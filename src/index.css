@@ -1,0 +1,177 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@layer base {
+  :root {
+    --background: 210 20% 97%;
+    --foreground: 220 30% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 30% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 30% 12%;
+
+    --primary: 220 60% 20%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 20% 94%;
+    --secondary-foreground: 220 30% 18%;
+
+    --muted: 210 15% 93%;
+    --muted-foreground: 215 14% 46%;
+
+    --accent: 185 70% 38%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214 20% 88%;
+    --input: 214 20% 88%;
+    --ring: 220 60% 20%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 220 40% 13%;
+    --sidebar-foreground: 210 20% 90%;
+    --sidebar-primary: 185 70% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 35% 18%;
+    --sidebar-accent-foreground: 210 20% 90%;
+    --sidebar-border: 220 30% 20%;
+    --sidebar-ring: 185 70% 50%;
+
+    /* Custom tokens */
+    --status-success: 152 60% 40%;
+    --status-warning: 38 92% 50%;
+    --status-danger: 0 72% 51%;
+    --status-info: 210 70% 55%;
+
+    --risk-high: 0 72% 51%;
+    --risk-medium: 38 92% 50%;
+    --risk-low: 152 60% 40%;
+
+    --demo-banner: 38 92% 50%;
+    --demo-banner-foreground: 0 0% 100%;
+
+    --gradient-hero: linear-gradient(135deg, hsl(220 60% 20%), hsl(220 50% 30%));
+    --gradient-accent: linear-gradient(135deg, hsl(185 70% 38%), hsl(195 80% 45%));
+    --gradient-sidebar: linear-gradient(180deg, hsl(220 40% 13%), hsl(220 45% 10%));
+  }
+
+  .dark {
+    --background: 220 30% 8%;
+    --foreground: 210 20% 92%;
+    --card: 220 30% 12%;
+    --card-foreground: 210 20% 92%;
+    --popover: 220 30% 12%;
+    --popover-foreground: 210 20% 92%;
+    --primary: 185 70% 50%;
+    --primary-foreground: 220 30% 8%;
+    --secondary: 220 25% 18%;
+    --secondary-foreground: 210 20% 90%;
+    --muted: 220 25% 16%;
+    --muted-foreground: 215 15% 60%;
+    --accent: 185 70% 42%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 220 25% 20%;
+    --input: 220 25% 20%;
+    --ring: 185 70% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  code, .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+@layer components {
+  .demo-banner {
+    @apply fixed top-0 left-0 right-0 z-50 text-center py-1.5 text-xs font-semibold tracking-wider uppercase;
+    background: hsl(var(--demo-banner));
+    color: hsl(var(--demo-banner-foreground));
+  }
+
+  .sidebar-gradient {
+    background: var(--gradient-sidebar);
+  }
+
+  .status-badge {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .status-editing {
+    @apply bg-blue-100 text-blue-700;
+  }
+
+  .status-analyzed {
+    background: hsl(var(--status-warning) / 0.15);
+    color: hsl(var(--status-warning));
+  }
+
+  .status-finalized {
+    background: hsl(var(--status-success) / 0.15);
+    color: hsl(var(--status-success));
+  }
+
+  .risk-high {
+    background: hsl(var(--risk-high) / 0.12);
+    color: hsl(var(--risk-high));
+    @apply border-l-4;
+    border-color: hsl(var(--risk-high));
+  }
+
+  .risk-medium {
+    background: hsl(var(--risk-medium) / 0.12);
+    color: hsl(var(--risk-medium));
+    @apply border-l-4;
+    border-color: hsl(var(--risk-medium));
+  }
+
+  .risk-low {
+    background: hsl(var(--risk-low) / 0.12);
+    color: hsl(var(--risk-low));
+    @apply border-l-4;
+    border-color: hsl(var(--risk-low));
+  }
+
+  .score-badge {
+    @apply inline-flex items-center justify-center w-12 h-12 rounded-lg font-bold text-lg;
+  }
+
+  .patent-card {
+    @apply bg-card rounded-lg border p-4 hover:shadow-md transition-shadow cursor-pointer;
+  }
+
+  .wizard-step {
+    @apply flex items-center gap-2;
+  }
+
+  .wizard-step-active {
+    @apply text-accent font-semibold;
+  }
+
+  .wizard-step-completed {
+    @apply text-foreground;
+  }
+
+  .wizard-step-pending {
+    @apply text-muted-foreground;
+  }
+}
