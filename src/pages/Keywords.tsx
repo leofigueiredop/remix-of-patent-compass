@@ -1,47 +1,163 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, X } from "lucide-react";
+import { Plus, X, ListFilter, Braces, Search, Trash2, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import AppLayout from "@/components/AppLayout";
 import WizardSteps from "@/components/WizardSteps";
 import LoadingTransition from "@/components/LoadingTransition";
-import { mockKeywords, mockClassifications } from "@/data/mockData";
 
 const steps = ["Briefing", "Transcrição", "Briefing Técnico", "Palavras-chave", "Resultados", "Análise", "Relatório"];
 
+interface KeywordGroup {
+  id: string;
+  terms: string[];
+}
+
+interface StrategyBlock {
+  id: string;
+  groups: KeywordGroup[];
+  connector: "AND" | "OR";
+}
+
+import { EspacenetService } from "@/services/espacenet";
+
+// ... existing imports
+
 export default function Keywords() {
   const navigate = useNavigate();
-  const [keywords, setKeywords] = useState(mockKeywords);
-  const [classifications, setClassifications] = useState(mockClassifications);
-  const [newKeyword, setNewKeyword] = useState("");
+  const [blocks, setBlocks] = useState<StrategyBlock[]>([
+    {
+      id: "b1",
+      connector: "AND",
+      groups: [
+        { id: "g1", terms: ["monitoramento*", "monitorar", "vigilância*"] },
+        { id: "g2", terms: ["térmico*", "calor", "temperatura"] }
+      ]
+    }
+  ]);
+  const [classifications, setClassifications] = useState<string[]>(["H01F 27/08", "G01K 11/32", "G06N 3/08"]);
+  const [newTerm, setNewTerm] = useState<{ blockId: string; groupId: string; value: string }>({ blockId: "", groupId: "", value: "" });
   const [newClassCode, setNewClassCode] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const toggleKeyword = (id: string) => {
-    setKeywords((prev) =>
-      prev.map((k) => (k.id === id ? { ...k, selected: !k.selected } : k))
-    );
+  // ... helper functions (addBlock, removeBlock, etc.)
+  const addBlock = () => {
+    setBlocks([...blocks, {
+      id: Date.now().toString(),
+      connector: "AND",
+      groups: [{ id: `g-${Date.now()}`, terms: [] }]
+    }]);
   };
 
-  const toggleClassification = (id: string) => {
-    setClassifications((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, selected: !c.selected } : c))
-    );
+  const removeBlock = (id: string) => {
+    if (blocks.length > 1) {
+      setBlocks(blocks.filter(b => b.id !== id));
+    }
   };
 
-  const addKeyword = () => {
-    if (!newKeyword.trim()) return;
-    setKeywords((prev) => [
-      ...prev,
-      { id: Date.now().toString(), term: newKeyword.trim(), selected: true },
-    ]);
-    setNewKeyword("");
+  const addGroupToBlock = (blockId: string) => {
+    setBlocks(blocks.map(b =>
+      b.id === blockId
+        ? { ...b, groups: [...b.groups, { id: `g-${Date.now()}`, terms: [] }] }
+        : b
+    ));
   };
 
-  const removeKeyword = (id: string) => {
-    setKeywords((prev) => prev.filter((k) => k.id !== id));
+  const removeGroupFromBlock = (blockId: string, groupId: string) => {
+    setBlocks(blocks.map(b => {
+      if (b.id !== blockId) return b;
+      const newGroups = b.groups.filter(g => g.id !== groupId);
+      return { ...b, groups: newGroups.length > 0 ? newGroups : [{ id: `g-${Date.now()}`, terms: [] }] };
+    }));
+  };
+
+  const addTermToGroup = (blockId: string, groupId: string) => {
+    if (!newTerm.value.trim() || newTerm.blockId !== blockId || newTerm.groupId !== groupId) return;
+    setBlocks(blocks.map(b => {
+      if (b.id !== blockId) return b;
+      return {
+        ...b,
+        groups: b.groups.map(g =>
+          g.id === groupId ? { ...g, terms: [...g.terms, newTerm.value.trim()] } : g
+        )
+      };
+    }));
+    setNewTerm({ blockId: "", groupId: "", value: "" });
+  };
+
+  const removeTerm = (blockId: string, groupId: string, term: string) => {
+    setBlocks(blocks.map(b => {
+      if (b.id !== blockId) return b;
+      return {
+        ...b,
+        groups: b.groups.map(g =>
+          g.id === groupId ? { ...g, terms: g.terms.filter(t => t !== term) } : g
+        )
+      };
+    }));
+  };
+
+  const addClassification = () => {
+    if (!newClassCode.trim()) return;
+    if (!classifications.includes(newClassCode.trim())) {
+      setClassifications([...classifications, newClassCode.trim()]);
+    }
+    setNewClassCode("");
+  };
+
+  const removeClassification = (code: string) => {
+    setClassifications(classifications.filter(c => c !== code));
+  };
+
+  const updateBlockConnector = (id: string, connector: "AND" | "OR") => {
+    setBlocks(blocks.map(b => b.id === id ? { ...b, connector } : b));
+  };
+
+  const renderQuery = (forApi = false) => {
+    const blockQueries = blocks.map(block => {
+      const groupQueries = block.groups
+        .filter(g => g.terms.length > 0)
+        .map(g => {
+          const terms = g.terms.map(t => {
+            return forApi ? `(ti all "${t}" OR ab all "${t}")` : t;
+          });
+          return `(${terms.join(" OR ")})`;
+        });
+
+      if (groupQueries.length === 0) return "";
+      return groupQueries.length === 1 ? groupQueries[0] : `(${groupQueries.join(" AND ")})`;
+    }).filter(q => q !== "");
+
+    let query = blockQueries.length > 0 ? blockQueries[0] : "";
+    for (let i = 1; i < blockQueries.length; i++) {
+      query = `(${query} ${blocks[i - 1].connector} ${blockQueries[i]})`;
+    }
+
+    const classQuery = classifications.length > 0
+      ? ` AND (${classifications.map(c => forApi ? `ipc="${c}"` : `IPC: ${c}`).join(" OR ")})`
+      : "";
+
+    if (!query && classifications.length === 0) return "";
+    return `${query}${classQuery}`;
+  };
+
+  const handleExecution = async () => {
+    setLoading(true);
+    const cql = renderQuery(true);
+    console.log("Executing CQL:", cql);
+
+    try {
+      const results = await EspacenetService.search(cql);
+      navigate("/research/results", { state: { results, query: cql } });
+    } catch (error) {
+      console.error("Search failed", error);
+      navigate("/research/results", { state: { error: "Falha na busca OPS (verifique chaves)", query: cql } });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -49,104 +165,190 @@ export default function Keywords() {
       {loading && (
         <LoadingTransition
           message="Pesquisando nas bases de patentes..."
-          subMessage="Consultando INPI e Espacenet"
-          duration={4000}
-          onComplete={() => navigate("/research/results")}
+          subMessage="Consultando API do Espacenet (EPO) em tempo real..."
+          duration={3000} // Give some time for the API call
+          onComplete={() => {/* onComplete is handled by the async flow, but prop is required */ }}
         />
       )}
       <WizardSteps currentStep={3} steps={steps} />
 
-      <div className="max-w-4xl">
-        <h1 className="text-2xl font-bold mb-1">Palavras-chave e Classificação</h1>
-        <p className="text-muted-foreground text-sm mb-8">
-          Defina a estratégia de busca selecionando termos e classificações
-        </p>
+      <div className="max-w-6xl space-y-8">
+        <div>
+          <h1 className="text-2xl font-bold mb-1">Estratégia de Busca Avançada</h1>
+          <p className="text-muted-foreground text-sm">
+            Construa lógicas horizontais (AND) e camadas verticais (AND/OR)
+          </p>
+        </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Keywords */}
-          <div className="bg-card rounded-lg border">
-            <div className="px-5 py-3 border-b">
-              <h2 className="text-sm font-semibold">Palavras-chave</h2>
-            </div>
-            <div className="p-4 space-y-2">
-              {keywords.map((kw) => (
-                <div
-                  key={kw.id}
-                  className="flex items-center justify-between p-2 rounded-md hover:bg-muted/50"
-                >
-                  <div className="flex items-center gap-3">
-                    <Checkbox
-                      checked={kw.selected}
-                      onCheckedChange={() => toggleKeyword(kw.id)}
-                    />
-                    <span className="text-sm">{kw.term}</span>
-                  </div>
-                  <button
-                    onClick={() => removeKeyword(kw.id)}
-                    className="text-muted-foreground hover:text-destructive"
+        {/* Strategy Blocks Area */}
+        <div className="space-y-8">
+          {blocks.map((block, bIndex) => (
+            <div key={block.id} className="space-y-6">
+              <div className="bg-card/30 rounded-xl border-2 border-dashed border-border p-6 relative">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xs font-bold uppercase tracking-tighter text-muted-foreground flex items-center gap-2">
+                    <Braces className="w-4 h-4" /> Camada {bIndex + 1}
+                  </h2>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeBlock(block.id)}
+                    disabled={blocks.length === 1}
+                    className="h-7 text-muted-foreground hover:text-destructive transition-colors px-2"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <Trash2 className="w-3.5 h-3.5 mr-1" /> Remover Camada
+                  </Button>
+                </div>
+
+                {/* Horizontal Groups */}
+                <div className="flex flex-wrap gap-4">
+                  {block.groups.map((group, gIndex) => (
+                    <div key={group.id} className="flex-1 min-w-[300px] flex items-center gap-2">
+                      {gIndex > 0 && <div className="text-[10px] font-black text-accent bg-accent/10 px-1 rounded">AND</div>}
+                      <div className="bg-card rounded-lg border shadow-sm p-4 flex-1 group/item">
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-[10px] font-semibold text-muted-foreground uppercase">Grupo {gIndex + 1} (OR)</span>
+                          <button
+                            onClick={() => removeGroupFromBlock(block.id, group.id)}
+                            className="opacity-0 group-hover/item:opacity-100 hover:text-destructive transition-all"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+
+                        <div className="flex flex-wrap gap-1.5 mb-3 min-h-[32px]">
+                          {group.terms.map((term) => (
+                            <Badge
+                              key={term}
+                              variant="secondary"
+                              className="px-1.5 py-0.5 gap-1 text-[11px] bg-muted/60 hover:bg-muted border-none"
+                            >
+                              {term}
+                              <button onClick={() => removeTerm(block.id, group.id, term)} className="hover:text-destructive">
+                                <X className="w-2.5 h-2.5" />
+                              </button>
+                            </Badge>
+                          ))}
+                        </div>
+
+                        <div className="flex gap-1">
+                          <Input
+                            placeholder="Termo..."
+                            value={(newTerm.blockId === block.id && newTerm.groupId === group.id) ? newTerm.value : ""}
+                            onChange={(e) => setNewTerm({ blockId: block.id, groupId: group.id, value: e.target.value })}
+                            onKeyDown={(e) => e.key === "Enter" && addTermToGroup(block.id, group.id)}
+                            className="text-xs h-7 px-2"
+                          />
+                          <Button size="icon" onClick={() => addTermToGroup(block.id, group.id)} className="h-7 w-7">
+                            <Plus className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => addGroupToBlock(block.id)}
+                    className="flex-1 min-w-[150px] border-2 border-dashed border-border rounded-lg flex items-center justify-center text-muted-foreground hover:bg-accent/5 hover:border-accent/50 transition-all text-sm gap-2"
+                  >
+                    <Plus className="w-4 h-4" /> Add AND
                   </button>
                 </div>
-              ))}
-              <div className="flex gap-2 pt-2">
-                <Input
-                  placeholder="Adicionar termo..."
-                  value={newKeyword}
-                  onChange={(e) => setNewKeyword(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addKeyword()}
-                  className="text-sm"
-                />
-                <Button variant="outline" size="sm" onClick={addKeyword}>
-                  <Plus className="w-4 h-4" />
-                </Button>
               </div>
-            </div>
-          </div>
 
-          {/* Classifications */}
-          <div className="bg-card rounded-lg border">
-            <div className="px-5 py-3 border-b">
-              <h2 className="text-sm font-semibold">Classificações Técnicas (IPC)</h2>
-            </div>
-            <div className="p-4 space-y-2">
-              {classifications.map((cls) => (
-                <div
-                  key={cls.id}
-                  className="flex items-center gap-3 p-2 rounded-md hover:bg-muted/50"
-                >
-                  <Checkbox
-                    checked={cls.selected}
-                    onCheckedChange={() => toggleClassification(cls.id)}
-                  />
-                  <div>
-                    <span className="text-sm font-mono font-medium">{cls.code}</span>
-                    <p className="text-xs text-muted-foreground">{cls.description}</p>
+              {/* Block Connector */}
+              {bIndex < blocks.length - 1 && (
+                <div className="flex justify-center -my-2 relative z-20">
+                  <div className="bg-background flex items-center gap-2 p-1 border rounded-lg shadow-sm">
+                    <Select
+                      value={block.connector}
+                      onValueChange={(val: "AND" | "OR") => updateBlockConnector(block.id, val)}
+                    >
+                      <SelectTrigger className="w-20 h-8 text-[10px] font-bold border-none bg-accent text-accent-foreground uppercase tracking-wider">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="AND" className="text-[10px] font-bold">AND</SelectItem>
+                        <SelectItem value="OR" className="text-[10px] font-bold">OR</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <ArrowRight className="w-3 h-3 text-muted-foreground rotate-90" />
                   </div>
                 </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Logic Layer Button */}
+        <div className="flex justify-end mb-2">
+          <Button variant="outline" size="sm" onClick={addBlock} className="gap-2 h-10 px-4 font-semibold">
+            <Plus className="w-4 h-4" /> Nova Camada Lógica
+          </Button>
+        </div>
+
+        {/* Classifications Section (Horizontal) */}
+        <div className="bg-card rounded-xl border p-6 space-y-4 shadow-sm">
+          <div className="flex items-center gap-2">
+            <ListFilter className="w-4 h-4 text-accent" />
+            <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Classificações IPC / CPC (Editáveis)</h2>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap gap-2 flex-1">
+              {classifications.map((code) => (
+                <Badge
+                  key={code}
+                  variant="outline"
+                  className="px-2 py-1 gap-2 font-mono text-xs bg-muted/20 border-border hover:bg-muted transition-colors"
+                >
+                  {code}
+                  <button onClick={() => removeClassification(code)} className="hover:text-destructive">
+                    <X className="w-3 h-3" />
+                  </button>
+                </Badge>
               ))}
-              <div className="flex gap-2 pt-2">
-                <Input
-                  placeholder="Ex: G06F 17/00"
-                  value={newClassCode}
-                  onChange={(e) => setNewClassCode(e.target.value)}
-                  className="text-sm font-mono"
-                />
-                <Button variant="outline" size="sm" onClick={() => setNewClassCode("")}>
-                  <Plus className="w-4 h-4" />
-                </Button>
-              </div>
+              {classifications.length === 0 && (
+                <p className="text-xs text-muted-foreground italic">Nenhuma classificação adicionada...</p>
+              )}
+            </div>
+
+            <div className="flex gap-2 w-full md:w-auto">
+              <Input
+                placeholder="Código (ex: hf*, G01K 11/32)"
+                value={newClassCode}
+                onChange={(e) => setNewClassCode(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addClassification()}
+                className="text-xs h-9 w-full md:w-48 font-mono"
+              />
+              <Button variant="outline" size="icon" onClick={addClassification} className="h-9 w-9 shrink-0">
+                <Plus className="w-4 h-4" />
+              </Button>
             </div>
           </div>
         </div>
 
-        <div className="flex justify-between mt-8">
-          <Button variant="outline" onClick={() => navigate("/research/structured")}>
+        {/* Action Buttons Row */}
+        {/* Action Buttons Row */}
+        <div className="flex justify-between items-center gap-4 pt-8 mt-4 border-t">
+          <Button variant="outline" onClick={() => navigate("/research/structured")} className="h-10 px-6">
             Voltar
           </Button>
-          <Button onClick={() => setLoading(true)}>
-            Confirmar Estratégia de Busca
+          <Button onClick={() => setLoading(true)} className="h-10 px-8 shadow-lg shadow-primary/20 font-bold">
+            Executar Análise de Patenteabilidade
           </Button>
+        </div>
+
+        {/* Query Helper */}
+        <div className="bg-muted/30 rounded-lg p-5 border border-dashed border-border mt-8">
+          <div className="flex items-start gap-3 text-muted-foreground">
+            <Search className="w-5 h-5 mt-1" />
+            <div>
+              <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground/50">Estratégia Resultante (Preview):</p>
+              <p className="text-[12px] font-mono mt-2 break-all leading-relaxed bg-white/50 p-3 rounded border">
+                {renderQuery()}
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     </AppLayout>

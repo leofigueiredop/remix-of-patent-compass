@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<revista numero="2823" dataPublicacao="11/02/2025">
+  <despachos>
+    <despacho codigo="1.1">
+      <processo>BR 10 2024 012345 6</processo>
+      <titulo>SISTEMA DE MONITORAMENTO DE COLIDÊNCIA</titulo>
+      <titulares>
+        <titular>INPI EXEMPLO LTDA</titular>
+      </titulares>
+    </despacho>
+  </despachos>
+</revista>

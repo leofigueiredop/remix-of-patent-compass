@@ -1,20 +1,22 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { ExternalLink } from "lucide-react";
+import { useState, useEffect } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { ExternalLink, AlertCircle } from "lucide-react";
 import LoadingTransition from "@/components/LoadingTransition";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import AppLayout from "@/components/AppLayout";
 import WizardSteps from "@/components/WizardSteps";
 import { mockPatents } from "@/data/mockData";
+import { OpsSearchResult } from "@/services/espacenet"; // Import type
 
 const steps = ["Briefing", "Transcrição", "Briefing Técnico", "Palavras-chave", "Resultados", "Análise", "Relatório"];
 
 function ScoreBadge({ score }: { score: number }) {
   const color =
     score >= 70 ? "bg-risk-high/15 text-risk-high" :
-    score >= 50 ? "bg-risk-medium/15 text-risk-medium" :
-    "bg-risk-low/15 text-risk-low";
+      score >= 50 ? "bg-risk-medium/15 text-risk-medium" :
+        "bg-risk-low/15 text-risk-low";
   return (
     <span className={`score-badge text-sm ${color}`}>
       {score}%
@@ -24,36 +26,31 @@ function ScoreBadge({ score }: { score: number }) {
 
 export default function SearchResults() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState("inpi");
+  const location = useLocation();
+  const [tab, setTab] = useState("espacenet"); // Default to Espacenet if we have real results
   const [loading, setLoading] = useState(false);
 
-  const inpiPatents = mockPatents.filter((p) => p.source === "INPI");
-  const espacenetPatents = mockPatents.filter((p) => p.source === "Espacenet");
+  // Get state from navigation
+  const { results, query, error } = location.state || {};
+  const realEspacenetResults: OpsSearchResult[] = results || [];
 
-  const renderPatentList = (patents: typeof mockPatents) => (
-    <div className="space-y-3">
-      {patents.map((patent) => (
-        <div key={patent.id} className="patent-card flex items-start gap-4">
-          <ScoreBadge score={patent.score} />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium mb-1">{patent.title}</p>
-            <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              <span className="font-mono">{patent.number}</span>
-              <span>{patent.applicant}</span>
-              <span>{new Date(patent.date).toLocaleDateString("pt-BR")}</span>
-            </div>
-            <p className="text-xs text-muted-foreground mt-2 line-clamp-2">
-              {patent.abstract}
-            </p>
-          </div>
-          <Button variant="ghost" size="sm" className="shrink-0 gap-1.5 text-xs">
-            <ExternalLink className="w-3.5 h-3.5" />
-            Abrir
-          </Button>
-        </div>
-      ))}
-    </div>
-  );
+  const displayedEspacenet = realEspacenetResults.length > 0
+    ? realEspacenetResults.map(p => ({
+      id: p.publicationNumber,
+      title: p.title,
+      number: p.publicationNumber,
+      applicant: p.applicant,
+      date: p.date,
+      abstract: p.abstract,
+      score: Math.floor(Math.random() * 40) + 60, // Simulate score for now as OPS doesn't give similarity score easily
+      source: "Espacenet"
+    }))
+    : mockPatents.filter((p) => p.source === "Espacenet");
+
+  const inpiPatents = mockPatents.filter((p) => p.source === "INPI");
+
+  // Use mock or real list
+  const patentList = tab === "inpi" ? inpiPatents : displayedEspacenet;
 
   return (
     <AppLayout>
@@ -67,26 +64,67 @@ export default function SearchResults() {
       )}
       <WizardSteps currentStep={4} steps={steps} />
 
-      <div>
-        <h1 className="text-2xl font-bold mb-1">Resultados de Busca</h1>
-        <p className="text-muted-foreground text-sm mb-6">
-          {mockPatents.length} patentes encontradas nas bases selecionadas
-        </p>
+      <div className="max-w-6xl space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold mb-1">Resultados de Busca</h1>
+          <p className="text-muted-foreground text-sm">
+            {realEspacenetResults.length > 0
+              ? `${realEspacenetResults.length} resultados reais encontrados via Espacenet (OPS)`
+              : `${mockPatents.length} patentes encontradas (Modo Simulação)`
+            }
+          </p>
+        </div>
+
+        {error && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Erro na Busca</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {query && (
+          <div className="bg-muted/30 p-3 rounded-lg border text-xs font-mono text-muted-foreground break-all">
+            QUERY: {query}
+          </div>
+        )}
 
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList>
+            <TabsTrigger value="espacenet">
+              Espacenet ({displayedEspacenet.length})
+            </TabsTrigger>
             <TabsTrigger value="inpi">
               INPI ({inpiPatents.length})
             </TabsTrigger>
-            <TabsTrigger value="espacenet">
-              Espacenet ({espacenetPatents.length})
-            </TabsTrigger>
           </TabsList>
-          <TabsContent value="inpi" className="mt-4">
-            {renderPatentList(inpiPatents)}
-          </TabsContent>
-          <TabsContent value="espacenet" className="mt-4">
-            {renderPatentList(espacenetPatents)}
+
+          <TabsContent value={tab} className="mt-4 space-y-3">
+            {patentList.map((patent) => (
+              <div key={patent.id} className="patent-card flex items-start gap-4">
+                <ScoreBadge score={patent.score} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium mb-1">{patent.title}</p>
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    <span className="font-mono">{patent.number}</span>
+                    <span>{patent.applicant}</span>
+                    <span>{patent.date ? new Date(patent.date.toString().replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3')).toLocaleDateString("pt-BR") : "N/A"}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2 line-clamp-2">
+                    {patent.abstract}
+                  </p>
+                </div>
+                <Button variant="ghost" size="sm" className="shrink-0 gap-1.5 text-xs">
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Abrir
+                </Button>
+              </div>
+            ))}
+            {patentList.length === 0 && (
+              <div className="text-center py-10 text-muted-foreground">
+                Nenhum resultado encontrado.
+              </div>
+            )}
           </TabsContent>
         </Tabs>
 

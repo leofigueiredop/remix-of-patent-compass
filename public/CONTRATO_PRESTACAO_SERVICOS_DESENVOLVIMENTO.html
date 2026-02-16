@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contrato de Prestação de Serviços - PatentScope</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap');
+
+        /* Print Settings */
+        @page {
+            size: A4;
+            margin: 2.5cm 3cm 2.5cm 3cm;
+            /* Margens formais: Topo, Direita, Baixo, Esquerda */
+        }
+
+        body {
+            font-family: "Times New Roman", Times, serif;
+            font-size: 12pt;
+            line-height: 1.5;
+            color: #000;
+            background: white;
+            /* Screen Simulation of A4 */
+            max-width: 210mm;
+            min-height: 297mm;
+            margin: 20px auto;
+            padding: 2.5cm 3cm;
+            /* Matches print margins for screen preview */
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            box-sizing: border-box;
+            /* Include padding in width */
+        }
+
+        /* Header Logo - Static, small */
+        .contract-header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .contract-header img {
+            max-width: 150px;
+            /* Small, suitable for header */
+            height: auto;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 14pt;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin-bottom: 30px;
+        }
+
+        h2 {
+            font-size: 12pt;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin-top: 25px;
+            margin-bottom: 15px;
+            /* Removed border for more formal look, kept spacing */
+        }
+
+        h3 {
+            font-size: 12pt;
+            font-weight: bold;
+            margin-top: 20px;
+            margin-bottom: 10px;
+            font-style: italic;
+        }
+
+        p {
+            margin-bottom: 15px;
+            text-align: justify;
+            text-indent: 1.5cm;
+            /* Standard paragraph indentation */
+        }
+
+        ul {
+            list-style-type: disc;
+            margin-left: 20px;
+            margin-bottom: 15px;
+            padding-left: 1.5cm;
+        }
+
+        li {
+            margin-bottom: 5px;
+            text-align: justify;
+        }
+
+        strong {
+            font-weight: bold;
+        }
+
+        /* Signature block */
+        .signatures {
+            margin-top: 80px;
+            display: flex;
+            flex-direction: column;
+            gap: 60px;
+            /* Space between signatures */
+            page-break-inside: avoid;
+            /* Prevent breaking inside signatures */
+        }
+
+        .signature-block {
+            width: 100%;
+            border-top: 1px solid #000;
+            padding-top: 5px;
+            font-size: 11pt;
+        }
+
+        .signature-line {
+            margin-bottom: 5px;
+        }
+
+        /* Screen-only utility to remove shadow/margin on print */
+        @media print {
+            body {
+                margin: 0;
+                padding: 0;
+                box-shadow: none;
+                width: auto;
+            }
+
+            /* Ensure background images (logo) print */
+            * {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+
+            /* Hide URL printing in some browsers */
+            a[href]:after {
+                content: none !important;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="contract-header">
+        <img src="https://site.seafeetlabs.tech/logo.png" alt="SeaFeet Labs Logo">
+    </div>
+
+    <h1>CONTRATO DE PRESTAÇÃO DE SERVIÇOS DE DESENVOLVIMENTO DE SOFTWARE E ACORDO DE CONFIDENCIALIDADE</h1>
+
+    <p>Pelo presente instrumento particular, as partes abaixo qualificadas celebram entre si este Contrato de Prestação
+        de Serviços de Desenvolvimento de Software ("Contrato"), que se regerá pelas cláusulas e condições seguintes:
+    </p>
+
+    <h2>1. DAS PARTES</h2>
+
+    <p><strong>CONTRATANTE:</strong><br>
+        <strong>S/SIMOES SERVICOS DE PROPRIEDADE INDUSTRIAL</strong>, pessoa jurídica de direito privado, inscrita no
+        CNPJ sob o nº <strong>35.700.906/0001-01</strong>, doravante denominada simplesmente
+        <strong>CONTRATANTE</strong>.
+    </p>
+
+    <p><strong>CONTRATADA:</strong><br>
+        <strong>SEAFEET - SERVICOS DE EDUCACAO E ASSISTENCIA FIT E TECH LTDA - ME</strong>, pessoa jurídica de direito
+        privado, inscrita no CNPJ sob o nº <strong>42.792.893/0001-03</strong>, doravante denominada simplesmente
+        <strong>CONTRATADA</strong>.
+    </p>
+
+    <h2>2. DO OBJETO</h2>
+
+    <p>2.1. O objeto deste Contrato é a prestação de serviços de desenvolvimento de software pela CONTRATADA à
+        CONTRATANTE, especificamente, para fins desse contrato, a criação do sistema denominado
+        <strong>"PatentScope"</strong> (ou "Projeto"),
+        uma plataforma web para apoio à pesquisa, análise prévia e geração de relatórios de evidências sobre patentes.
+    </p>
+
+    <p>2.2. O desenvolvimento será dividido em 2 (duas) Fases, conforme detalhado na Cláusula 3.</p>
+
+    <h2>3. DO ESCOPO E DAS FASES DO PROJETO</h2>
+
+    <p>O Projeto será executado em duas fases distintas, englobando as seguintes funcionalidades e características
+        técnicas, baseadas na proposta técnica aprovada:</p>
+
+    <h3>FASE 1 - Desenvolvimento Completo do Sistema (MVP)</h3>
+    <ul>
+        <li><strong>Autenticação e Controle de Acesso:</strong> Login seguro, gestão de sessão e perfis
+            (admin/analista).</li>
+        <li><strong>Dashboard:</strong> Gestão de pesquisas com filtros e status.</li>
+        <li><strong>Coleta de Briefing:</strong> Upload de áudio com transcrição (IA Local), entrada de texto, imagens e
+            vídeos, processamento e revisão.</li>
+        <li><strong>Estruturação Técnica:</strong> Extração automática de campos (Problema, Solução, Diferenciais) via
+            IA Local.</li>
+        <li><strong>Extração de Palavras-chave/Classificação:</strong> Sugestão automática de IPC/CPC e keywords.</li>
+        <li><strong>Integração com Bases:</strong>Incluindo, mas nao se limitando: INPI, Espacenet (EPO OPS), Google
+            Patents, Patent Lens e analise comercial geral (internet).</li>
+        <li><strong>Análise de Similaridade:</strong> Cálculo de score, ranqueamento de risco e justificativa via IA
+            Local.</li>
+        <li><strong>Relatórios:</strong> Geração de relatórios personalizados e relatórios de patentes.</li>
+        <li><strong>Tecnologias:</strong> React, TypeScript, Tailwind CSS, Supabase, Modelos de IA On-premise.</li>
+    </ul>
+
+    <h3>FASE 2 - Expansão Comercial e Multi-Tenant</h3>
+    <ul>
+        <li><strong>Arquitetura Multi-Tenant:</strong> Isolamento de dados por cliente/organização.</li>
+        <li><strong>Sistema de Pagamentos:</strong> Integração com Gateway (ex: Stripe), planos de assinatura, checkout
+            e emissão de recibos.</li>
+        <li><strong>Comercialização:</strong> Landing page institucional, registro self-service, dashboard
+            administrativo de métricas.</li>
+    </ul>
+
+    <h2>4. DOS PRAZOS, ENTREGAS E HOMOLOGAÇÃO</h2>
+
+    <p>4.1. O cronograma de execução obedecerá aos seguintes prazos:</p>
+
+    <p><strong>FASE 1:</strong></p>
+    <ul>
+        <li><strong>Desenvolvimento:</strong> 30 (trinta) dias corridos, contados a partir da assinatura deste contrato
+            e confirmação do pagamento inicial.</li>
+        <li><strong>Homologação:</strong> 30 (trinta) dias corridos, contados a partir da entrega da versão de
+            desenvolvimento da Fase 1.</li>
+    </ul>
+
+    <p><strong>FASE 2:</strong></p>
+    <ul>
+        <li><strong>Desenvolvimento:</strong> 15 (quinze) dias corridos, iniciando-se imediatamente após a conclusão da
+            Homologação da Fase 1 ou em data acordada entre as partes.</li>
+        <li><strong>Homologação:</strong> 30 (trinta) dias corridos, contados a partir da entrega da versão de
+            desenvolvimento da Fase 2.</li>
+    </ul>
+
+    <p>4.2. <strong>DA HOMOLOGAÇÃO:</strong> Durante os períodos de homologação, a CONTRATANTE testará o sistema.</p>
+    <ul>
+        <li><strong>Parágrafo Único:</strong> A CONTRATADA se obriga a realizar os ajustes e correções apontados pela
+            CONTRATANTE durante a homologação, <strong>incluindo alterações de maior complexidade que se revelem
+                necessárias a partir da percepção de uso nos testes</strong>, sem custo adicional, visando a plena
+            aderência ao objetivo do produto.</li>
+    </ul>
+
+    <h2>5. DO PREÇO E DA FORMA DE PAGAMENTO</h2>
+
+    <p>5.1. Pelo desenvolvimento das Fases 1 e 2, a CONTRATANTE pagará à CONTRATADA o valor total de <strong>R$
+            23.000,00 (Vinte e três mil reais)</strong>, parcelado da seguinte forma:</p>
+
+    <ul>
+        <li><strong>1ª Parcela:</strong> <strong>R$ 5.000,00 (Cinco mil reais)</strong>, a ser paga no ato da assinatura
+            deste contrato.</li>
+        <li><strong>2ª Parcela:</strong> <strong>R$ 6.000,00 (Seis mil reais)</strong>, com vencimento em <strong>07 de
+                abril</strong>.</li>
+        <li><strong>3ª Parcela:</strong> <strong>R$ 6.000,00 (Seis mil reais)</strong>, com vencimento em <strong>07 de
+                maio</strong>.</li>
+        <li><strong>4ª Parcela:</strong> <strong>R$ 6.000,00 (Seis mil reais)</strong>, com vencimento em <strong>07 de
+                junho</strong>.</li>
+    </ul>
+
+    <p>5.2. A partir do mês de <strong>Julho</strong>, iniciará a cobrança de <strong>Suporte e Manutenção</strong>
+        mensal.</p>
+    <ul>
+        <li><strong>Valor Mensal:</strong> <strong>R$ 300,00 (Trezentos reais)</strong>.</li>
+        <li><strong>Vencimento:</strong> Todo dia <strong>07 (sete)</strong> de cada mês.</li>
+        <li>O suporte garantirá a disponibilidade do serviço, correções de bugs e manutenção da infraestrutura básica
+            (excluindo custos de terceiros como servidores/cloud, que são de responsabilidade da CONTRATANTE, se
+            aplicável).</li>
+    </ul>
+
+    <h2>6. DAS OBRIGAÇÕES</h2>
+
+    <p>6.1. <strong>Da CONTRATADA:</strong></p>
+    <ul>
+        <li>a) Executar os serviços com zelo e competência técnica.</li>
+        <li>b) Entregar os códigos-fonte e documentação ao final do projeto.</li>
+        <li>c) Respeitar os prazos estipulados.</li>
+        <li>d) Manter sigilo absoluto sobre o projeto.</li>
+    </ul>
+
+    <p>6.2. <strong>Da CONTRATANTE:</strong></p>
+    <ul>
+        <li>a) Efetuar os pagamentos nas datas aprazadas.</li>
+        <li>b) Fornecer informações e acessos necessários para o desenvolvimento.</li>
+        <li>c) Realizar os testes de homologação dentro dos prazos estipulados.</li>
+        <li>d) Arcar com custos de infraestrutura em nuvem (AWS, Google Cloud, etc.) ou APIs pagas, se houver, salvo se
+            acordado o uso de infraestrutura da Contratada incluso no suporte.</li>
+    </ul>
+
+    <h2>7. DA CONFIDENCIALIDADE E NÃO DIVULGAÇÃO (NDA)</h2>
+
+    <p>7.1. As partes reconhecem que, em virtude deste Contrato, a CONTRATADA terá acesso a Informações Confidenciais da
+        CONTRATANTE, incluindo, mas não se limitando a: ideias de negócio, lógica de algoritmos, estratégias de
+        inovação, dados de clientes e detalhes técnicos do "PatentScope".</p>
+
+    <p>7.2. A CONTRATADA compromete-se a:</p>
+    <ul>
+        <li>a) Não divulgar, revelar, reproduzir ou disponibilizar qualquer Informação Confidencial a terceiros sem a
+            prévia autorização por escrito da CONTRATANTE.</li>
+        <li>b) Utilizar as Informações Confidenciais exclusivamente para os fins de execução deste Contrato.</li>
+        <li>c) Adotar todas as medidas de segurança razoáveis para proteger as Informações Confidenciais.</li>
+    </ul>
+
+    <p>7.3. A obrigação de confidencialidade permanecerá vigente mesmo após o término deste contrato, por um período de
+        <strong>5 (cinco) anos</strong>.
+    </p>
+
+    <p>7.4. A quebra deste dever de sigilo sujeitará a parte infratora ao pagamento de perdas e danos comprovados, além
+        das medidas judiciais cabíveis.</p>
+
+    <h2>8. DA PROPRIEDADE INTELECTUAL</h2>
+
+    <p>8.1. Todo o código-fonte, design, banco de dados e documentação desenvolvidos por força deste contrato serão de
+        propriedade exclusiva da <strong>CONTRATANTE</strong> após a quitação integral dos valores descritos na Cláusula
+        5.1.</p>
+
+    <p>8.2. A CONTRATADA transfere, neste ato (condicionado ao pagamento), todos os direitos patrimoniais de autor sobre
+        o software desenvolvido.</p>
+
+    <h2>9. DA RESCISÃO</h2>
+
+    <p>9.1. O presente contrato poderá ser rescindido por qualquer das partes, mediante aviso prévio por escrito de 30
+        (trinta) dias.</p>
+
+    <p>9.2. Em caso de rescisão antecipada por parte da CONTRATANTE, serão devidos os valores proporcionais às fases ou
+        etapas já concluídas ou em andamento.</p>
+
+    <h2>10. DO FORO</h2>
+
+    <p>10.1. As partes elegem o foro da Comarca de Blumenau/SC, para dirimir quaisquer dúvidas oriundas deste Contrato.
+    </p>
+
+    <p>E, por estarem assim justas e contratadas, assinam o presente em 2 (duas) vias de igual teor.</p>
+
+    <p>Local e Data: Blumenau, 12 de fevereiro de 2026.</p>
+
+    <div class="signatures">
+        <div class="signature-block">
+            <div class="signature-line"><strong>CONTRATANTE</strong></div>
+            <div>S/SIMOES SERVICOS DE PROPRIEDADE INDUSTRIAL</div>
+            <div>CNPJ: 35.700.906/0001-01</div>
+        </div>
+
+        <div class="signature-block">
+            <div class="signature-line"><strong>CONTRATADA</strong></div>
+            <div>SEAFEET - SERVICOS DE EDUCACAO E ASSISTENCIA FIT E TECH LTDA - ME</div>
+            <div>CNPJ: 42.792.893/0001-03</div>
+        </div>
+    </div>
+
+</body>
+
+</html>

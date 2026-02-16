@@ -9,11 +9,24 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
-const navItems = [
-  { label: "Dashboard", icon: LayoutDashboard, path: "/dashboard" },
-  { label: "Pesquisas", icon: Search, path: "/dashboard" },
-  { label: "Relatórios", icon: FileText, path: "/dashboard" },
-  { label: "Configurações", icon: Settings, path: "/dashboard" },
+const navigation = [
+  {
+    group: "Pesquisa de Patenteabilidade",
+    items: [
+      { label: "Dashboard", icon: LayoutDashboard, path: "/research/dashboard" },
+      { label: "Nova Pesquisa", icon: Search, path: "/research/new" },
+      { label: "Histórico", icon: FileText, path: "/research/history" },
+      { label: "Configurações", icon: Settings, path: "/research/settings" },
+    ],
+  },
+  {
+    group: "Monitoramento de Colidência",
+    items: [
+      { label: "Dashboard", icon: LayoutDashboard, path: "/monitoring/dashboard" },
+      { label: "Patentes", icon: ShieldCheck, path: "/monitoring/patents" },
+      { label: "Configurações", icon: Settings, path: "/monitoring/settings" },
+    ],
+  },
 ];
 
 export default function AppLayout({ children }: { children: ReactNode }) {
@@ -46,24 +59,32 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             </div>
           </div>
 
-          <nav className="flex-1 p-3 space-y-1">
-            {navItems.map((item) => {
-              const isActive = location.pathname === item.path && item.label === "Dashboard";
-              return (
-                <button
-                  key={item.label}
-                  onClick={() => navigate(item.path)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
-                    isActive
-                      ? "bg-sidebar-accent text-sidebar-primary font-medium"
-                      : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-                  }`}
-                >
-                  <item.icon className="w-4 h-4" />
-                  {item.label}
-                </button>
-              );
-            })}
+          <nav className="flex-1 p-3 space-y-6">
+            {navigation.map((group) => (
+              <div key={group.group}>
+                <h2 className="px-3 text-xs font-semibold text-sidebar-foreground/40 uppercase tracking-wider mb-2">
+                  {group.group}
+                </h2>
+                <div className="space-y-1">
+                  {group.items.map((item) => {
+                    const isActive = location.pathname === item.path;
+                    return (
+                      <button
+                        key={item.label}
+                        onClick={() => navigate(item.path)}
+                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${isActive
+                            ? "bg-sidebar-accent text-sidebar-primary font-medium"
+                            : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                          }`}
+                      >
+                        <item.icon className="w-4 h-4" />
+                        {item.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </nav>
 
           <div className="p-3 border-t border-sidebar-border">
