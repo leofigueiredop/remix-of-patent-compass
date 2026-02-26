@@ -33,8 +33,6 @@ services:
   # Local LLM Service
   ollama:
     image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     environment:
@@ -49,8 +47,6 @@ services:
   # Speech-to-Text Service
   whisper:
     image: fedirz/faster-whisper-server:latest-cpu
-    ports:
-      - "8000:8000"
     environment:
       - WHISPER_MODEL=medium
       - WHISPER_BEAM_SIZE=5
