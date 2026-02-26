@@ -466,6 +466,8 @@ async function searchInpiAdvanced(params: {
         if (params.inventor) formData.append('NomeInventor', params.inventor.trim());
         if (params.keywords) formData.append('Titulo', params.keywords.trim());
 
+        fastify.log.info(`INPI search POST body: ${formData.toString()}`);
+
         const response = await axios.post(
             'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController',
             formData.toString(),
@@ -480,6 +482,10 @@ async function searchInpiAdvanced(params: {
                 }
             }
         );
+
+        // Log first 500 chars of response for debugging
+        const htmlSnippet = typeof response.data === 'string' ? response.data.substring(0, 500) : JSON.stringify(response.data).substring(0, 500);
+        fastify.log.info(`INPI search response (first 500 chars): ${htmlSnippet}`);
 
         return parseInpiResults(response.data);
     } catch (error: any) {
