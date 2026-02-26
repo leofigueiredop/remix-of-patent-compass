@@ -17,6 +17,8 @@ services:
     restart: unless-stopped
     environment:
       - PORT=3000
+      - JWT_SECRET=${JWT_SECRET:-patent-scope-secret-change-me}
+      - DATA_DIR=/app/data
       - DATABASE_URL=postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-patent_compass}
       - OLLAMA_BASE_URL=http://ollama:11434
       - WHISPER_BASE_URL=http://whisper:8000
@@ -25,6 +27,8 @@ services:
       - OPS_CONSUMER_KEY=${OPS_CONSUMER_KEY:-}
       - OPS_CONSUMER_SECRET=${OPS_CONSUMER_SECRET:-}
       - INPI_MODE=${INPI_MODE:-scrape}
+    volumes:
+      - api_data:/app/data
     depends_on:
       - ollama
       - whisper
@@ -73,3 +77,4 @@ volumes:
   ollama_data:
   whisper_cache:
   postgres_data:
+  api_data:

@@ -55,8 +55,7 @@
     --risk-medium: 38 92% 50%;
     --risk-low: 152 60% 40%;
 
-    --demo-banner: 38 92% 50%;
-    --demo-banner-foreground: 0 0% 100%;
+
 
     --gradient-hero: linear-gradient(135deg, hsl(220 60% 20%), hsl(220 50% 30%));
     --gradient-accent: linear-gradient(135deg, hsl(185 70% 38%), hsl(195 80% 45%));
@@ -96,18 +95,13 @@
     font-family: 'Inter', system-ui, sans-serif;
   }
 
-  code, .font-mono {
+  code,
+  .font-mono {
     font-family: 'JetBrains Mono', monospace;
   }
 }
 
 @layer components {
-  .demo-banner {
-    @apply fixed top-0 left-0 right-0 z-50 text-center py-1.5 text-xs font-semibold tracking-wider uppercase;
-    background: hsl(var(--demo-banner));
-    color: hsl(var(--demo-banner-foreground));
-  }
-
   .sidebar-gradient {
     background: var(--gradient-sidebar);
   }

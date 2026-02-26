@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
+import jwt from '@fastify/jwt';
 import axios from 'axios';
 import fs from 'fs';
 import os from 'os';
@@ -9,11 +10,40 @@ import { pipeline } from 'stream/promises';
 import { createWriteStream } from 'fs';
 import FormData from 'form-data';
 import * as cheerio from 'cheerio';
+import bcrypt from 'bcryptjs';
 
 const fastify = Fastify({ logger: true });
 
 fastify.register(cors, { origin: '*' });
 fastify.register(multipart);
+fastify.register(jwt, { secret: process.env.JWT_SECRET || 'patent-scope-secret-change-me' });
+
+// ─── Simple User Store (JSON file) ─────────────────────────────
+const DATA_DIR = process.env.DATA_DIR || '/app/data';
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
+
+interface StoredUser {
+    id: string;
+    email: string;
+    name: string;
+    password_hash: string;
+    role: string;
+    created_at: string;
+}
+
+function loadUsers(): StoredUser[] {
+    try {
+        if (fs.existsSync(USERS_FILE)) {
+            return JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
+        }
+    } catch { /* ignore */ }
+    return [];
+}
+
+function saveUsers(users: StoredUser[]): void {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+}
 
 // ─── Environment ───────────────────────────────────────────────
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://ollama:11434';
@@ -61,6 +91,63 @@ async function ollamaGenerate(model: string, prompt: string, timeout = 120000): 
     }, { timeout });
     return response.data.response || JSON.stringify(response.data);
 }
+
+// ─── POST /auth/register ───────────────────────────────────────
+fastify.post('/auth/register', async (request, reply) => {
+    const { email, password, name } = request.body as { email: string; password: string; name?: string };
+    if (!email || !password) return reply.code(400).send({ error: 'Email e senha são obrigatórios' });
+    if (password.length < 6) return reply.code(400).send({ error: 'Senha deve ter no mínimo 6 caracteres' });
+
+    const users = loadUsers();
+    if (users.find(u => u.email === email)) {
+        return reply.code(409).send({ error: 'Este e-mail já está cadastrado' });
+    }
+
+    const hash = await bcrypt.hash(password, 10);
+    const newUser: StoredUser = {
+        id: crypto.randomUUID(),
+        email,
+        name: name || email.split('@')[0],
+        password_hash: hash,
+        role: users.length === 0 ? 'admin' : 'user', // First user is admin
+        created_at: new Date().toISOString()
+    };
+    users.push(newUser);
+    saveUsers(users);
+
+    const token = fastify.jwt.sign({ id: newUser.id, email: newUser.email, role: newUser.role }, { expiresIn: '7d' });
+    return { token, user: { id: newUser.id, email: newUser.email, name: newUser.name, role: newUser.role } };
+});
+
+// ─── POST /auth/login ──────────────────────────────────────────
+fastify.post('/auth/login', async (request, reply) => {
+    const { email, password } = request.body as { email: string; password: string };
+    if (!email || !password) return reply.code(400).send({ error: 'Email e senha são obrigatórios' });
+
+    const users = loadUsers();
+    const user = users.find(u => u.email === email);
+    if (!user) return reply.code(401).send({ error: 'Credenciais inválidas' });
+
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) return reply.code(401).send({ error: 'Credenciais inválidas' });
+
+    const token = fastify.jwt.sign({ id: user.id, email: user.email, role: user.role }, { expiresIn: '7d' });
+    return { token, user: { id: user.id, email: user.email, name: user.name, role: user.role } };
+});
+
+// ─── GET /auth/me ──────────────────────────────────────────────
+fastify.get('/auth/me', async (request, reply) => {
+    try {
+        await request.jwtVerify();
+        const { id, email, role } = request.user as any;
+        const users = loadUsers();
+        const user = users.find(u => u.id === id);
+        if (!user) return reply.code(401).send({ error: 'Usuário não encontrado' });
+        return { id: user.id, email: user.email, name: user.name, role: user.role };
+    } catch {
+        return reply.code(401).send({ error: 'Token inválido' });
+    }
+});
 
 // ─── Health Check ──────────────────────────────────────────────
 fastify.get('/health', async () => {
