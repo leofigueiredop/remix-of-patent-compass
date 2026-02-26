@@ -1,0 +1,69 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 1. Authenticated Users (Admins/Consultants)
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  password_hash String
+  name          String?
+  role          String   @default("user") // 'admin', 'user'
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+}
+
+// 2. Clients (Companies/Individuals being monitored)
+model Client {
+  id         String   @id @default(uuid())
+  name       String
+  email      String?
+  document   String?  // CNPJ/CPF
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  patents    Patent[]
+}
+
+// 3. Monitored Patents/Applications
+model Patent {
+  id             String           @id @default(uuid())
+  client_id      String
+  client         Client           @relation(fields: [client_id], references: [id])
+  patent_number  String           // INPI Number (e.g., BR 10 2023...)
+  title          String
+  holder         String?          // Titular
+  inventor       String?
+  classification String?          // IPC/CPC
+  status         String           @default("active") // 'active', 'inactive'
+  created_at     DateTime         @default(now())
+  updated_at     DateTime         @updatedAt
+  rules          MonitoringRule[]
+  alerts         CollisionAlert[]
+}
+
+// 4. Monitoring Rules (The "Intellegence")
+model MonitoringRule {
+  id        String   @id @default(uuid())
+  patent_id String
+  patent    Patent   @relation(fields: [patent_id], references: [id])
+  type      String   // 'exact_number', 'holder_wildcard', 'inventor_wildcard', 'keyword'
+  value     String   // The search term (e.g., "Leonardo*Pickler")
+}
+
+// 5. Collision Alerts (Results from RPI Processing)
+model CollisionAlert {
+  id          String   @id @default(uuid())
+  patent_id   String
+  patent      Patent   @relation(fields: [patent_id], references: [id])
+  rpi_number  String   // e.g., "2774"
+  rpi_date    DateTime
+  matched_text String  // What text in RPI triggered the alert?
+  description String?  // AI Brief analysis of collision
+  is_read     Boolean  @default(false)
+  created_at  DateTime @default(now())
+}

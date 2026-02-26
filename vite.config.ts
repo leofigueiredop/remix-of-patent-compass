@@ -6,10 +6,17 @@ import path from "path";
 export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
-    port: 8080,
+    port: 5173,
     hmr: {
       overlay: false,
     },
+    proxy: {
+      '/base_api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/base_api/, ''),
+      },
+    }
   },
   plugins: [react()].filter(Boolean),
   resolve: {

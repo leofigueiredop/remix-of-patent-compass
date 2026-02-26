@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arquitetura da Solução - Patent Scope</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --text-color: #333;
+            --bg-color: #fff;
+            --border-color: #e5e7eb;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            max-width: 210mm;
+            /* A4 width */
+            margin: 0 auto;
+            padding: 40px;
+            background: var(--bg-color);
+        }
+
+        h1 {
+            font-size: 2.5em;
+            color: #1a1a1a;
+            border-bottom: 2px solid var(--primary-color);
+            padding-bottom: 10px;
+            margin-bottom: 30px;
+        }
+
+        h2 {
+            font-size: 1.8em;
+            color: #2a2a2a;
+            margin-top: 40px;
+            margin-bottom: 20px;
+            page-break-after: avoid;
+        }
+
+        h3 {
+            font-size: 1.3em;
+            color: #4a4a4a;
+            margin-top: 25px;
+            border-left: 4px solid var(--primary-color);
+            padding-left: 10px;
+        }
+
+        p {
+            margin-bottom: 15px;
+            text-align: justify;
+        }
+
+        ul {
+            margin-bottom: 15px;
+        }
+
+        li {
+            margin-bottom: 5px;
+        }
+
+        .diagram-container {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            margin: 30px 0;
+            background: #f9fafb;
+            page-break-inside: avoid;
+        }
+
+        .diagram-caption {
+            text-align: center;
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 10px;
+            font-style: italic;
+        }
+
+        .info-box {
+            background-color: #eff6ff;
+            border-left: 4px solid #3b82f6;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 0 4px 4px 0;
+        }
+
+        .term-list dt {
+            font-weight: bold;
+            color: var(--primary-color);
+            margin-top: 10px;
+        }
+
+        .term-list dd {
+            margin-left: 0;
+            margin-bottom: 10px;
+        }
+
+        @media print {
+            body {
+                padding: 0;
+                max-width: 100%;
+            }
+
+            .no-print {
+                display: none;
+            }
+
+            a {
+                text-decoration: none;
+                color: #000;
+            }
+
+            .diagram-container {
+                border: 1px solid #ccc;
+                background: #fff;
+            }
+
+            /* Ensure diagrams are not split across pages */
+            .diagram-container,
+            h2,
+            h3 {
+                page-break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="no-print"
+        style="background: #fef3c7; padding: 10px; text-align: center; margin-bottom: 20px; border: 1px solid #f59e0b; border-radius: 4px;">
+        <strong>Modo de Visualização</strong> - Para salvar como PDF ou Imprimir: Pressione <kbd>Ctrl + P</kbd> (ou
+        <kbd>Cmd + P</kbd>) e selecione "Salvar como PDF".
+    </div>
+
+    <h1>Documentação de Arquitetura - Patent Scope</h1>
+
+    <div style="margin-bottom: 40px; font-size: 1.1em; color: #555;">
+        <p>Este documento detalha a infraestrutura, funcionamento e processos de inteligência artificial da solução
+            Patent Scope, hospedada em ambiente privado (VPS).</p>
+    </div>
+
+    <h2>1. Visão Geral (Executive Summary)</h2>
+    <p>
+        O <strong>Patent Scope</strong> é uma solução de inteligência artificial dedicada à análise e pesquisa de
+        patentes.
+        Diferente de soluções comuns que dependem de serviços externos (como ChatGPT/OpenAI ou Google Gemini) enviando
+        dados para a nuvem,
+        esta solução foi arquitetada para rodar <strong>100% localmente</strong> em um Servidor Privado Virtual (VPS).
+    </p>
+    <div class="info-box">
+        <strong>Principais Benefícios desta Arquitetura:</strong>
+        <ul>
+            <li><strong>Privacidade Total:</strong> Nenhum dado confidencial (ex: descrição de invenção não patenteada)
+                sai do servidor.</li>
+            <li><strong>Custo Fixo:</strong> Não há cobrança por "token" ou volume de uso, apenas o custo fixo do
+                aluguel do servidor.</li>
+            <li><strong>Controle:</strong> Total autonomia sobre os modelos de IA e atualizações.</li>
+        </ul>
+    </div>
+
+    <h2>2. Dicionário de Termos</h2>
+    <dl class="term-list">
+        <dt>VPS (Virtual Private Server)</dt>
+        <dd>É como um "computador potente" alugado, que roda 24h por dia em um data center. É onde todo o nosso sistema
+            "mora".</dd>
+
+        <dt>Coolify</dt>
+        <dd>É o painel de controle do servidor. Pense nele como o "Sistema Operacional" visual que nos permite gerenciar
+            os aplicativos sem precisar digitar códigos complexos.</dd>
+
+        <dt>Docker</dt>
+        <dd>Tecnologia que empacota os aplicativos em "containers". Garante que o software rode exatamente da mesma
+            forma no desenvolvimento e na produção.</dd>
+
+        <dt>LLM (Large Language Model)</dt>
+        <dd>O tipo de Inteligência Artificial usada para entender e gerar texto (ex: DeepSeek, Phi-3).</dd>
+
+        <dt>Inferência</dt>
+        <dd>O ato da IA "pensar" e gerar uma resposta para uma pergunta específica.</dd>
+    </dl>
+
+    <h2>3. Infraestrutura e Componentes</h2>
+    <p>A solução é composta por componentes que trabalham em harmonia dentro do servidor. Nada é terceirizado.</p>
+
+    <div class="diagram-container">
+        <div class="mermaid">
+            graph TD
+            subgraph VPS ["Servidor VPS (Nuvem Privada)"]
+            direction TB
+
+            U[Usuário / Web] -->|HTTPS| P[Coolify / Proxy Reverso]
+
+            subgraph APP ["Aplicação Patent Scope"]
+            P -->|Acessa| FE[Frontend (Interface Visual)]
+            P -->|API| BE[Backend (Cérebro Lógico)]
+
+            BE -->|Texto| OL[Ollama (Motor de IA)]
+            BE -->|Áudio| WH[Whisper (Transcrição)]
+
+            subgraph Models ["Modelos de IA (Na Memória RAM)"]
+            OL -.->|Carrega| DS[DeepSeek-R1<br />(Raciocínio Complexo)]
+            OL -.->|Carrega| PH[Phi-3.5<br />(Estratégia/Busca)]
+            end
+            end
+
+            subgraph Storage ["Armazenamento"]
+            DB[(Banco de Dados)]
+            VOL[(Arquivos de Modelos)]
+            OL --> VOL
+            BE --> DB
+            end
+            end
+
+            style U fill:#f9f,stroke:#333,stroke-width:2px
+            style P fill:#ff9,stroke:#333
+            style BE fill:#bbf,stroke:#333
+            style OL fill:#bfb,stroke:#333
+            style WH fill:#bfb,stroke:#333
+        </div>
+        <div class="diagram-caption">Figura 1: Diagrama de Infraestrutura e Comunicação entre Componentes.</div>
+    </div>
+
+    <h2>4. Fluxo de Trabalho da IA</h2>
+    <p>Como a IA processa uma nova invenção, desde o áudio até a estratégia de busca.</p>
+
+    <div class="diagram-container">
+        <div class="mermaid">
+            sequenceDiagram
+            participant User as Usuário
+            participant Front as Interface
+            participant Back as Backend
+            participant Whisper as IA Transcrição
+            participant DeepSeek as IA Raciocínio
+            participant Phi as IA Estratégia
+
+            User->>Front: 1. Envia Áudio (Ideia)
+            Front->>Back: Upload do arquivo
+            Back->>Whisper: Processar Áudio
+            Whisper-->>Back: Retorna Texto Transcrito
+
+            Back->>DeepSeek: 2. Analisar Invenção (Prompt Técnico)
+            Note over DeepSeek: Extrai: Problema, Solução, Diferenciais
+            DeepSeek-->>Back: Retorna Briefing Estruturado JSON
+
+            Back->>Phi: 3. Criar Estratégia de Busca
+            Note over Phi: Converte conceitos em Keywords e IPCs
+            Phi-->>Back: Retorna Termos de Busca
+
+            Back-->>Front: Resultado Completo
+            Front-->>User: Exibe Briefing e Estratégia
+        </div>
+        <div class="diagram-caption">Figura 2: Fluxo sequencial de processamento de uma patente.</div>
+    </div>
+
+    <h2>5. Como a IA "Aprende" e Melhora?</h2>
+    <p>Uma dúvida comum é: <em>"A IA aprende com o que eu uso?"</em>. A resposta técnica é composta por dois mecanismos:
+    </p>
+
+    <h3>A. RAG (Retrieval-Augmented Generation) - O "Livro de Consultas"</h3>
+    <p>
+        A IA instalada (DeepSeek/Phi-3) é "congelada", ou seja, ela não muda seu "cérebro" a cada uso. Treinar uma IA
+        custa milhões.
+        Para que ela "aprenda" sobre seus clientes ou patentes específicas, usamos uma técnica chamada
+        <strong>RAG</strong>.
+    </p>
+    <ul>
+        <li>O sistema cria uma "biblioteca" (Banco de Dados Vetorial) com seus documentos.</li>
+        <li>Antes de responder, a IA consulta essa biblioteca para encontrar informações relevantes.</li>
+        <li><strong>Resultado:</strong> A IA responde com base no conhecimento específico do seu negócio, sem precisar
+            ser "re-treinada".</li>
+    </ul>
+
+    <h3>B. Feedback Loop (Ciclo de Melhoria)</h3>
+    <p>
+        O sistema possui um mecanismo de memória de correções:
+    </p>
+    <div class="diagram-container">
+        <div class="mermaid">
+            graph LR
+            A[IA Gera Resposta] --> B{Usuário Aprova?}
+            B -- Sim --> C[Salvar no Histórico]
+            B -- Não --> D[Usuário Edita/Corrige]
+            D --> E[Salvar Correção no Banco de Exemplos]
+            E --> F[Próxima Geração]
+            F -->|Usa Correção como Exemplo| A
+        </div>
+        <div class="diagram-caption">Figura 3: Ciclo de Feedback para melhoria contínua.</div>
+    </div>
+    <p>
+        Quando você corrige uma resposta da IA, essa correção é salva. Nas próximas gerações, o sistema injeta essa
+        correção como um "exemplo de como fazer certo" (técnica chamada de <em>Few-Shot Prompting</em>), tornando a IA
+        progressivamente mais alinhada ao seu estilo.
+    </p>
+
+    <script>
+        mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+    </script>
+</body>
+
+</html>

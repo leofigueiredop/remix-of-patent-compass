@@ -1,16 +1,25 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { ExternalLink, AlertCircle } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import LoadingTransition from "@/components/LoadingTransition";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import AppLayout from "@/components/AppLayout";
 import WizardSteps from "@/components/WizardSteps";
-import { mockPatents } from "@/data/mockData";
-import { OpsSearchResult } from "@/services/espacenet"; // Import type
 
 const steps = ["Briefing", "Transcrição", "Briefing Técnico", "Palavras-chave", "Resultados", "Análise", "Relatório"];
+
+interface SearchResultItem {
+  id: string;
+  title: string;
+  number: string;
+  applicant: string;
+  date: string;
+  abstract: string;
+  score: number;
+  source: string;
+  url?: string;
+}
 
 function ScoreBadge({ score }: { score: number }) {
   const color =
@@ -27,30 +36,41 @@ function ScoreBadge({ score }: { score: number }) {
 export default function SearchResults() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [tab, setTab] = useState("espacenet"); // Default to Espacenet if we have real results
+  const [tab, setTab] = useState("espacenet");
   const [loading, setLoading] = useState(false);
 
-  // Get state from navigation
-  const { results, query, error } = location.state || {};
-  const realEspacenetResults: OpsSearchResult[] = results || [];
+  // Get state from navigation (set by Keywords page after search)
+  const { results, query } = (location.state || {}) as {
+    results?: { espacenet?: any[]; inpi?: any[] };
+    query?: string;
+  };
 
-  const displayedEspacenet = realEspacenetResults.length > 0
-    ? realEspacenetResults.map(p => ({
-      id: p.publicationNumber,
-      title: p.title,
-      number: p.publicationNumber,
-      applicant: p.applicant,
-      date: p.date,
-      abstract: p.abstract,
-      score: Math.floor(Math.random() * 40) + 60, // Simulate score for now as OPS doesn't give similarity score easily
-      source: "Espacenet"
-    }))
-    : mockPatents.filter((p) => p.source === "Espacenet");
+  const espacenetResults: SearchResultItem[] = (results?.espacenet || []).map((p: any) => ({
+    id: p.publicationNumber || p.number,
+    title: p.title,
+    number: p.publicationNumber || p.number,
+    applicant: p.applicant || "Desconhecido",
+    date: p.date || "",
+    abstract: p.abstract || "",
+    score: p.score || 0,
+    source: "Espacenet",
+    url: p.url,
+  }));
 
-  const inpiPatents = mockPatents.filter((p) => p.source === "INPI");
+  const inpiResults: SearchResultItem[] = (results?.inpi || []).map((p: any, idx: number) => ({
+    id: p.numero || `inpi-${idx}`,
+    title: p.titulo || p.title || "Sem título",
+    number: p.numero || p.number || "",
+    applicant: p.titular || p.applicant || "Desconhecido",
+    date: p.dataDeposito || p.date || "",
+    abstract: p.resumo || p.abstract || "",
+    score: p.score || 0,
+    source: "INPI",
+    url: p.url,
+  }));
 
-  // Use mock or real list
-  const patentList = tab === "inpi" ? inpiPatents : displayedEspacenet;
+  const patentList = tab === "inpi" ? inpiResults : espacenetResults;
+  const totalResults = espacenetResults.length + inpiResults.length;
 
   return (
     <AppLayout>
@@ -59,7 +79,9 @@ export default function SearchResults() {
           message="Analisando similaridade técnica..."
           subMessage="Comparando reivindicações e classificações"
           duration={3500}
-          onComplete={() => navigate("/research/analysis")}
+          onComplete={() => navigate("/research/analysis", {
+            state: { results: [...espacenetResults, ...inpiResults] }
+          })}
         />
       )}
       <WizardSteps currentStep={4} steps={steps} />
@@ -68,20 +90,12 @@ export default function SearchResults() {
         <div>
           <h1 className="text-2xl font-bold mb-1">Resultados de Busca</h1>
           <p className="text-muted-foreground text-sm">
-            {realEspacenetResults.length > 0
-              ? `${realEspacenetResults.length} resultados reais encontrados via Espacenet (OPS)`
-              : `${mockPatents.length} patentes encontradas (Modo Simulação)`
+            {totalResults > 0
+              ? `${totalResults} patentes encontradas`
+              : "Nenhum resultado encontrado. Tente ajustar suas palavras-chave."
             }
           </p>
         </div>
-
-        {error && (
-          <Alert variant="destructive">
-            <AlertCircle className="h-4 w-4" />
-            <AlertTitle>Erro na Busca</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
 
         {query && (
           <div className="bg-muted/30 p-3 rounded-lg border text-xs font-mono text-muted-foreground break-all">
@@ -92,10 +106,10 @@ export default function SearchResults() {
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList>
             <TabsTrigger value="espacenet">
-              Espacenet ({displayedEspacenet.length})
+              Espacenet ({espacenetResults.length})
             </TabsTrigger>
             <TabsTrigger value="inpi">
-              INPI ({inpiPatents.length})
+              INPI ({inpiResults.length})
             </TabsTrigger>
           </TabsList>
 
@@ -114,15 +128,19 @@ export default function SearchResults() {
                     {patent.abstract}
                   </p>
                 </div>
-                <Button variant="ghost" size="sm" className="shrink-0 gap-1.5 text-xs">
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  Abrir
-                </Button>
+                {patent.url && (
+                  <a href={patent.url} target="_blank" rel="noopener noreferrer">
+                    <Button variant="ghost" size="sm" className="shrink-0 gap-1.5 text-xs">
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      Abrir
+                    </Button>
+                  </a>
+                )}
               </div>
             ))}
             {patentList.length === 0 && (
               <div className="text-center py-10 text-muted-foreground">
-                Nenhum resultado encontrado.
+                Nenhum resultado encontrado nesta base.
               </div>
             )}
           </TabsContent>
@@ -132,7 +150,10 @@ export default function SearchResults() {
           <Button variant="outline" onClick={() => navigate("/research/keywords")}>
             Voltar
           </Button>
-          <Button onClick={() => setLoading(true)}>
+          <Button
+            onClick={() => setLoading(true)}
+            disabled={totalResults === 0}
+          >
             Prosseguir para Análise
           </Button>
         </div>

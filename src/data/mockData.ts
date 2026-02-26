@@ -18,6 +18,8 @@ export interface Patent {
   classification: string;
   riskLevel: "high" | "medium" | "low";
   justification: string;
+  imageUrl?: string;
+  url?: string;
 }
 
 export const mockResearches: Research[] = [
@@ -93,6 +95,8 @@ export const mockPatents: Patent[] = [
     classification: "H01F 27/08",
     riskLevel: "high",
     justification: "Alta sobreposição técnica: ambos utilizam sensores de fibra óptica para monitoramento térmico em transformadores. O pedido BR diferencia-se por não incluir predição por rede neural, mas cobre o método de sensoriamento distribuído que é elemento central da invenção.",
+    imageUrl: "/patents/BR1020190154327.png",
+    url: "https://busca.inpi.gov.br/pePI/servlet/PatenteServletController"
   },
   {
     id: "2",
@@ -106,6 +110,8 @@ export const mockPatents: Patent[] = [
     classification: "G01K 11/32",
     riskLevel: "high",
     justification: "Sobreposição significativa na combinação de sensoriamento distribuído com predição por machine learning. Embora utilize sensores convencionais (não fibra óptica), o conceito de predição de falhas térmicas por ML é essencialmente o mesmo.",
+    imageUrl: "/patents/EP3285042A1.png",
+    url: "https://worldwide.espacenet.com/patent/search?q=pn%3DEP3285042A1"
   },
   {
     id: "3",
@@ -119,6 +125,8 @@ export const mockPatents: Patent[] = [
     classification: "G06N 3/08",
     riskLevel: "medium",
     justification: "Compartilha o uso de redes neurais para predição de falhas em transformadores, porém com abordagem técnica distinta (análise de gases vs. monitoramento térmico). Risco moderado de objeção por sobreposição conceitual.",
+    imageUrl: "/patents/BR1020200238910.png",
+    url: "https://busca.inpi.gov.br/pePI/servlet/PatenteServletController"
   },
   {
     id: "4",
@@ -132,6 +140,8 @@ export const mockPatents: Patent[] = [
     classification: "G01K 11/32",
     riskLevel: "medium",
     justification: "Utiliza fibra óptica (Bragg grating) para monitoramento térmico em equipamentos elétricos, mas sem componente de predição por IA. Sobreposição parcial no sensoriamento, diferencia-se na análise.",
+    imageUrl: "/patents/US2022128425A1.png",
+    url: "https://worldwide.espacenet.com/patent/search?q=pn%3DUS2022128425A1"
   },
   {
     id: "5",
@@ -145,6 +155,8 @@ export const mockPatents: Patent[] = [
     classification: "H04L 12/40",
     riskLevel: "low",
     justification: "Relaciona-se apenas ao componente de comunicação do sistema. Embora haja sobreposição no conceito de protocolo de baixa latência para ambientes industriais, é um aspecto secundário da invenção.",
+    imageUrl: "/patents/BR1020180087651.png",
+    url: "https://busca.inpi.gov.br/pePI/servlet/PatenteServletController"
   },
   {
     id: "6",
@@ -158,5 +170,7 @@ export const mockPatents: Patent[] = [
     classification: "G06N 3/08",
     riskLevel: "low",
     justification: "Utiliza deep learning para monitoramento de transformadores, porém baseado em sinais de vibração e elétricos, não em temperatura. Abordagem técnica fundamentalmente distinta.",
-  },
+    imageUrl: "/patents/CN112345678A.png",
+    url: "https://worldwide.espacenet.com/patent/search?q=pn%3DCN112345678A"
+  }
 ];

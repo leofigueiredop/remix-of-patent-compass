@@ -5,7 +5,8 @@ import { Textarea } from "@/components/ui/textarea";
 import AppLayout from "@/components/AppLayout";
 import WizardSteps from "@/components/WizardSteps";
 import LoadingTransition from "@/components/LoadingTransition";
-import { mockStructuredBriefing } from "@/data/mockData";
+import { useResearch } from "@/contexts/ResearchContext";
+import { aiService } from "@/services/ai";
 
 const steps = ["Briefing", "Transcrição", "Briefing Técnico", "Palavras-chave", "Resultados", "Análise", "Relatório"];
 
@@ -18,11 +19,33 @@ const fields = [
 
 export default function StructuredBriefing() {
   const navigate = useNavigate();
-  const [briefing, setBriefing] = useState(mockStructuredBriefing);
+  const { briefing, setBriefing, setStrategy } = useResearch();
+  const [localBriefing, setLocalBriefing] = useState(briefing || {
+    problemaTecnico: "",
+    solucaoProposta: "",
+    diferenciais: "",
+    aplicacoes: "",
+  });
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const updateField = (key: string, value: string) => {
-    setBriefing((prev) => ({ ...prev, [key]: value }));
+    setLocalBriefing((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleConfirm = async () => {
+    setError(null);
+    setLoading(true);
+    setBriefing(localBriefing);
+
+    try {
+      const result = await aiService.generateStrategy(localBriefing);
+      setStrategy(result);
+      navigate("/research/keywords");
+    } catch (err: any) {
+      setError(err.message || "Erro ao gerar estratégia de busca.");
+      setLoading(false);
+    }
   };
 
   return (
@@ -30,9 +53,9 @@ export default function StructuredBriefing() {
       {loading && (
         <LoadingTransition
           message="Extraindo palavras-chave..."
-          subMessage="Identificando termos e classificações IPC"
-          duration={2800}
-          onComplete={() => navigate("/research/keywords")}
+          subMessage="Identificando termos e classificações IPC com IA"
+          duration={3000}
+          onComplete={() => { }}
         />
       )}
       <WizardSteps currentStep={2} steps={steps} />
@@ -43,6 +66,12 @@ export default function StructuredBriefing() {
           Revise os campos organizados automaticamente a partir da transcrição
         </p>
 
+        {error && (
+          <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg mb-4">
+            {error}
+          </div>
+        )}
+
         <div className="space-y-5">
           {fields.map((field) => (
             <div key={field.key} className="bg-card rounded-lg border p-5">
@@ -51,7 +80,7 @@ export default function StructuredBriefing() {
                 {field.label}
               </label>
               <Textarea
-                value={briefing[field.key]}
+                value={localBriefing[field.key]}
                 onChange={(e) => updateField(field.key, e.target.value)}
                 className="min-h-[80px] resize-y text-sm leading-relaxed"
               />
@@ -63,7 +92,7 @@ export default function StructuredBriefing() {
           <Button variant="outline" onClick={() => navigate("/research/transcription")}>
             Voltar
           </Button>
-          <Button onClick={() => setLoading(true)}>
+          <Button onClick={handleConfirm} disabled={loading}>
             Confirmar Briefing
           </Button>
         </div>

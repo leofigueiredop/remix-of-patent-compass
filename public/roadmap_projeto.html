@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roadmap de Desenvolvimento - PatentScope</title>
+    <style>
+        :root {
+            --primary: #0f172a;
+            --secondary: #334155;
+            --accent: #f59e0b;
+            --success: #10b981;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --border: #e2e8f0;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--primary);
+            padding: 2cm;
+            line-height: 1.5;
+        }
+
+        @page {
+            size: A4 landscape;
+            margin: 0;
+        }
+
+        @media print {
+            body {
+                background: white;
+                padding: 1cm;
+                width: 29.7cm;
+                /* A4 Landscape width */
+                height: 21cm;
+                /* A4 Landscape height */
+            }
+
+            .no-print {
+                display: none;
+            }
+        }
+
+        /* Header */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-bottom: 30px;
+            border-bottom: 2px solid var(--primary);
+            padding-bottom: 15px;
+        }
+
+        h1 {
+            font-size: 24px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .meta {
+            text-align: right;
+            font-size: 14px;
+            color: var(--secondary);
+        }
+
+        /* Timeline Grid */
+        .timeline-container {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            height: 100%;
+        }
+
+        /* Sprint Column */
+        .sprint-Column {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .sprint-header {
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .sprint-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: var(--primary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .sprint-date {
+            font-size: 12px;
+            color: var(--secondary);
+            font-weight: normal;
+            display: block;
+            margin-top: 4px;
+        }
+
+        .sprint-status {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+
+        .status-done {
+            background: #dcfce7;
+            color: var(--success);
+        }
+
+        .status-active {
+            background: #fef3c7;
+            color: var(--accent);
+            border: 1px solid var(--accent);
+        }
+
+        .status-next {
+            background: #f1f5f9;
+            color: var(--secondary);
+        }
+
+        /* Tasks */
+        .task-list {
+            list-style: none;
+            flex-grow: 1;
+        }
+
+        .task-item {
+            font-size: 12px;
+            padding: 8px;
+            margin-bottom: 8px;
+            background: #f8fafc;
+            border-left: 3px solid var(--secondary);
+            border-radius: 0 4px 4px 0;
+        }
+
+        .task-item.done {
+            border-left-color: var(--success);
+            background: #f0fdf4;
+        }
+
+        .task-item.priority {
+            border-left-color: var(--accent);
+            background: #fffbeb;
+        }
+
+        .task-title {
+            font-weight: 600;
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        .task-desc {
+            color: #64748b;
+            font-size: 11px;
+        }
+
+        /* Deliverables (Milestones) */
+        .deliverable {
+            margin-top: auto;
+            padding-top: 15px;
+            border-top: 1px dashed var(--border);
+        }
+
+        .deliverable-title {
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+            color: var(--secondary);
+            margin-bottom: 5px;
+        }
+
+        .badge {
+            display: inline-block;
+            font-size: 10px;
+            padding: 3px 8px;
+            background: var(--primary);
+            color: white;
+            border-radius: 12px;
+        }
+
+        /* Disclaimer */
+        .footer {
+            margin-top: 10px;
+            font-size: 10px;
+            color: #94a3b8;
+            text-align: center;
+            border-top: 1px solid var(--border);
+            padding-top: 10px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="no-print"
+        style="text-align: center; margin-bottom: 20px; padding: 10px; background: #fffbeb; border: 1px solid #f59e0b; border-radius: 4px;">
+        💡 <strong>Dica de Impressão:</strong> Use <kbd>Ctrl + P</kbd> e selecione layout <strong>Paisagem
+            (Landscape)</strong>.
+    </div>
+
+    <header>
+        <div>
+            <h1>Roadmap de Projeto: Patent Scope</h1>
+            <p style="font-size: 14px; color: #64748b;">Cronograma de entrega acelerada (30 Dias / 4 Sprints)</p>
+        </div>
+        <div class="meta">
+            <p><strong>Cliente:</strong> Leo Figueiredo</p>
+            <p><strong>Início:</strong> 14/02/2026</p>
+            <p><strong>Entrega Final:</strong> 15/03/2026</p>
+        </div>
+    </header>
+
+    <div class="timeline-container">
+
+        <!-- Sprint 1 -->
+        <div class="sprint-Column">
+            <div class="sprint-header">
+                <div class="sprint-title">
+                    Sprint 1: Fundação
+                    <span class="sprint-status status-done">Concluído</span>
+                </div>
+                <span class="sprint-date">14/02 - 20/02 (Entrega Amanhã)</span>
+            </div>
+            <ul class="task-list">
+                <li class="task-item done">
+                    <span class="task-title">Setup VPS & Docker</span>
+                    <span class="task-desc">Configuração High Performance (12-core/48GB).</span>
+                </li>
+                <li class="task-item done">
+                    <span class="task-title">Frontend Demo (UX/UI)</span>
+                    <span class="task-desc">Interfaces de Pesquisa, Monitoramento e Relatórios.</span>
+                </li>
+                <li class="task-item done">
+                    <span class="task-title">Mockup de Monitoramento</span>
+                    <span class="task-desc">Telas de Dashboard, Patentes e Alertas.</span>
+                </li>
+                <li class="task-item done">
+                    <span class="task-title">Integração Básica IA</span>
+                    <span class="task-desc">Fluxo de Pesquisa (DeepSeek + Espacenet).</span>
+                </li>
+            </ul>
+            <div class="deliverable">
+                <div class="deliverable-title">🎯 Milestone 1</div>
+                <span class="badge">MVP Visual (Demo)</span>
+            </div>
+        </div>
+
+        <!-- Sprint 2 -->
+        <div class="sprint-Column" style="border: 2px solid var(--accent);">
+            <div class="sprint-header">
+                <div class="sprint-title">
+                    Sprint 2: Dados Reais
+                    <span class="sprint-status status-active">Foco Atual</span>
+                </div>
+                <span class="sprint-date">21/02 - 28/02</span>
+            </div>
+            <ul class="task-list">
+                <li class="task-item priority">
+                    <span class="task-title">Backend Real (Node.js)</span>
+                    <span class="task-desc">Migração de Mock para Prisma + Postgres.</span>
+                </li>
+                <li class="task-item priority">
+                    <span class="task-title">Autenticação (JWT)</span>
+                    <span class="task-desc">Login seguro e gestão de usuários (Admin/Consultor).</span>
+                </li>
+                <li class="task-item">
+                    <span class="task-title">Cadastro de Clientes</span>
+                    <span class="task-desc">CRUD completo de Clientes e Patentes.</span>
+                </li>
+                <li class="task-item">
+                    <span class="task-title">Crawler RPI (Básico)</span>
+                    <span class="task-desc">Script para baixar e ler XML semanal do INPI.</span>
+                </li>
+            </ul>
+            <div class="deliverable">
+                <div class="deliverable-title">🎯 Milestone 2</div>
+                <span class="badge">Sistema Funcional (Dados Reais)</span>
+            </div>
+        </div>
+
+        <!-- Sprint 3 -->
+        <div class="sprint-Column">
+            <div class="sprint-header">
+                <div class="sprint-title">
+                    Sprint 3: Inteligência
+                    <span class="sprint-status status-next">Planejado</span>
+                </div>
+                <span class="sprint-date">01/03 - 08/03</span>
+            </div>
+            <ul class="task-list">
+                <li class="task-item">
+                    <span class="task-title">Motor de Colidência</span>
+                    <span class="task-desc">Lógica de Wildcard (*) e Fuzzy Match nos textos.</span>
+                </li>
+                <li class="task-item">
+                    <span class="task-title">Automação de Alertas</span>
+                    <span class="task-desc">Envio de emails/notificações ao detectar conflito.</span>
+                </li>
+                <li class="task-item">
+                    <span class="task-title">Refinamento IA (RAG)</span>
+                    <span class="task-desc">Conectar DeepSeek para analisar o texto da colidência.</span>
+                </li>
+                <li class="task-item">
+                    <span class="task-title">Upload de Mídia Real</span>
+                    <span class="task-desc">Processamento de Áudio/Vídeo via Whisper no Backend.</span>
+                </li>
+            </ul>
+            <div class="deliverable">
+                <div class="deliverable-title">🎯 Milestone 3</div>
+                <span class="badge">Monitoramento Automatizado</span>
+            </div>
+        </div>
+
+        <!-- Sprint 4 -->
+        <div class="sprint-Column">
+            <div class="sprint-header">
+                <div class="sprint-title">
+                    Sprint 4: Entrega Final
+                    <span class="sprint-status status-next">Planejado</span>
+                </div>
+                <span class="sprint-date">09/03 - 15/03</span>
+            </div>
+            <ul class="task-list">
+                <li class="task-item">
+                    <span class="task-title">Polimento de UI/UX</span>
+                    <span class="task-desc">Ajustes finais de design e responsividade.</span>
+                </li>
+                <li class="task-item">
+                    <span class="task-title">Relatórios PDF Finais</span>
+                    <span class="task-desc">Ajuste fino do layout de impressão para clientes.</span>
+                </li>
+                <li class="task-item">
+                    <span class="task-title">Otimização VPS</span>
+                    <span class="task-desc">Tuning final de cache e performance do banco.</span>
+                </li>
+                <li class="task-item">
+                    <span class="task-title">Documentação & Treinamento</span>
+                    <span class="task-desc">Manual de uso e walkthrough em vídeo.</span>
+                </li>
+            </ul>
+            <div class="deliverable">
+                <div class="deliverable-title">🎯 Milestone 4</div>
+                <span class="badge" style="background: var(--success);">Golive (Produção)</span>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="footer">
+        Documento gerado em 19/02/2026 • Patent Scope v1.0 • Planejamento sujeito a ajustes conforme feedback semanal.
+    </div>
+
+</body>
+
+</html>

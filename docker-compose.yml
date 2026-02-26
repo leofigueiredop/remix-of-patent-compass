@@ -1,0 +1,79 @@
+services:
+  # Frontend (Vite)
+  web:
+    build: .
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:3000}
+    depends_on:
+      - api
+
+  # Backend Orchestrator (Node.js)
+  api:
+    build: ./backend
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-patent_compass}
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - WHISPER_BASE_URL=http://whisper:8000
+      - OLLAMA_PRIMARY_MODEL=${OLLAMA_PRIMARY_MODEL:-qwen2.5:14b-instruct-q4_K_M}
+      - OLLAMA_SECONDARY_MODEL=${OLLAMA_SECONDARY_MODEL:-llama3.1:8b-instruct-q4_K_M}
+      - OPS_CONSUMER_KEY=${OPS_CONSUMER_KEY:-}
+      - OPS_CONSUMER_SECRET=${OPS_CONSUMER_SECRET:-}
+      - INPI_MODE=${INPI_MODE:-scrape}
+    depends_on:
+      - ollama
+      - whisper
+      - db
+
+  # Local LLM Service
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
+      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-2}
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-24h}
+      - OLLAMA_NUM_THREADS=${OLLAMA_NUM_THREADS:-10}
+    # CPU-only VPS (40GB RAM / 12 cores)
+    # Models: qwen2.5:14b-instruct-q4_K_M (~10GB) + llama3.1:8b-instruct-q4_K_M (~6GB)
+    restart: unless-stopped
+
+  # Speech-to-Text Service
+  whisper:
+    image: fedirz/faster-whisper-server:latest-cpu
+    ports:
+      - "8000:8000"
+    environment:
+      - WHISPER_MODEL=medium
+      - WHISPER_BEAM_SIZE=5
+      - WHISPER_COMPUTE_TYPE=int8 # Optimization for CPU speed
+      - WHISPER_DEVICE=cpu
+      - WHISPER_NUM_WORKERS=4 # Dedicate 4 cores to transcription
+    volumes:
+      - whisper_cache:/root/.cache/huggingface
+
+  # Database (Postgres)
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-patent_compass}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
+  whisper_cache:
+  postgres_data:

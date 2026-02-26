@@ -7,6 +7,7 @@ import {
   Settings,
   LogOut,
   ShieldCheck,
+  BookOpen,
 } from "lucide-react";
 
 const navigation = [
@@ -24,6 +25,7 @@ const navigation = [
     items: [
       { label: "Dashboard", icon: LayoutDashboard, path: "/monitoring/dashboard" },
       { label: "Patentes", icon: ShieldCheck, path: "/monitoring/patents" },
+      { label: "Base de Conhecimento", icon: BookOpen, path: "/knowledge-base" }, // New Item
       { label: "Configurações", icon: Settings, path: "/monitoring/settings" },
     ],
   },
@@ -73,8 +75,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                         key={item.label}
                         onClick={() => navigate(item.path)}
                         className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${isActive
-                            ? "bg-sidebar-accent text-sidebar-primary font-medium"
-                            : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                          ? "bg-sidebar-accent text-sidebar-primary font-medium"
+                          : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
                           }`}
                       >
                         <item.icon className="w-4 h-4" />

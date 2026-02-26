@@ -6,21 +6,56 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import AppLayout from "@/components/AppLayout";
 import WizardSteps from "@/components/WizardSteps";
+import { useResearch } from "@/contexts/ResearchContext";
+import { aiService } from "@/services/ai";
 
 const steps = ["Briefing", "Transcrição", "Briefing Técnico", "Palavras-chave", "Resultados", "Análise", "Relatório"];
 
 export default function NewResearch() {
   const navigate = useNavigate();
+  const { setRawInput, setTranscription, setInputMode: setCtxInputMode } = useResearch();
   const [inputMode, setInputMode] = useState<"audio" | "text" | "files">("text");
   const [text, setText] = useState("");
+  const [audioFile, setAudioFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const getLoadingMessage = () => {
     switch (inputMode) {
-      case "audio": return "Transcrevendo áudio...";
+      case "audio": return "Transcrevendo áudio com Whisper...";
       case "files": return "Analisando arquivos e mídia...";
       default: return "Organizando briefing...";
     }
+  };
+
+  const handleSubmit = async () => {
+    setError(null);
+    setLoading(true);
+    setCtxInputMode(inputMode);
+
+    try {
+      if (inputMode === "audio" && audioFile) {
+        const result = await aiService.transcribeAudio(audioFile);
+        setRawInput(result.text);
+        setTranscription(result.text);
+        navigate("/research/transcription");
+      } else if (inputMode === "text" && text.trim()) {
+        setRawInput(text);
+        setTranscription(text);
+        navigate("/research/transcription");
+      } else {
+        setError("Insira um texto ou selecione um arquivo de áudio.");
+        setLoading(false);
+      }
+    } catch (err: any) {
+      setError(err.message || "Erro ao processar entrada. Verifique se o backend está rodando.");
+      setLoading(false);
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) setAudioFile(file);
   };
 
   return (
@@ -30,7 +65,7 @@ export default function NewResearch() {
           message={getLoadingMessage()}
           subMessage="Processando entrada com IA"
           duration={3000}
-          onComplete={() => navigate("/research/transcription")}
+          onComplete={() => { }}
         />
       )}
       <WizardSteps currentStep={0} steps={steps} />
@@ -41,13 +76,19 @@ export default function NewResearch() {
           Descreva a invenção para iniciar a análise de patentes
         </p>
 
+        {error && (
+          <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg mb-6">
+            {error}
+          </div>
+        )}
+
         {/* Input mode selector */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
           <button
             onClick={() => setInputMode("audio")}
             className={`flex items-center gap-3 p-4 rounded-lg border-2 transition-colors ${inputMode === "audio"
-                ? "border-accent bg-accent/5"
-                : "border-border hover:border-muted-foreground/30"
+              ? "border-accent bg-accent/5"
+              : "border-border hover:border-muted-foreground/30"
               }`}
           >
             <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${inputMode === "audio" ? "bg-accent text-accent-foreground" : "bg-muted text-muted-foreground"}`}>
@@ -62,8 +103,8 @@ export default function NewResearch() {
           <button
             onClick={() => setInputMode("files")}
             className={`flex items-center gap-3 p-4 rounded-lg border-2 transition-colors ${inputMode === "files"
-                ? "border-accent bg-accent/5"
-                : "border-border hover:border-muted-foreground/30"
+              ? "border-accent bg-accent/5"
+              : "border-border hover:border-muted-foreground/30"
               }`}
           >
             <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${inputMode === "files" ? "bg-accent text-accent-foreground" : "bg-muted text-muted-foreground"}`}>
@@ -78,8 +119,8 @@ export default function NewResearch() {
           <button
             onClick={() => setInputMode("text")}
             className={`flex items-center gap-3 p-4 rounded-lg border-2 transition-colors ${inputMode === "text"
-                ? "border-accent bg-accent/5"
-                : "border-border hover:border-muted-foreground/30"
+              ? "border-accent bg-accent/5"
+              : "border-border hover:border-muted-foreground/30"
               }`}
           >
             <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${inputMode === "text" ? "bg-accent text-accent-foreground" : "bg-muted text-muted-foreground"}`}>
@@ -102,20 +143,30 @@ export default function NewResearch() {
         ) : (
           <div className="border-2 border-dashed border-border rounded-lg p-12 text-center">
             <Upload className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-            <p className="text-sm font-medium mb-1">Arraste os arquivos aqui</p>
+            <p className="text-sm font-medium mb-1">
+              {audioFile ? audioFile.name : "Arraste os arquivos aqui"}
+            </p>
             <p className="text-xs text-muted-foreground mb-4">
               {inputMode === "audio"
                 ? "MP3, WAV, M4A — máx. 25MB"
                 : "Imagens, Vídeos (MP4), PDFs — máx. 50MB"}
             </p>
-            <Button variant="outline" size="sm">
-              Selecionar Arquivos
-            </Button>
+            <label>
+              <Button variant="outline" size="sm" asChild>
+                <span>Selecionar Arquivos</span>
+              </Button>
+              <input
+                type="file"
+                className="hidden"
+                accept={inputMode === "audio" ? "audio/*" : "image/*,video/*,.pdf"}
+                onChange={handleFileSelect}
+              />
+            </label>
           </div>
         )}
 
         <div className="flex justify-end mt-6">
-          <Button onClick={() => setLoading(true)} className="gap-2">
+          <Button onClick={handleSubmit} className="gap-2" disabled={loading}>
             {inputMode === "text" ? "Organizar" : inputMode === "audio" ? "Transcrever" : "Analisar"}
           </Button>
         </div>
