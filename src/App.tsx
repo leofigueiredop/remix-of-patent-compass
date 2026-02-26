@@ -20,6 +20,7 @@ import ResearchHistory from "./pages/ResearchHistory";
 import ResearchSettings from "./pages/ResearchSettings";
 import KnowledgeBase from "./pages/KnowledgeBase";
 import MonitoringSettings from "./pages/MonitoringSettings";
+import QuickSearch from "./pages/QuickSearch";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -45,6 +46,7 @@ const App = () => (
             <Route path="/research/report" element={<Report />} />
             <Route path="/research/history" element={<ResearchHistory />} />
             <Route path="/research/settings" element={<ResearchSettings />} />
+            <Route path="/search" element={<QuickSearch />} />
             <Route path="/knowledge-base" element={<KnowledgeBase />} />
             <Route path="/monitoring/dashboard" element={<MonitoringDashboard />} />
             <Route path="/monitoring/patents" element={<MonitoringPatents />} />

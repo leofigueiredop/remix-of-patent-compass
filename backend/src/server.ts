@@ -402,6 +402,100 @@ async function scrapeInpiBuscaWeb(keywords: string[], ipcCodes: string[]): Promi
     }
 }
 
+// ─── POST /search/quick ────────────────────────────────────────
+fastify.post('/search/quick', async (request, reply) => {
+    const { number, titular, inventor, keywords } = request.body as {
+        number?: string;
+        titular?: string;
+        inventor?: string;
+        keywords?: string;
+    };
+
+    if (!number && !titular && !inventor && !keywords) {
+        return reply.code(400).send({ error: 'Informe pelo menos um critério de busca' });
+    }
+
+    const results: any[] = [];
+
+    // 1. Search INPI via scraping
+    try {
+        const queryParts: string[] = [];
+        if (number) queryParts.push(number.trim());
+        if (titular) queryParts.push(titular.trim());
+        if (inventor) queryParts.push(inventor.trim());
+        if (keywords) queryParts.push(keywords.trim());
+
+        const query = queryParts.join(' ');
+        const url = `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=SearchPatent&Query=${encodeURIComponent(query)}`;
+
+        const response = await axios.get(url, {
+            timeout: 30000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (compatible; PatentScoope/1.0)',
+                'Accept': 'text/html',
+                'Accept-Language': 'pt-BR,pt;q=0.9'
+            }
+        });
+
+        const $ = cheerio.load(response.data);
+        $('table.resultado tr, table.listaResultado tr, .resultado-pesquisa tr').each((i, row) => {
+            if (i === 0) return;
+            const cells = $(row).find('td');
+            if (cells.length < 2) return;
+
+            const num = $(cells[0]).text().trim();
+            const title = $(cells[1]).text().trim();
+            const depositor = cells.length > 2 ? $(cells[2]).text().trim() : '';
+            const date = cells.length > 3 ? $(cells[3]).text().trim() : '';
+
+            if (num && title) {
+                results.push({
+                    publicationNumber: num,
+                    title,
+                    applicant: depositor || 'N/A',
+                    inventor: '',
+                    date: date || '',
+                    abstract: '',
+                    classification: '',
+                    source: 'INPI',
+                    url: `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${encodeURIComponent(num)}`
+                });
+            }
+        });
+    } catch (err: any) {
+        fastify.log.warn(`Quick search INPI failed: ${err.message}`);
+    }
+
+    // 2. Search Espacenet if OPS keys are configured
+    if (OPS_CONSUMER_KEY && OPS_CONSUMER_SECRET) {
+        try {
+            const cqlParts: string[] = [];
+            if (number) cqlParts.push(`pn=${number.trim()}`);
+            if (titular) cqlParts.push(`pa="${titular.trim()}"`);
+            if (inventor) cqlParts.push(`in="${inventor.trim()}"`);
+            if (keywords) cqlParts.push(`txt="${keywords.trim()}"`);
+
+            const cql = cqlParts.join(' AND ');
+            const token = await getOpsToken();
+            const opsUrl = `http://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=${encodeURIComponent(cql)}`;
+
+            const response = await axios.get(opsUrl, {
+                headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+                timeout: 30000
+            });
+
+            const opsResults = parseOpsResponse(response.data);
+            results.push(...opsResults);
+        } catch (err: any) {
+            if (err.response?.status !== 404) {
+                fastify.log.warn(`Quick search Espacenet failed: ${err.message}`);
+            }
+        }
+    }
+
+    return { results, total: results.length };
+});
+
 // ─── POST /search (unified) ────────────────────────────────────
 fastify.post('/search', async (request, reply) => {
     const { cql, keywords, ipc_codes } = request.body as {

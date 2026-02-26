@@ -8,6 +8,7 @@ import {
   LogOut,
   ShieldCheck,
   BookOpen,
+  SearchCheck,
 } from "lucide-react";
 import { authService } from "@/services/auth";
 
@@ -17,6 +18,7 @@ const navigation = [
     items: [
       { label: "Dashboard", icon: LayoutDashboard, path: "/research/dashboard" },
       { label: "Nova Pesquisa", icon: Search, path: "/research/new" },
+      { label: "Busca Rápida", icon: SearchCheck, path: "/search" },
       { label: "Histórico", icon: FileText, path: "/research/history" },
       { label: "Configurações", icon: Settings, path: "/research/settings" },
     ],
