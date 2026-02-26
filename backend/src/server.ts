@@ -351,30 +351,42 @@ fastify.post('/search/inpi', async (request, reply) => {
 
 // ─── INPI Session + Search Helper ──────────────────────────────
 async function getInpiCookies(): Promise<string> {
-    // Anonymous login to get JSESSIONID + BUSCAID
-    // Must NOT follow redirects — cookies are on the 302 response
+    const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
     const loginUrl = 'https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login';
-    const response = await axios.get(loginUrl, {
+
+    // Step 1: Hit login — capture 302 + Set-Cookie WITHOUT following redirect
+    const step1 = await axios.get(loginUrl, {
         timeout: 15000,
         maxRedirects: 0,
-        validateStatus: (status) => status >= 200 && status < 400, // Accept 3xx
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml',
-            'Accept-Language': 'pt-BR,pt;q=0.9'
-        }
+        validateStatus: () => true, // Accept any status
+        headers: { 'User-Agent': UA, 'Accept': 'text/html', 'Accept-Language': 'pt-BR,pt;q=0.9' }
     });
 
-    // Extract all cookies from Set-Cookie headers
-    const setCookies = response.headers['set-cookie'];
-    if (!setCookies) throw new Error('No cookies from INPI login');
+    fastify.log.info(`INPI login step1: status=${step1.status}, has set-cookie=${!!step1.headers['set-cookie']}`);
 
-    const cookieParts: string[] = [];
-    for (const c of setCookies) {
-        const name = c.split(';')[0]; // "JSESSIONID=xxx" or "BUSCAID=xxx"
-        cookieParts.push(name);
+    // Extract cookies
+    const setCookies = step1.headers['set-cookie'];
+    if (!setCookies || setCookies.length === 0) {
+        throw new Error(`INPI login: no Set-Cookie headers (status=${step1.status})`);
     }
-    return cookieParts.join('; ');
+
+    const cookieStr = setCookies.map((c: string) => c.split(';')[0]).join('; ');
+    fastify.log.info(`INPI cookies: ${cookieStr}`);
+
+    // Step 2: Follow the redirect manually to activate the session
+    const location = step1.headers['location'];
+    if (location) {
+        const redirectUrl = location.startsWith('http') ? location : `https://busca.inpi.gov.br${location}`;
+        fastify.log.info(`INPI login step2: following redirect to ${redirectUrl}`);
+        await axios.get(redirectUrl, {
+            timeout: 15000,
+            maxRedirects: 5,
+            validateStatus: () => true,
+            headers: { 'User-Agent': UA, 'Accept': 'text/html', 'Cookie': cookieStr }
+        });
+    }
+
+    return cookieStr;
 }
 
 function parseInpiResults(html: string): any[] {
