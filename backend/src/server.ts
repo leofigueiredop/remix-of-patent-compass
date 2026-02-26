@@ -416,16 +416,36 @@ function searchInpiViaCurl(params: {
             { timeout: 15000 }
         );
 
-        // Step 2: POST advanced search with session cookies
-        const postParts: string[] = [];
-        postParts.push('Action=SearchAvancado');
-        postParts.push('RegisterPerPage=100');
-        if (params.number) postParts.push(`NumPedido=${encodeURIComponent(params.number.trim())}`);
-        if (params.titular) postParts.push(`NomeDepositante=${encodeURIComponent(params.titular.trim())}`);
-        if (params.inventor) postParts.push(`NomeInventor=${encodeURIComponent(params.inventor.trim())}`);
-        if (params.keywords) postParts.push(`Titulo=${encodeURIComponent(params.keywords.trim())}`);
+        // Step 2: POST advanced search — INPI requires ALL fields (even empty)
+        const fields: Record<string, string> = {
+            Action: 'SearchAvancado',
+            NumPedido: params.number?.trim() || '',
+            NumGru: '',
+            NumProtocolo: '',
+            NumPrioridade: '',
+            CodigoPct: '',
+            DataDeposito1: '',
+            DataDeposito2: '',
+            DataPrioridade1: '',
+            DataPrioridade2: '',
+            DataDepositoPCT1: '',
+            DataDepositoPCT2: '',
+            DataPublicacaoPCT1: '',
+            DataPublicacaoPCT2: '',
+            ClassificacaoIPC: '',
+            CatchWordIPC: '',
+            Titulo: params.keywords?.trim() || '',
+            Resumo: '',
+            NomeDepositante: params.titular?.trim() || '',
+            CpfCnpjDepositante: '',
+            NomeInventor: params.inventor?.trim() || '',
+            RegisterPerPage: '100',
+            botao: ' pesquisar » ',
+        };
 
-        const postBody = postParts.join('&');
+        const postBody = Object.entries(fields)
+            .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+            .join('&');
         fastify.log.info(`INPI curl search: ${postBody}`);
 
         const html = execSync(
