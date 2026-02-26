@@ -349,54 +349,95 @@ fastify.post('/search/inpi', async (request, reply) => {
     }
 });
 
-async function scrapeInpiBuscaWeb(keywords: string[], ipcCodes: string[]): Promise<any[]> {
-    // INPI Busca Web uses a search form that we can query via GET params
-    const query = keywords.join(' ');
-    const url = `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=SearchPatent&Query=${encodeURIComponent(query)}`;
+// ─── INPI Session + Search Helper ──────────────────────────────
+async function getInpiSession(): Promise<string> {
+    // Step 1: Anonymous login to get JSESSIONID
+    const loginUrl = 'https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login';
+    const response = await axios.get(loginUrl, {
+        timeout: 15000,
+        maxRedirects: 5,
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml',
+            'Accept-Language': 'pt-BR,pt;q=0.9'
+        }
+    });
 
+    // Extract JSESSIONID from Set-Cookie header
+    const cookies = response.headers['set-cookie'];
+    if (cookies) {
+        for (const cookie of cookies) {
+            const match = cookie.match(/JSESSIONID=([^;]+)/);
+            if (match) return match[1];
+        }
+    }
+    throw new Error('Failed to get INPI session');
+}
+
+function parseInpiResults(html: string): any[] {
+    const $ = cheerio.load(html);
+    const results: any[] = [];
+
+    // INPI results: links inside font.marcador contain patent numbers
+    // Each result row has the number as a link, then title, depositor, and dates in table cells
+    $('table tr').each((_, row) => {
+        const cells = $(row).find('td');
+        if (cells.length < 2) return;
+
+        // Look for patent number link (font.marcador a, or just a with patent-like text)
+        let number = '';
+        let title = '';
+
+        // Try common INPI patterns
+        const link = $(cells[0]).find('a').first();
+        if (link.length) {
+            number = link.text().trim();
+        } else {
+            number = $(cells[0]).text().trim();
+        }
+
+        // Patent numbers typically match BR followed by digits
+        if (!number || !number.match(/^(BR|PI|MU|PP)\s*\d/i)) return;
+
+        title = $(cells[1]).text().trim();
+        const depositor = cells.length > 2 ? $(cells[2]).text().trim() : '';
+        const date = cells.length > 3 ? $(cells[3]).text().trim() : '';
+
+        if (number && title) {
+            results.push({
+                publicationNumber: number,
+                title,
+                applicant: depositor || 'N/A',
+                date: date || '',
+                abstract: '',
+                classification: '',
+                source: 'INPI',
+                url: `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${encodeURIComponent(number)}`
+            });
+        }
+    });
+
+    return results;
+}
+
+async function scrapeInpiBuscaWeb(keywords: string[], _ipcCodes: string[]): Promise<any[]> {
     try {
-        const response = await axios.get(url, {
+        const sessionId = await getInpiSession();
+        const query = keywords.join(' ');
+        const searchUrl = `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=SearchPatent&Query=${encodeURIComponent(query)}`;
+
+        const response = await axios.get(searchUrl, {
             timeout: 30000,
             headers: {
-                'User-Agent': 'Mozilla/5.0 (compatible; PatentScoope/1.0)',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Accept': 'text/html',
-                'Accept-Language': 'pt-BR,pt;q=0.9'
+                'Accept-Language': 'pt-BR,pt;q=0.9',
+                'Cookie': `JSESSIONID=${sessionId}`
             }
         });
 
-        const $ = cheerio.load(response.data);
-        const results: any[] = [];
-
-        // INPI search results are typically in a table structure
-        // The exact selectors may need adjustment based on the current INPI page structure
-        $('table.resultado tr, table.listaResultado tr, .resultado-pesquisa tr').each((i, row) => {
-            if (i === 0) return; // Skip header row
-
-            const cells = $(row).find('td');
-            if (cells.length < 2) return;
-
-            const number = $(cells[0]).text().trim();
-            const title = $(cells[1]).text().trim();
-            const depositor = cells.length > 2 ? $(cells[2]).text().trim() : '';
-            const date = cells.length > 3 ? $(cells[3]).text().trim() : '';
-
-            if (number && title) {
-                results.push({
-                    publicationNumber: number,
-                    title,
-                    applicant: depositor || 'N/A',
-                    date: date || '',
-                    abstract: '', // INPI listing doesn't show abstract
-                    classification: '',
-                    source: 'INPI',
-                    url: `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${encodeURIComponent(number)}`
-                });
-            }
-        });
-
-        return results;
+        return parseInpiResults(response.data);
     } catch (error: any) {
-        // If scraping fails, return empty (INPI may be down or block automated access)
         fastify.log.warn(`INPI scrape failed: ${error.message}. Returning empty results.`);
         return [];
     }
@@ -417,7 +458,7 @@ fastify.post('/search/quick', async (request, reply) => {
 
     const results: any[] = [];
 
-    // 1. Search INPI via scraping
+    // 1. Search INPI via scraping (with session)
     try {
         const queryParts: string[] = [];
         if (number) queryParts.push(number.trim());
@@ -426,42 +467,21 @@ fastify.post('/search/quick', async (request, reply) => {
         if (keywords) queryParts.push(keywords.trim());
 
         const query = queryParts.join(' ');
-        const url = `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=SearchPatent&Query=${encodeURIComponent(query)}`;
+        const sessionId = await getInpiSession();
+        const searchUrl = `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=SearchPatent&Query=${encodeURIComponent(query)}`;
 
-        const response = await axios.get(url, {
+        const response = await axios.get(searchUrl, {
             timeout: 30000,
             headers: {
-                'User-Agent': 'Mozilla/5.0 (compatible; PatentScoope/1.0)',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Accept': 'text/html',
-                'Accept-Language': 'pt-BR,pt;q=0.9'
+                'Accept-Language': 'pt-BR,pt;q=0.9',
+                'Cookie': `JSESSIONID=${sessionId}`
             }
         });
 
-        const $ = cheerio.load(response.data);
-        $('table.resultado tr, table.listaResultado tr, .resultado-pesquisa tr').each((i, row) => {
-            if (i === 0) return;
-            const cells = $(row).find('td');
-            if (cells.length < 2) return;
-
-            const num = $(cells[0]).text().trim();
-            const title = $(cells[1]).text().trim();
-            const depositor = cells.length > 2 ? $(cells[2]).text().trim() : '';
-            const date = cells.length > 3 ? $(cells[3]).text().trim() : '';
-
-            if (num && title) {
-                results.push({
-                    publicationNumber: num,
-                    title,
-                    applicant: depositor || 'N/A',
-                    inventor: '',
-                    date: date || '',
-                    abstract: '',
-                    classification: '',
-                    source: 'INPI',
-                    url: `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${encodeURIComponent(num)}`
-                });
-            }
-        });
+        const inpiResults = parseInpiResults(response.data);
+        results.push(...inpiResults);
     } catch (err: any) {
         fastify.log.warn(`Quick search INPI failed: ${err.message}`);
     }
