@@ -14,8 +14,8 @@ COPY package*.json ./
 RUN npm ci --only=production
 COPY --from=builder /app/dist ./dist
 
-# Install ffmpeg for audio processing (required by fluent-ffmpeg)
-RUN apk add --no-cache ffmpeg
+# Install ffmpeg for audio processing + curl for INPI scraping
+RUN apk add --no-cache ffmpeg curl
 
 ENV PORT=3000
 EXPOSE 3000
