@@ -352,10 +352,12 @@ fastify.post('/search/inpi', async (request, reply) => {
 // ─── INPI Session + Search Helper ──────────────────────────────
 async function getInpiCookies(): Promise<string> {
     // Anonymous login to get JSESSIONID + BUSCAID
+    // Must NOT follow redirects — cookies are on the 302 response
     const loginUrl = 'https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login';
     const response = await axios.get(loginUrl, {
         timeout: 15000,
-        maxRedirects: 5,
+        maxRedirects: 0,
+        validateStatus: (status) => status >= 200 && status < 400, // Accept 3xx
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml',
