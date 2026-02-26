@@ -1,11 +1,12 @@
 services:
   # Frontend (Vite)
   web:
-    build: .
+    build:
+      context: .
+      args:
+        - VITE_API_URL=${VITE_API_URL:-http://localhost:3000}
     ports:
       - "5173:5173"
-    environment:
-      - VITE_API_URL=${VITE_API_URL:-http://localhost:3000}
     depends_on:
       - api
 
