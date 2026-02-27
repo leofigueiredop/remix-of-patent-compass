@@ -37,8 +37,9 @@ export default function Transcription() {
       {loading && (
         <LoadingTransition
           message="Estruturando briefing técnico..."
-          subMessage="Extraindo campos do texto com IA (pode levar até 60s no primeiro uso)"
+          subMessage="Extraindo campos do texto com IA (pode levar até 2 min no primeiro uso)"
           duration={5000}
+          onCancel={() => setLoading(false)}
           onComplete={() => { }}
         />
       )}

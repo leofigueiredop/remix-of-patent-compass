@@ -1,13 +1,13 @@
 import { useState, useEffect } from "react";
-import { Check, Loader2, Sparkles, BrainCircuit, Search, FileText } from "lucide-react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Check, Loader2, Sparkles, BrainCircuit, Search, FileText, X } from "lucide-react";
 
 interface LoadingTransitionProps {
   message?: string;
   subMessage?: string;
   duration?: number;
   onComplete?: () => void;
-  mode?: "simple" | "detailed"; // "detailed" shows the AI Consciousness Timeline
+  onCancel?: () => void;
+  mode?: "simple" | "detailed";
 }
 
 const steps = [
@@ -22,43 +22,50 @@ export default function LoadingTransition({
   subMessage = "Aguarde enquanto analisamos os dados",
   duration = 3000,
   onComplete,
+  onCancel,
   mode = "simple",
 }: LoadingTransitionProps) {
   const [progress, setProgress] = useState(0);
   const [currentStep, setCurrentStep] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
-    // Progress Bar Animation
     const startTime = Date.now();
     const interval = setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      const newProgress = Math.min((elapsed / duration) * 100, 100);
-      setProgress(newProgress);
+      const elapsedMs = Date.now() - startTime;
+      setElapsed(elapsedMs);
 
-      // Step Logic
+      // Progress fills to 90% in `duration`, then slowly creeps to simulate waiting
+      const basePct = Math.min((elapsedMs / duration) * 90, 90);
+      const extraPct = elapsedMs > duration ? Math.min((elapsedMs - duration) / 60000 * 10, 9.5) : 0;
+      setProgress(basePct + extraPct);
+
       if (mode === "detailed") {
         const stepDuration = duration / steps.length;
-        const stepIndex = Math.floor(elapsed / stepDuration);
+        const stepIndex = Math.floor(elapsedMs / stepDuration);
         if (stepIndex < steps.length) setCurrentStep(stepIndex);
       }
-
-      if (elapsed >= duration) {
-        clearInterval(interval);
-        setTimeout(() => {
-          onComplete?.();
-        }, 500);
-      }
-    }, 50);
+    }, 100);
 
     return () => clearInterval(interval);
-  }, [duration, onComplete, mode]);
+  }, [duration, mode]);
+
+  const formatTime = (ms: number) => {
+    const secs = Math.floor(ms / 1000);
+    return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
+  };
 
   if (mode === "detailed") {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-300">
         <div className="bg-slate-950 text-white rounded-xl shadow-2xl border border-slate-800 w-full max-w-md p-6 relative overflow-hidden">
-          {/* Background Glow */}
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent opacity-50"></div>
+
+          {onCancel && (
+            <button onClick={onCancel} className="absolute top-3 right-3 text-slate-500 hover:text-white transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          )}
 
           <div className="text-center mb-6">
             <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-slate-900 border border-slate-800 mb-3 animate-pulse">
@@ -92,7 +99,7 @@ export default function LoadingTransition({
 
           <div className="mt-8 pt-4 border-t border-slate-800">
             <div className="flex justify-between text-[10px] text-slate-400 mb-2 uppercase tracking-wider">
-              <span>Progresso Total</span>
+              <span>Tempo: {formatTime(elapsed)}</span>
               <span>{Math.round(progress)}%</span>
             </div>
             <div className="h-1.5 w-full bg-slate-900 rounded-full overflow-hidden">
@@ -108,27 +115,43 @@ export default function LoadingTransition({
   }
 
   return (
-    <Dialog open={true}>
-      <DialogContent className="sm:max-w-md flex flex-col items-center justify-center p-10 gap-6 [&>button]:hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="bg-card rounded-xl shadow-2xl border w-full max-w-md p-10 flex flex-col items-center gap-6 relative">
+        {onCancel && (
+          <button onClick={onCancel} className="absolute top-4 right-4 text-muted-foreground hover:text-foreground transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        )}
+
         <div className="relative">
           <div className="w-16 h-16 rounded-full border-4 border-muted flex items-center justify-center">
             <Loader2 className="w-8 h-8 text-primary animate-spin" />
           </div>
-          <div className="absolute inset-0 rounded-full border-4 border-primary border-t-transparent animate-spin duration-1000" />
+          <div className="absolute inset-0 rounded-full border-4 border-primary border-t-transparent animate-spin" style={{ animationDuration: '1.5s' }} />
         </div>
 
         <div className="text-center space-y-2">
           <h3 className="text-lg font-semibold">{message}</h3>
           <p className="text-sm text-muted-foreground">{subMessage}</p>
+          {elapsed > 15000 && (
+            <p className="text-xs text-muted-foreground/60 animate-pulse">
+              {elapsed > 60000
+                ? "O modelo está demorando mais que o normal..."
+                : `Aguardando resposta da IA... (${formatTime(elapsed)})`
+              }
+            </p>
+          )}
         </div>
 
-        <div className="w-full max-w-[200px] h-1.5 bg-muted rounded-full overflow-hidden">
-          <div
-            className="h-full bg-primary transition-all duration-300 ease-out"
-            style={{ width: `${progress}%` }}
-          />
+        <div className="w-full max-w-[200px]">
+          <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+            <div
+              className="h-full bg-primary transition-all duration-300 ease-out"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   );
 }
