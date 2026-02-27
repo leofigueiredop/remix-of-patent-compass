@@ -21,8 +21,10 @@ interface AnalyzedPatent {
   abstract: string;
   selected: boolean;
   riskLevel: "high" | "medium" | "low";
+  score: number;
   comments: string;
   url?: string;
+  classification?: string;
 }
 
 export default function Analysis() {
@@ -33,20 +35,30 @@ export default function Analysis() {
 
   useEffect(() => {
     const incomingResults = location.state?.results as any[];
+    const analyzedData = location.state?.analyzed as any[];
 
     if (incomingResults && incomingResults.length > 0) {
-      setPatents(incomingResults.map((p, idx) => ({
-        publicationNumber: p.publicationNumber || p.number || `PAT-${idx}`,
-        title: p.title || "Sem título",
-        applicant: p.applicant || "Desconhecido",
-        date: p.date || "",
-        abstract: p.abstract || "",
-        id: p.publicationNumber || p.id || `id-${idx}`,
-        selected: false,
-        riskLevel: p.riskLevel || "medium",
-        comments: p.justificativa || p.comments || "",
-        url: p.url,
-      })));
+      setPatents(incomingResults.map((p, idx) => {
+        // Merge AI analysis if available
+        const analysis = analyzedData?.find(
+          (a: any) => a.publicationNumber === (p.publicationNumber || p.number)
+        ) || analyzedData?.[idx];
+
+        return {
+          publicationNumber: p.publicationNumber || p.number || `PAT-${idx}`,
+          title: p.title || "Sem título",
+          applicant: p.applicant || "Desconhecido",
+          date: p.date || "",
+          abstract: p.abstract || "",
+          classification: p.classification || "",
+          id: p.publicationNumber || p.id || `id-${idx}`,
+          selected: (analysis?.riskLevel === "high" || analysis?.riskLevel === "medium") || false,
+          riskLevel: analysis?.riskLevel || "medium",
+          score: analysis?.score || 0,
+          comments: analysis?.justificativa || analysis?.comments || "",
+          url: p.url,
+        };
+      }));
     }
   }, [location.state]);
 
@@ -70,6 +82,15 @@ export default function Analysis() {
     }, 2000);
   };
 
+  const riskColor = (level: string) => {
+    switch (level) {
+      case "high": return "bg-red-500/10 border-red-500/30 text-red-600";
+      case "medium": return "bg-amber-500/10 border-amber-500/30 text-amber-600";
+      case "low": return "bg-green-500/10 border-green-500/30 text-green-600";
+      default: return "";
+    }
+  };
+
   return (
     <AppLayout>
       {loading && (
@@ -86,7 +107,10 @@ export default function Analysis() {
         <div>
           <h1 className="text-2xl font-bold mb-1">Análise de Similaridade e Seleção</h1>
           <p className="text-muted-foreground text-sm">
-            Selecione as patentes relevantes para o relatório e adicione seus comentários técnicos.
+            {patents.some(p => p.score > 0)
+              ? "A IA analisou as patentes. Revise os resultados e selecione as relevantes para o relatório."
+              : "Selecione as patentes relevantes para o relatório e adicione seus comentários técnicos."
+            }
           </p>
         </div>
 
@@ -100,16 +124,24 @@ export default function Analysis() {
                   className="mt-1.5"
                 />
                 <div className="flex-1 space-y-1">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
                     <CardTitle className="text-base font-semibold leading-tight">
                       {patent.title}
                     </CardTitle>
-                    <Badge variant="outline" className="font-mono text-[10px]">
-                      {patent.publicationNumber}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      {patent.score > 0 && (
+                        <Badge className={`text-[10px] ${riskColor(patent.riskLevel)}`}>
+                          {patent.score}% sobreposição
+                        </Badge>
+                      )}
+                      <Badge variant="outline" className="font-mono text-[10px]">
+                        {patent.publicationNumber}
+                      </Badge>
+                    </div>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {patent.applicant} • {patent.date ? new Date(patent.date.toString().replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3')).toLocaleDateString("pt-BR") : "Data N/A"}
+                    {patent.applicant} • {patent.date || "Data N/A"}
+                    {patent.classification && ` • IPC: ${patent.classification}`}
                   </p>
                 </div>
               </CardHeader>

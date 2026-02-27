@@ -1,25 +1,15 @@
 import { useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { ExternalLink } from "lucide-react";
 import LoadingTransition from "@/components/LoadingTransition";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import AppLayout from "@/components/AppLayout";
 import WizardSteps from "@/components/WizardSteps";
+import { useResearch } from "@/contexts/ResearchContext";
+import { aiService } from "@/services/ai";
 
 const steps = ["Briefing", "Transcrição", "Briefing Técnico", "Palavras-chave", "Resultados", "Análise", "Relatório"];
-
-interface SearchResultItem {
-  id: string;
-  title: string;
-  number: string;
-  applicant: string;
-  date: string;
-  abstract: string;
-  score: number;
-  source: string;
-  url?: string;
-}
 
 function ScoreBadge({ score }: { score: number }) {
   const color =
@@ -35,17 +25,12 @@ function ScoreBadge({ score }: { score: number }) {
 
 export default function SearchResults() {
   const navigate = useNavigate();
-  const location = useLocation();
+  const { searchResults, briefing, cqlQuery } = useResearch();
   const [tab, setTab] = useState("espacenet");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Get state from navigation (set by Keywords page after search)
-  const { results, query } = (location.state || {}) as {
-    results?: { espacenet?: any[]; inpi?: any[] };
-    query?: string;
-  };
-
-  const espacenetResults: SearchResultItem[] = (results?.espacenet || []).map((p: any) => ({
+  const espacenetResults = (searchResults?.espacenet || []).map((p: any) => ({
     id: p.publicationNumber || p.number,
     title: p.title,
     number: p.publicationNumber || p.number,
@@ -55,33 +40,52 @@ export default function SearchResults() {
     score: p.score || 0,
     source: "Espacenet",
     url: p.url,
+    classification: p.classification || "",
   }));
 
-  const inpiResults: SearchResultItem[] = (results?.inpi || []).map((p: any, idx: number) => ({
-    id: p.numero || `inpi-${idx}`,
+  const inpiResults = (searchResults?.inpi || []).map((p: any, idx: number) => ({
+    id: p.publicationNumber || p.numero || `inpi-${idx}`,
     title: p.titulo || p.title || "Sem título",
-    number: p.numero || p.number || "",
+    number: p.publicationNumber || p.numero || p.number || "",
     applicant: p.titular || p.applicant || "Desconhecido",
     date: p.dataDeposito || p.date || "",
     abstract: p.resumo || p.abstract || "",
     score: p.score || 0,
     source: "INPI",
     url: p.url,
+    classification: p.classification || "",
   }));
 
   const patentList = tab === "inpi" ? inpiResults : espacenetResults;
-  const totalResults = espacenetResults.length + inpiResults.length;
+  const allResults = [...espacenetResults, ...inpiResults];
+  const totalResults = allResults.length;
+
+  const handleAnalyze = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      // Call AI analysis with all patents + briefing
+      const response = await aiService.analyzePatents(allResults, briefing);
+      navigate("/research/analysis", {
+        state: { results: allResults, analyzed: response.patents }
+      });
+    } catch (err: any) {
+      // If AI fails, proceed without AI analysis
+      console.warn("AI analysis failed, proceeding manually:", err.message);
+      navigate("/research/analysis", {
+        state: { results: allResults }
+      });
+    }
+  };
 
   return (
     <AppLayout>
       {loading && (
         <LoadingTransition
-          message="Analisando similaridade técnica..."
-          subMessage="Comparando reivindicações e classificações"
-          duration={3500}
-          onComplete={() => navigate("/research/analysis", {
-            state: { results: [...espacenetResults, ...inpiResults] }
-          })}
+          message="Analisando similaridade técnica com IA..."
+          subMessage="Comparando reivindicações e classificações (pode levar alguns minutos)"
+          duration={5000}
+          onComplete={() => { }}
         />
       )}
       <WizardSteps currentStep={4} steps={steps} />
@@ -97,9 +101,15 @@ export default function SearchResults() {
           </p>
         </div>
 
-        {query && (
+        {error && (
+          <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg">
+            {error}
+          </div>
+        )}
+
+        {cqlQuery && (
           <div className="bg-muted/30 p-3 rounded-lg border text-xs font-mono text-muted-foreground break-all">
-            QUERY: {query}
+            QUERY: {cqlQuery}
           </div>
         )}
 
@@ -116,17 +126,31 @@ export default function SearchResults() {
           <TabsContent value={tab} className="mt-4 space-y-3">
             {patentList.map((patent) => (
               <div key={patent.id} className="patent-card flex items-start gap-4">
-                <ScoreBadge score={patent.score} />
+                {patent.score > 0 && <ScoreBadge score={patent.score} />}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium mb-1">{patent.title}</p>
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                    <span className="font-mono">{patent.number}</span>
-                    <span>{patent.applicant}</span>
-                    <span>{patent.date ? new Date(patent.date.toString().replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3')).toLocaleDateString("pt-BR") : "N/A"}</span>
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <span className="text-xs font-mono font-medium text-accent bg-accent/10 px-2 py-0.5 rounded">
+                      {patent.number}
+                    </span>
+                    <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                      {patent.source}
+                    </span>
+                    {patent.date && (
+                      <span className="text-xs text-muted-foreground">{patent.date}</span>
+                    )}
                   </div>
-                  <p className="text-xs text-muted-foreground mt-2 line-clamp-2">
-                    {patent.abstract}
-                  </p>
+                  <p className="text-sm font-medium mb-1">{patent.title}</p>
+                  <p className="text-xs text-muted-foreground">{patent.applicant}</p>
+                  {patent.abstract && (
+                    <p className="text-xs text-muted-foreground mt-2 line-clamp-2">
+                      {patent.abstract}
+                    </p>
+                  )}
+                  {patent.classification && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      <span className="font-medium">IPC:</span> {patent.classification}
+                    </p>
+                  )}
                 </div>
                 {patent.url && (
                   <a href={patent.url} target="_blank" rel="noopener noreferrer">
@@ -151,8 +175,8 @@ export default function SearchResults() {
             Voltar
           </Button>
           <Button
-            onClick={() => setLoading(true)}
-            disabled={totalResults === 0}
+            onClick={handleAnalyze}
+            disabled={totalResults === 0 || loading}
           >
             Prosseguir para Análise
           </Button>
