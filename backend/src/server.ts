@@ -449,7 +449,7 @@ function searchInpiViaCurl(params: {
         fastify.log.info(`INPI curl search: ${postBody}`);
 
         const html = execSync(
-            `curl -s -b ${cookieFile} -X POST 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController' -d '${postBody}'`,
+            `curl -s -b ${cookieFile} -X POST 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController' -d '${postBody}' | iconv -f ISO-8859-1 -t UTF-8`,
             { timeout: 30000, encoding: 'utf-8', maxBuffer: 5 * 1024 * 1024 }
         );
 

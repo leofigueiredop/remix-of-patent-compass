@@ -14,8 +14,9 @@ COPY package*.json ./
 RUN npm ci --only=production
 COPY --from=builder /app/dist ./dist
 
-# Install ffmpeg for audio processing + curl for INPI scraping
-RUN apk add --no-cache ffmpeg curl
+# Install ffmpeg for audio, curl + iconv for INPI scraping
+RUN apk add --no-cache ffmpeg curl gnu-libiconv
+ENV LD_PRELOAD=/usr/lib/preloadable_libiconv.so
 
 ENV PORT=3000
 EXPOSE 3000
