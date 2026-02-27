@@ -468,6 +468,61 @@ async function scrapeInpiBuscaWeb(keywords: string[], _ipcCodes: string[]): Prom
     return searchInpiViaCurl({ keywords: keywords.join(' ') });
 }
 
+// ─── GET /search/inpi/detail/:codPedido ────────────────────────
+fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
+    const { codPedido } = request.params as { codPedido: string };
+    if (!codPedido) return reply.code(400).send({ error: 'CodPedido é obrigatório' });
+
+    const cookieFile = `/tmp/inpi_detail_${randomUUID()}.txt`;
+    try {
+        // Login anônimo
+        execSync(`curl -s -c ${cookieFile} -L 'https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login' -o /dev/null`, { timeout: 15000 });
+
+        // Buscar página de detalhe
+        const html = execSync(
+            `curl -s -b ${cookieFile} 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${codPedido}' | iconv -f ISO-8859-1 -t UTF-8`,
+            { timeout: 30000, encoding: 'utf-8', maxBuffer: 5 * 1024 * 1024 }
+        );
+
+        try { execSync(`rm -f ${cookieFile}`); } catch { }
+
+        const $ = cheerio.load(html);
+        const detail: Record<string, string> = {};
+
+        // INPI detail page has <td> with labels followed by <td> with values
+        $('table tr').each((_, row) => {
+            const cells = $(row).find('td');
+            if (cells.length >= 2) {
+                const label = $(cells[0]).text().trim().toLowerCase().replace(/[:\s]+$/g, '').trim();
+                const value = $(cells[1]).text().trim();
+
+                if (label.includes('depositante') || label.includes('titular')) detail.applicant = value;
+                if (label.includes('inventor')) detail.inventor = value;
+                if (label.includes('resumo')) detail.abstract = value;
+                if (label.includes('classifica')) detail.classification = value;
+                if (label.includes('dep') && label.includes('sito') && !detail.filingDate) detail.filingDate = value;
+                if (label.includes('t') && label.includes('tulo') && !detail.title) detail.title = value;
+                if (label.includes('despacho') || label.includes('situa')) detail.status = value;
+            }
+        });
+
+        // Also try to extract abstract from specific div if exists
+        const resumoDiv = $('div.resumo, #resumo, .abstract').text().trim();
+        if (resumoDiv && !detail.abstract) detail.abstract = resumoDiv;
+
+        return {
+            codPedido,
+            ...detail,
+            source: 'INPI',
+            url: `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${codPedido}`
+        };
+    } catch (error: any) {
+        try { execSync(`rm -f ${cookieFile}`); } catch { }
+        fastify.log.warn(`INPI detail scrape failed: ${error.message}`);
+        return reply.code(500).send({ error: 'Falha ao buscar detalhe da patente', details: error.message });
+    }
+});
+
 // ─── POST /search/quick ────────────────────────────────────────
 fastify.post('/search/quick', async (request, reply) => {
     const { number, titular, inventor, keywords } = request.body as {
