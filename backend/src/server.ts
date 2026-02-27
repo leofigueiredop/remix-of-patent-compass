@@ -50,7 +50,7 @@ function saveUsers(users: StoredUser[]): void {
 // ─── Environment ───────────────────────────────────────────────
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://ollama:11434';
 const WHISPER_BASE_URL = process.env.WHISPER_BASE_URL || 'http://whisper:8000';
-const PRIMARY_MODEL = process.env.OLLAMA_PRIMARY_MODEL || 'qwen2.5:14b-instruct-q4_K_M';
+const PRIMARY_MODEL = process.env.OLLAMA_PRIMARY_MODEL || 'llama3.1:8b-instruct-q4_K_M';
 const SECONDARY_MODEL = process.env.OLLAMA_SECONDARY_MODEL || 'llama3.1:8b-instruct-q4_K_M';
 const OPS_CONSUMER_KEY = process.env.OPS_CONSUMER_KEY || '';
 const OPS_CONSUMER_SECRET = process.env.OPS_CONSUMER_SECRET || '';
@@ -84,7 +84,7 @@ async function getOpsToken(): Promise<string> {
 }
 
 // ─── Ollama Helper ─────────────────────────────────────────────
-async function ollamaGenerate(model: string, prompt: string, timeout = 120000): Promise<string> {
+async function ollamaGenerate(model: string, prompt: string, timeout = 300000): Promise<string> {
     const response = await axios.post(`${OLLAMA_BASE_URL}/api/generate`, {
         model,
         prompt,
