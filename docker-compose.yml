@@ -23,7 +23,7 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-patent_compass}
       - OLLAMA_BASE_URL=http://ollama:11434
       - WHISPER_BASE_URL=http://whisper:8000
-      - OLLAMA_PRIMARY_MODEL=${OLLAMA_PRIMARY_MODEL:-qwen2.5:14b-instruct-q4_K_M}
+      - OLLAMA_PRIMARY_MODEL=${OLLAMA_PRIMARY_MODEL:-llama3.1:8b-instruct-q4_K_M}
       - OLLAMA_SECONDARY_MODEL=${OLLAMA_SECONDARY_MODEL:-llama3.1:8b-instruct-q4_K_M}
       - OPS_CONSUMER_KEY=${OPS_CONSUMER_KEY:-}
       - OPS_CONSUMER_SECRET=${OPS_CONSUMER_SECRET:-}
