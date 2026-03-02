@@ -26,4 +26,4 @@ ENV LD_PRELOAD=/usr/lib/preloadable_libiconv.so
 ENV PORT=3000
 EXPOSE 3000
 
-CMD npx prisma migrate deploy && node dist/server.js
+CMD npx prisma db push --accept-data-loss && node dist/server.js
