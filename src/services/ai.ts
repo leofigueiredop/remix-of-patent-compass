@@ -30,8 +30,16 @@ export const aiService = {
         diferenciais: string;
         aplicacoes: string;
     }> => {
-        const response = await api.post('/briefing', { text }, { timeout: 180000 });
+        const response = await api.post('/briefing', { text }, { timeout: 240000 });
         return response.data;
+    },
+
+    /**
+     * Generates a single field of the technical briefing.
+     */
+    generateBriefingField: async (text: string, field: string): Promise<string> => {
+        const response = await api.post('/briefing', { text, field }, { timeout: 120000 });
+        return response.data[field];
     },
 
     /**

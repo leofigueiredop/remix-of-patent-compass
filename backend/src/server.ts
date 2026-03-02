@@ -164,23 +164,47 @@ fastify.post('/transcribe', async (request, reply) => {
 
 // ─── POST /briefing ────────────────────────────────────────────
 fastify.post('/briefing', async (request, reply) => {
-    const { text } = request.body as { text: string };
+    const { text, field } = request.body as { text: string; field?: string };
     if (!text) return reply.code(400).send({ error: 'Text is required' });
 
+    const prompts: Record<string, string> = {
+        problemaTecnico: "Trabalhe como um especialista em patentes. Analise o texto e descreva APENAS o PROBLEMA TÉCNICO que a invenção resolve. Seja conciso e técnico.",
+        solucaoProposta: "Trabalhe como um especialista em patentes. Analise o texto e descreva APENAS a SOLUÇÃO TÉCNICA proposta pela invenção. Seja conciso e técnico.",
+        diferenciais: "Trabalhe como um especialista em patentes. Analise o texto e extraia uma LISTA de DIFERENCIAIS técnicos em relação ao estado da arte. Responda em tópicos.",
+        aplicacoes: "Trabalhe como um especialista em patentes. Analise o texto e identifique as APLICAÇÕES INDUSTRIAIS e MERCADOS-ALVO da invenção."
+    };
+
+    // Caso o field seja especificado, gera apenas ele para economia de tokens e tempo
+    if (field && prompts[field]) {
+        const prompt = `${prompts[field]}
+        
+Text:
+${text.substring(0, 15000)}`;
+
+        try {
+            const raw = await ollamaGenerate(PRIMARY_MODEL, prompt, 120000);
+            return { [field]: raw.replace(/["{}]/g, '').trim() }; // Limpeza simples caso o LLM tente ser prolixo
+        } catch (error: any) {
+            request.log.error(error);
+            return reply.code(500).send({ error: `Failed to generate ${field}`, details: error.message });
+        }
+    }
+
+    // Comportamento legado (gera tudo de uma vez)
     const prompt = `Você é um especialista em patentes brasileiro. Analise o texto abaixo e extraia um briefing técnico estruturado.
 Responda APENAS um JSON válido com estes campos exatos:
 {
-  "problemaTecnico": "descrição do problema técnico que a invenção resolve",
-  "solucaoProposta": "descrição da solução técnica proposta",
-  "diferenciais": "lista dos diferenciais em relação ao estado da arte",
-  "aplicacoes": "aplicações industriais e mercados-alvo"
+  "problemaTecnico": "descrição do problema técnico",
+  "solucaoProposta": "descrição da solução técnica",
+  "diferenciais": "lista dos diferenciais",
+  "aplicacoes": "aplicações industriais"
 }
 
 Texto:
 ${text.substring(0, 15000)}`;
 
     try {
-        const raw = await ollamaGenerate(PRIMARY_MODEL, prompt, 180000);
+        const raw = await ollamaGenerate(PRIMARY_MODEL, prompt, 240000);
         const parsed = JSON.parse(raw);
         return parsed;
     } catch (error: any) {

@@ -15,6 +15,7 @@ export default function Transcription() {
   const { transcription, setTranscription, setBriefing } = useResearch();
   const [text, setText] = useState(transcription);
   const [loading, setLoading] = useState(false);
+  const [loadingStep, setLoadingStep] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const handleConfirm = async () => {
@@ -23,8 +24,26 @@ export default function Transcription() {
     setTranscription(text);
 
     try {
-      const result = await aiService.generateBriefing(text);
-      setBriefing(result);
+      // Geração incremental field-by-field para melhor UX e evitar timeout
+      setLoadingStep("Analisando problema técnico...");
+      const problemaTecnico = await aiService.generateBriefingField(text, "problemaTecnico");
+
+      setLoadingStep("Estruturando solução proposta...");
+      const solucaoProposta = await aiService.generateBriefingField(text, "solucaoProposta");
+
+      setLoadingStep("Identificando diferenciais...");
+      const diferenciais = await aiService.generateBriefingField(text, "diferenciais");
+
+      setLoadingStep("Mapeando aplicações...");
+      const aplicacoes = await aiService.generateBriefingField(text, "aplicacoes");
+
+      setBriefing({
+        problemaTecnico,
+        solucaoProposta,
+        diferenciais,
+        aplicacoes
+      });
+
       navigate("/research/structured");
     } catch (err: any) {
       setError(err.message || "Erro ao gerar briefing. O LLM pode estar carregando.");
@@ -36,7 +55,7 @@ export default function Transcription() {
     <AppLayout>
       {loading && (
         <LoadingTransition
-          message="Estruturando briefing técnico..."
+          message={loadingStep || "Estruturando briefing técnico..."}
           subMessage="Extraindo campos do texto com IA (pode levar até 2 min no primeiro uso)"
           duration={5000}
           onCancel={() => setLoading(false)}
