@@ -28,8 +28,16 @@ export interface AnalyzedPatent extends PatentResult {
 }
 
 export interface SearchStrategy {
-    keywords_pt: string[];
-    keywords_en: string[];
+    keywords_pt?: string[]; // Mantido como fallback opcional
+    keywords_en?: string[]; // Mantido como fallback opcional
+    blocks?: {
+        id: string;
+        connector: "AND" | "OR";
+        groups: {
+            id: string;
+            terms: string[];
+        }[];
+    }[];
     ipc_codes: string[];
 }
 

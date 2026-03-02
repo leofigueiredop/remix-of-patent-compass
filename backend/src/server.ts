@@ -233,15 +233,33 @@ fastify.post('/strategy', async (request, reply) => {
     const { briefing } = request.body as { briefing: any };
     if (!briefing) return reply.code(400).send({ error: 'Briefing object is required' });
 
-    const prompt = `Com base no briefing técnico abaixo de uma invenção, gere palavras-chave de busca e classificações IPC/CPC para pesquisa de anterioridade em bases de patentes.
-Responda APENAS um JSON válido com:
+    const prompt = `Com base no briefing técnico de uma invenção fornecido abaixo, crie uma estratégia de busca para anterioridade (patentes).
+A estratégia DEVE ser estruturada em "camadas lógicas" (blocks). Cada camada representa um conceito central ou eixo da invenção.
+Dentro de cada camada (block), crie 1 a 3 "grupos" (groups). Cada grupo deve conter sinônimos de uma vertente do conceito, misturando termos em Português e Inglês no mesmo grupo.
+A lógica visualizada será: (Grupo1 OR Grupo2) AND (Grupo3 OR Grupo4) AND etc.
+Portanto:
+ - Termos dentro do mesmo grupo são juntados com OR (são sinônimos diretos, ex: "artificial intelligence", "inteligência artificial", "neural network").
+ - Grupos dentro da mesma camada representam subtópicos do mesmo eixo e devem ter lógia OR entre si.
+ - Camadas diferentes (blocks) conectam conceitos diferentes com AND.
+
+Responda APENAS um JSON estritamente neste formato:
 {
-  "keywords_pt": ["array de 5-8 palavras-chave em português"],
-  "keywords_en": ["array de 5-8 palavras-chave em inglês"],
+  "blocks": [
+    {
+      "id": "b1",
+      "connector": "AND",
+      "groups": [
+        {
+          "id": "g1",
+          "terms": ["termo em pt", "termo em en", "sinônimo pt", "synonym en"]
+        }
+      ]
+    }
+  ],
   "ipc_codes": ["array de 3-5 códigos IPC relevantes no formato X00X 00/00"]
 }
 
-Briefing:
+Briefing da invenção:
 ${JSON.stringify(briefing)}`;
 
     try {

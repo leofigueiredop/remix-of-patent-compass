@@ -44,16 +44,21 @@ export default function Keywords() {
   // Populate from strategy when available
   useEffect(() => {
     if (strategy) {
-      const ptTerms = strategy.keywords_pt || [];
-      const enTerms = strategy.keywords_en || [];
-      setBlocks([{
-        id: "b1",
-        connector: "AND",
-        groups: [
-          { id: "g1", terms: ptTerms.slice(0, 4) },
-          { id: "g2", terms: enTerms.slice(0, 4) }
-        ].filter(g => g.terms.length > 0)
-      }]);
+      if (strategy.blocks && strategy.blocks.length > 0) {
+        setBlocks(strategy.blocks);
+      } else {
+        // Fallback for old strategy format
+        const ptTerms = strategy.keywords_pt || [];
+        const enTerms = strategy.keywords_en || [];
+        setBlocks([{
+          id: "b1",
+          connector: "AND",
+          groups: [
+            { id: "g1", terms: ptTerms.slice(0, 4) },
+            { id: "g2", terms: enTerms.slice(0, 4) }
+          ].filter(g => g.terms.length > 0)
+        }]);
+      }
       setClassifications(strategy.ipc_codes || []);
     }
   }, [strategy]);

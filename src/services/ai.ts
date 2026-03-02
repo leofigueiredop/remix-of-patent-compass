@@ -58,8 +58,14 @@ export const aiService = {
      * Generates search keywords and IPC codes from a briefing using the secondary LLM.
      */
     generateStrategy: async (briefing: any): Promise<{
-        keywords_pt: string[];
-        keywords_en: string[];
+        blocks: {
+            id: string;
+            connector: "AND" | "OR";
+            groups: {
+                id: string;
+                terms: string[];
+            }[];
+        }[];
         ipc_codes: string[];
     }> => {
         const response = await api.post('/strategy', { briefing }, { timeout: 60000 });
