@@ -161,25 +161,39 @@ export default function Keywords() {
     return `${query}${classQuery}`;
   };
 
-  // Collect all keywords for INPI search
-  const getAllKeywords = (): string[] => {
-    const allTerms: string[] = [];
-    blocks.forEach(b => b.groups.forEach(g => allTerms.push(...g.terms)));
-    return allTerms;
+  // Construir a string booleana nativa para o INPI
+  const getInpiQuery = (): string => {
+    const blockQueries = blocks.map(block => {
+      const blockTerms = block.groups.flatMap(g => g.terms).filter(t => t.trim() !== "");
+      if (blockTerms.length === 0) return "";
+
+      const orString = blockTerms.map(t => `"${t}"`).join(" OR ");
+      return `(${orString})`;
+    }).filter(q => q !== "");
+
+    if (blockQueries.length === 0) return "";
+
+    let query = blockQueries[0];
+    for (let i = 1; i < blockQueries.length; i++) {
+      query = `${query} ${blocks[i - 1].connector} ${blockQueries[i]}`;
+    }
+
+    return query;
   };
 
   const handleExecution = async () => {
     setError(null);
     setLoading(true);
     const cql = renderQuery(true);
+    const inpiQuery = getInpiQuery();
     setCqlQuery(cql);
 
     try {
-      const results = await aiService.searchPatents(cql, getAllKeywords(), classifications);
+      const results = await aiService.searchPatents(cql, inpiQuery, classifications);
       setSearchResults(results);
       navigate("/research/results");
     } catch (err: any) {
-      setError(err.message || "Erro na busca. Verifique as credenciais do Espacenet.");
+      setError(err.message || "Erro na busca. Verifique as credenciais do Espacenet e INPI.");
       setLoading(false);
     }
   };

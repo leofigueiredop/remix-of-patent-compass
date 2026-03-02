@@ -610,13 +610,16 @@ fastify.post('/search/quick', async (request, reply) => {
 
 // ─── POST /search (unified) ────────────────────────────────────
 fastify.post('/search', async (request, reply) => {
-    const { cql, keywords, ipc_codes } = request.body as {
+    const { cql, inpiQuery, keywords, ipc_codes } = request.body as {
         cql: string;
-        keywords: string[];
+        inpiQuery?: string;
+        keywords?: string[];
         ipc_codes: string[];
     };
 
     const results: { espacenet: any[]; inpi: any[] } = { espacenet: [], inpi: [] };
+
+    const inpiStr = inpiQuery ? inpiQuery : (keywords?.length ? keywords.join(' ') : '');
 
     // Run both searches in parallel
     const [espacenetResult, inpiResult] = await Promise.allSettled([
@@ -634,7 +637,7 @@ fastify.post('/search', async (request, reply) => {
                 throw err;
             }
         })() : Promise.resolve([]),
-        keywords?.length ? scrapeInpiBuscaWeb(keywords, ipc_codes || []) : Promise.resolve([])
+        inpiStr ? scrapeInpiBuscaWeb([inpiStr], ipc_codes || []) : Promise.resolve([])
     ]);
 
     if (espacenetResult.status === 'fulfilled') results.espacenet = espacenetResult.value;
