@@ -13,39 +13,16 @@ import * as cheerio from 'cheerio';
 import bcrypt from 'bcryptjs';
 import { execSync } from 'child_process';
 import { randomUUID } from 'crypto';
+import { PrismaClient } from '@prisma/client';
 
 const fastify = Fastify({ logger: true });
+const prisma = new PrismaClient();
 
 fastify.register(cors, { origin: '*' });
 fastify.register(multipart);
 fastify.register(jwt, { secret: process.env.JWT_SECRET || 'patent-scope-secret-change-me' });
 
-// ─── Simple User Store (JSON file) ─────────────────────────────
-const DATA_DIR = process.env.DATA_DIR || '/app/data';
-const USERS_FILE = path.join(DATA_DIR, 'users.json');
-
-interface StoredUser {
-    id: string;
-    email: string;
-    name: string;
-    password_hash: string;
-    role: string;
-    created_at: string;
-}
-
-function loadUsers(): StoredUser[] {
-    try {
-        if (fs.existsSync(USERS_FILE)) {
-            return JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
-        }
-    } catch { /* ignore */ }
-    return [];
-}
-
-function saveUsers(users: StoredUser[]): void {
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
-}
+// Database will be used via Prisma
 
 // ─── Environment ───────────────────────────────────────────────
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://ollama:11434';
@@ -100,22 +77,22 @@ fastify.post('/auth/register', async (request, reply) => {
     if (!email || !password) return reply.code(400).send({ error: 'Email e senha são obrigatórios' });
     if (password.length < 6) return reply.code(400).send({ error: 'Senha deve ter no mínimo 6 caracteres' });
 
-    const users = loadUsers();
-    if (users.find(u => u.email === email)) {
+    const existingUser = await prisma.user.findUnique({ where: { email } });
+    if (existingUser) {
         return reply.code(409).send({ error: 'Este e-mail já está cadastrado' });
     }
 
+    const userCount = await prisma.user.count();
     const hash = await bcrypt.hash(password, 10);
-    const newUser: StoredUser = {
-        id: crypto.randomUUID(),
-        email,
-        name: name || email.split('@')[0],
-        password_hash: hash,
-        role: users.length === 0 ? 'admin' : 'user', // First user is admin
-        created_at: new Date().toISOString()
-    };
-    users.push(newUser);
-    saveUsers(users);
+
+    const newUser = await prisma.user.create({
+        data: {
+            email,
+            name: name || email.split('@')[0],
+            password_hash: hash,
+            role: userCount === 0 ? 'admin' : 'user'
+        }
+    });
 
     const token = fastify.jwt.sign({ id: newUser.id, email: newUser.email, role: newUser.role }, { expiresIn: '7d' });
     return { token, user: { id: newUser.id, email: newUser.email, name: newUser.name, role: newUser.role } };
@@ -126,8 +103,7 @@ fastify.post('/auth/login', async (request, reply) => {
     const { email, password } = request.body as { email: string; password: string };
     if (!email || !password) return reply.code(400).send({ error: 'Email e senha são obrigatórios' });
 
-    const users = loadUsers();
-    const user = users.find(u => u.email === email);
+    const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return reply.code(401).send({ error: 'Credenciais inválidas' });
 
     const valid = await bcrypt.compare(password, user.password_hash);
@@ -141,9 +117,8 @@ fastify.post('/auth/login', async (request, reply) => {
 fastify.get('/auth/me', async (request, reply) => {
     try {
         await request.jwtVerify();
-        const { id, email, role } = request.user as any;
-        const users = loadUsers();
-        const user = users.find(u => u.id === id);
+        const { id } = request.user as any;
+        const user = await prisma.user.findUnique({ where: { id } });
         if (!user) return reply.code(401).send({ error: 'Usuário não encontrado' });
         return { id: user.id, email: user.email, name: user.name, role: user.role };
     } catch {
