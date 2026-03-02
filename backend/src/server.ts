@@ -15,6 +15,8 @@ import { execSync } from 'child_process';
 import { randomUUID } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 
+import { GoogleGenAI } from '@google/genai';
+
 const fastify = Fastify({ logger: true });
 const prisma = new PrismaClient();
 
@@ -22,16 +24,15 @@ fastify.register(cors, { origin: '*' });
 fastify.register(multipart);
 fastify.register(jwt, { secret: process.env.JWT_SECRET || 'patent-scope-secret-change-me' });
 
-// Database will be used via Prisma
-
 // ─── Environment ───────────────────────────────────────────────
-const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://ollama:11434';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const WHISPER_BASE_URL = process.env.WHISPER_BASE_URL || 'http://whisper:8000';
-const PRIMARY_MODEL = process.env.OLLAMA_PRIMARY_MODEL || 'llama3.1:8b-instruct-q4_K_M';
-const SECONDARY_MODEL = process.env.OLLAMA_SECONDARY_MODEL || 'llama3.1:8b-instruct-q4_K_M';
 const OPS_CONSUMER_KEY = process.env.OPS_CONSUMER_KEY || '';
 const OPS_CONSUMER_SECRET = process.env.OPS_CONSUMER_SECRET || '';
 const INPI_MODE = process.env.INPI_MODE || 'scrape';
+
+// Inicializa SDK do Gemini (usaremos o 2.5-flash, que é rápido e super barato/grátis)
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
 // ─── OPS Token Cache ───────────────────────────────────────────
 let opsAccessToken: string | null = null;
@@ -60,15 +61,23 @@ async function getOpsToken(): Promise<string> {
     return opsAccessToken!;
 }
 
-// ─── Ollama Helper ─────────────────────────────────────────────
-async function ollamaGenerate(model: string, prompt: string, timeout = 300000): Promise<string> {
-    const response = await axios.post(`${OLLAMA_BASE_URL}/api/generate`, {
-        model,
-        prompt,
-        stream: false,
-        format: 'json'
-    }, { timeout });
-    return response.data.response || JSON.stringify(response.data);
+// ─── Gemini Helper ─────────────────────────────────────────────
+async function generateWithGemini(prompt: string, expectJson = true): Promise<string> {
+    if (!GEMINI_API_KEY) {
+        throw new Error('GEMINI_API_KEY não configurada no servidor.');
+    }
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+        config: {
+            temperature: 0.2, // Baixa temperatura para fatos/análise técnica
+            responseMimeType: expectJson ? "application/json" : "text/plain"
+        }
+    });
+
+    if (!response.text) throw new Error("Gemini retornou uma resposta vazia.");
+    return response.text;
 }
 
 // ─── POST /auth/register ───────────────────────────────────────
@@ -130,8 +139,7 @@ fastify.get('/auth/me', async (request, reply) => {
 fastify.get('/health', async () => {
     return {
         status: 'ok',
-        services: { ollama: OLLAMA_BASE_URL, whisper: WHISPER_BASE_URL },
-        models: { primary: PRIMARY_MODEL, secondary: SECONDARY_MODEL },
+        services: { gemini: GEMINI_API_KEY ? 'configured' : 'missing', whisper: WHISPER_BASE_URL },
         ops: OPS_CONSUMER_KEY ? 'configured' : 'missing',
         inpi_mode: INPI_MODE
     };
@@ -172,25 +180,25 @@ const briefingPrompts: Record<string, string> = {
 
 fastify.post('/briefing/problem', async (request, reply) => {
     const { text } = request.body as { text: string };
-    const raw = await ollamaGenerate(PRIMARY_MODEL, `${briefingPrompts.problem}\n\nText:\n${text.substring(0, 15000)}`, 120000);
+    const raw = await generateWithGemini(`${briefingPrompts.problem}\n\nText:\n${text.substring(0, 15000)}`, false);
     return { problemaTecnico: raw.replace(/["{}]/g, '').trim() };
 });
 
 fastify.post('/briefing/solution', async (request, reply) => {
     const { text } = request.body as { text: string };
-    const raw = await ollamaGenerate(PRIMARY_MODEL, `${briefingPrompts.solution}\n\nText:\n${text.substring(0, 15000)}`, 120000);
+    const raw = await generateWithGemini(`${briefingPrompts.solution}\n\nText:\n${text.substring(0, 15000)}`, false);
     return { solucaoProposta: raw.replace(/["{}]/g, '').trim() };
 });
 
 fastify.post('/briefing/highlights', async (request, reply) => {
     const { text } = request.body as { text: string };
-    const raw = await ollamaGenerate(PRIMARY_MODEL, `${briefingPrompts.highlights}\n\nText:\n${text.substring(0, 15000)}`, 120000);
+    const raw = await generateWithGemini(`${briefingPrompts.highlights}\n\nText:\n${text.substring(0, 15000)}`, false);
     return { diferenciais: raw.replace(/["{}]/g, '').trim() };
 });
 
 fastify.post('/briefing/applications', async (request, reply) => {
     const { text } = request.body as { text: string };
-    const raw = await ollamaGenerate(PRIMARY_MODEL, `${briefingPrompts.applications}\n\nText:\n${text.substring(0, 15000)}`, 120000);
+    const raw = await generateWithGemini(`${briefingPrompts.applications}\n\nText:\n${text.substring(0, 15000)}`, false);
     return { aplicacoes: raw.replace(/["{}]/g, '').trim() };
 });
 
@@ -211,7 +219,7 @@ Texto:
 ${text.substring(0, 15000)}`;
 
     try {
-        const raw = await ollamaGenerate(PRIMARY_MODEL, prompt, 240000);
+        const raw = await generateWithGemini(prompt, true);
         const parsed = JSON.parse(raw);
         return parsed;
     } catch (error: any) {
@@ -237,7 +245,7 @@ Briefing:
 ${JSON.stringify(briefing)}`;
 
     try {
-        const raw = await ollamaGenerate(SECONDARY_MODEL, prompt, 60000);
+        const raw = await generateWithGemini(prompt, true);
         const parsed = JSON.parse(raw);
         return parsed;
     } catch (error: any) {
@@ -655,7 +663,7 @@ Responda APENAS um JSON com:
 }`;
 
                 try {
-                    const raw = await ollamaGenerate(PRIMARY_MODEL, prompt, 120000);
+                    const raw = await generateWithGemini(prompt, true);
                     const parsed = JSON.parse(raw);
                     return {
                         ...patent,
