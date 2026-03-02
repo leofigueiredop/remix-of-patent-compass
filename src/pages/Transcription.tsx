@@ -24,18 +24,18 @@ export default function Transcription() {
     setTranscription(text);
 
     try {
-      // Geração incremental field-by-field para melhor UX e evitar timeout
+      // Geração incremental field-by-field em rotas separadas e sequenciais
       setLoadingStep("Analisando problema técnico...");
-      const problemaTecnico = await aiService.generateBriefingField(text, "problemaTecnico");
+      const problemaTecnico = await aiService.generateBriefingProblem(text);
 
       setLoadingStep("Estruturando solução proposta...");
-      const solucaoProposta = await aiService.generateBriefingField(text, "solucaoProposta");
+      const solucaoProposta = await aiService.generateBriefingSolution(text);
 
       setLoadingStep("Identificando diferenciais...");
-      const diferenciais = await aiService.generateBriefingField(text, "diferenciais");
+      const diferenciais = await aiService.generateBriefingHighlights(text);
 
       setLoadingStep("Mapeando aplicações...");
-      const aplicacoes = await aiService.generateBriefingField(text, "aplicacoes");
+      const aplicacoes = await aiService.generateBriefingApplications(text);
 
       setBriefing({
         problemaTecnico,

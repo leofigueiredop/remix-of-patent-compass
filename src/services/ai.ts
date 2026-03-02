@@ -35,11 +35,23 @@ export const aiService = {
     },
 
     /**
-     * Generates a single field of the technical briefing.
+     * Generates specific fields of the technical briefing via separate routes.
      */
-    generateBriefingField: async (text: string, field: string): Promise<string> => {
-        const response = await api.post('/briefing', { text, field }, { timeout: 120000 });
-        return response.data[field];
+    generateBriefingProblem: async (text: string): Promise<string> => {
+        const response = await api.post('/briefing/problem', { text }, { timeout: 120000 });
+        return response.data.problemaTecnico;
+    },
+    generateBriefingSolution: async (text: string): Promise<string> => {
+        const response = await api.post('/briefing/solution', { text }, { timeout: 120000 });
+        return response.data.solucaoProposta;
+    },
+    generateBriefingHighlights: async (text: string): Promise<string> => {
+        const response = await api.post('/briefing/highlights', { text }, { timeout: 120000 });
+        return response.data.diferenciais;
+    },
+    generateBriefingApplications: async (text: string): Promise<string> => {
+        const response = await api.post('/briefing/applications', { text }, { timeout: 120000 });
+        return response.data.aplicacoes;
     },
 
     /**

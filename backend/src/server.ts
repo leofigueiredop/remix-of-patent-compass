@@ -162,35 +162,42 @@ fastify.post('/transcribe', async (request, reply) => {
     }
 });
 
-// ─── POST /briefing ────────────────────────────────────────────
+// ─── POST /briefing/:field ─────────────────────────────────────
+const briefingPrompts: Record<string, string> = {
+    problem: "Trabalhe como um especialista em patentes. Analise o texto e descreva APENAS o PROBLEMA TÉCNICO que a invenção resolve. Seja conciso e técnico.",
+    solution: "Trabalhe como um especialista em patentes. Analise o texto e descreva APENAS a SOLUÇÃO TÉCNICA proposta pela invenção. Seja conciso e técnico.",
+    highlights: "Trabalhe como um especialista em patentes. Analise o texto e extraia uma LISTA de DIFERENCIAIS técnicos em relação ao estado da arte. Responda em tópicos.",
+    applications: "Trabalhe como um especialista em patentes. Analise o texto e identifique as APLICAÇÕES INDUSTRIAIS e MERCADOS-ALVO da invenção."
+};
+
+fastify.post('/briefing/problem', async (request, reply) => {
+    const { text } = request.body as { text: string };
+    const raw = await ollamaGenerate(PRIMARY_MODEL, `${briefingPrompts.problem}\n\nText:\n${text.substring(0, 15000)}`, 120000);
+    return { problemaTecnico: raw.replace(/["{}]/g, '').trim() };
+});
+
+fastify.post('/briefing/solution', async (request, reply) => {
+    const { text } = request.body as { text: string };
+    const raw = await ollamaGenerate(PRIMARY_MODEL, `${briefingPrompts.solution}\n\nText:\n${text.substring(0, 15000)}`, 120000);
+    return { solucaoProposta: raw.replace(/["{}]/g, '').trim() };
+});
+
+fastify.post('/briefing/highlights', async (request, reply) => {
+    const { text } = request.body as { text: string };
+    const raw = await ollamaGenerate(PRIMARY_MODEL, `${briefingPrompts.highlights}\n\nText:\n${text.substring(0, 15000)}`, 120000);
+    return { diferenciais: raw.replace(/["{}]/g, '').trim() };
+});
+
+fastify.post('/briefing/applications', async (request, reply) => {
+    const { text } = request.body as { text: string };
+    const raw = await ollamaGenerate(PRIMARY_MODEL, `${briefingPrompts.applications}\n\nText:\n${text.substring(0, 15000)}`, 120000);
+    return { aplicacoes: raw.replace(/["{}]/g, '').trim() };
+});
+
 fastify.post('/briefing', async (request, reply) => {
-    const { text, field } = request.body as { text: string; field?: string };
+    const { text } = request.body as { text: string };
     if (!text) return reply.code(400).send({ error: 'Text is required' });
 
-    const prompts: Record<string, string> = {
-        problemaTecnico: "Trabalhe como um especialista em patentes. Analise o texto e descreva APENAS o PROBLEMA TÉCNICO que a invenção resolve. Seja conciso e técnico.",
-        solucaoProposta: "Trabalhe como um especialista em patentes. Analise o texto e descreva APENAS a SOLUÇÃO TÉCNICA proposta pela invenção. Seja conciso e técnico.",
-        diferenciais: "Trabalhe como um especialista em patentes. Analise o texto e extraia uma LISTA de DIFERENCIAIS técnicos em relação ao estado da arte. Responda em tópicos.",
-        aplicacoes: "Trabalhe como um especialista em patentes. Analise o texto e identifique as APLICAÇÕES INDUSTRIAIS e MERCADOS-ALVO da invenção."
-    };
-
-    // Caso o field seja especificado, gera apenas ele para economia de tokens e tempo
-    if (field && prompts[field]) {
-        const prompt = `${prompts[field]}
-        
-Text:
-${text.substring(0, 15000)}`;
-
-        try {
-            const raw = await ollamaGenerate(PRIMARY_MODEL, prompt, 120000);
-            return { [field]: raw.replace(/["{}]/g, '').trim() }; // Limpeza simples caso o LLM tente ser prolixo
-        } catch (error: any) {
-            request.log.error(error);
-            return reply.code(500).send({ error: `Failed to generate ${field}`, details: error.message });
-        }
-    }
-
-    // Comportamento legado (gera tudo de uma vez)
     const prompt = `Você é um especialista em patentes brasileiro. Analise o texto abaixo e extraia um briefing técnico estruturado.
 Responda APENAS um JSON válido com estes campos exatos:
 {
