@@ -41,23 +41,30 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     environment:
-      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
-      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-2}
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-1}
+      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-1}
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-24h}
-      - OLLAMA_NUM_THREADS=${OLLAMA_NUM_THREADS:-10}
-    # CPU-only VPS (40GB RAM / 12 cores)
-    # Models: qwen2.5:14b-instruct-q4_K_M (~10GB) + llama3.1:8b-instruct-q4_K_M (~6GB)
+      - OLLAMA_NUM_THREADS=${OLLAMA_NUM_THREADS:-8} # Use 8 of 12 cores for IA stability
+    deploy:
+      resources:
+        limits:
+          memory: 16G # Adjust based on 40GB total
     restart: unless-stopped
 
   # Speech-to-Text Service
   whisper:
     image: fedirz/faster-whisper-server:latest-cpu
     environment:
-      - WHISPER_MODEL=medium
+      - WHISPER_MODEL=small # Use small instead of medium for speed on CPU
       - WHISPER_BEAM_SIZE=5
-      - WHISPER_COMPUTE_TYPE=int8 # Optimization for CPU speed
+      - WHISPER_COMPUTE_TYPE=int8
       - WHISPER_DEVICE=cpu
-      - WHISPER_NUM_WORKERS=4 # Dedicate 4 cores to transcription
+      - WHISPER_NUM_WORKERS=2 # Use only 2 cores for transcription
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
     volumes:
       - whisper_cache:/root/.cache/huggingface
 
@@ -68,6 +75,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
       POSTGRES_DB: ${POSTGRES_DB:-patent_compass}
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
