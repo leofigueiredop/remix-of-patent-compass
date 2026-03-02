@@ -60,7 +60,7 @@ export default function StructuredBriefing() {
       )}
       <WizardSteps currentStep={2} steps={steps} />
 
-      <div className="max-w-3xl">
+      <div className="max-w-5xl w-full">
         <h1 className="text-2xl font-bold mb-1">Briefing Técnico Estruturado</h1>
         <p className="text-muted-foreground text-sm mb-8">
           Revise os campos organizados automaticamente a partir da transcrição
@@ -72,9 +72,9 @@ export default function StructuredBriefing() {
           </div>
         )}
 
-        <div className="space-y-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {fields.map((field) => (
-            <div key={field.key} className="bg-card rounded-lg border p-5">
+            <div key={field.key} className="bg-card rounded-lg border p-5 flex flex-col h-full">
               <label className="flex items-center gap-2 text-sm font-semibold mb-3">
                 <span>{field.icon}</span>
                 {field.label}
@@ -82,7 +82,7 @@ export default function StructuredBriefing() {
               <Textarea
                 value={localBriefing[field.key]}
                 onChange={(e) => updateField(field.key, e.target.value)}
-                className="min-h-[80px] resize-y text-sm leading-relaxed"
+                className="min-h-[180px] flex-1 resize-y text-sm leading-relaxed"
               />
             </div>
           ))}
