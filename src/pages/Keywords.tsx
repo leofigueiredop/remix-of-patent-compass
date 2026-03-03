@@ -41,7 +41,7 @@ export default function Keywords() {
   const [ipcDetails, setIpcDetails] = useState<IpcCode[]>([]);
   const [techBlocks, setTechBlocks] = useState<TechBlock[]>([]);
   const [searchLevels, setSearchLevels] = useState<SearchLevel[]>([]);
-  const [selectedLevel, setSelectedLevel] = useState<string>("custom");
+  const [selectedLevel, setSelectedLevel] = useState<string>("2");
   const [showTechBlocks, setShowTechBlocks] = useState(true);
   const [newTerm, setNewTerm] = useState<{ blockId: string; groupId: string; value: string }>({ blockId: "", groupId: "", value: "" });
   const [newClassCode, setNewClassCode] = useState("");
@@ -85,8 +85,11 @@ export default function Keywords() {
       // Tech blocks
       if (strategy.techBlocks) setTechBlocks(strategy.techBlocks);
 
-      // Search levels
-      if (strategy.searchLevels) setSearchLevels(strategy.searchLevels);
+      // Search levels — default to Level 2 (balanced) if available
+      if (strategy.searchLevels && strategy.searchLevels.length > 0) {
+        setSearchLevels(strategy.searchLevels);
+        setSelectedLevel("2");
+      }
     }
   }, [strategy]);
 
@@ -162,29 +165,31 @@ export default function Keywords() {
   };
 
   // Build CQL query from blocks (Espacenet format)
+  // Each block = one concept layer. All terms within a block are OR'd (synonyms).
+  // Blocks are connected via their connector (AND by default).
+  // Uses ta= (title+abstract combined) instead of duplicating ti/ab per term.
   const renderCqlQuery = () => {
     const blockQueries = blocks.map(block => {
-      const groupQueries = block.groups
-        .filter(g => g.terms.length > 0)
-        .map(g => {
-          const terms = g.terms.map(t => `(ti all "${t}" OR ab all "${t}")`);
-          return `(${terms.join(" OR ")})`;
-        });
+      // Flatten all terms across all groups in this block — they're all synonyms
+      const allTerms = block.groups.flatMap(g => g.terms).filter(t => t.trim() !== "");
+      if (allTerms.length === 0) return "";
 
-      if (groupQueries.length === 0) return "";
-      return groupQueries.length === 1 ? groupQueries[0] : `(${groupQueries.join(" AND ")})`;
+      const termsStr = allTerms.map(t => `ta all "${t}"`).join(" OR ");
+      return `(${termsStr})`;
     }).filter(q => q !== "");
 
+    if (blockQueries.length === 0 && classifications.length === 0) return "";
+
+    // Join blocks with their connectors (AND between concept layers)
     let query = blockQueries.length > 0 ? blockQueries[0] : "";
     for (let i = 1; i < blockQueries.length; i++) {
-      query = `(${query} ${blocks[i - 1].connector} ${blockQueries[i]})`;
+      query = `${query} ${blocks[i - 1].connector} ${blockQueries[i]}`;
     }
 
     const classQuery = classifications.length > 0
-      ? ` AND (${classifications.map(c => `ic="${c}"`).join(" OR ")})`
+      ? `${query ? " AND " : ""}(${classifications.map(c => `ic="${c}"`).join(" OR ")})`
       : "";
 
-    if (!query && classifications.length === 0) return "";
     return `${query}${classQuery}`;
   };
 

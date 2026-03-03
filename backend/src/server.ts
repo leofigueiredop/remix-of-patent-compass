@@ -268,31 +268,37 @@ FASE 3 — CONSTRUÇÃO DE QUERIES PRONTAS
 ========================================
 Gere 3 níveis de busca com queries PRONTAS para uso direto:
 
+REGRAS CRÍTICAS para todas as queries:
+- Queries CURTAS e FUNCIONAIS. Máximo 300 caracteres por query.
+- Use poucos termos por OR (3-5 no máximo).
+- Nível 1: MÁXIMO 1 AND. Nível 2: MÁXIMO 2 AND. Nível 3: MÁXIMO 3 AND.
+
 NÍVEL 1 — Busca ampla (alto recall):
-- Poucos AND, termos genéricos.
-- CQL Espacenet: Use ti= e ab= com operadores AND/OR. Use aspas em termos compostos.
-- INPI: String booleana simples em Português com AND/OR e aspas.
+- 0 ou 1 AND, termos genéricos e curtos.
+- CQL: Use ta= (busca em título + abstract combinados).
+- INPI: String booleana simples com 2-3 termos em PT.
 
 NÍVEL 2 — Interseção tecnológica:
-- Cruza 2 eixos principais da invenção.
-- CQL Espacenet: Combine 2 blocos com AND.
+- Cruza 2 eixos com AND.
+- CQL: 2 blocos OR conectados com AND.
 - INPI: Idem em Português.
 
 NÍVEL 3 — Busca refinada:
-- A assinatura específica da invenção (3+ conceitos).
-- CQL Espacenet: Interseção precisa mas sem excesso de AND.
+- Máximo 3 AND.
+- CQL: Interseção precisa mas COMPACTA.
 - INPI: Idem em Português.
 
 Formato CQL Espacenet válido:
-- ti all "termo" — busca no título
-- ab all "termo" — busca no abstract
+- ta all "termo" — busca no título E abstract combinados
+- NÃO use ti= e ab= separadamente. Use APENAS ta=.
 - Use AND/OR, parênteses, e aspas corretamente.
-- Exemplo: (ti all "wearable device" OR ab all "portable sensor") AND (ti all "biometric" OR ab all "physiological signal")
+- Exemplo Nível 1: ta all "wearable" OR ta all "portable sensor" OR ta all "vestível"
+- Exemplo Nível 2: (ta all "wearable" OR ta all "portable device") AND (ta all "biometric" OR ta all "physiological")
 
 Formato INPI válido:
 - String booleana nativa: ("termo1" OR "termo2") AND ("termo3" OR "termo4")
-- Usar termos em Português prioritariamente.
-- Menos operadores que o CQL. Máximo 2 AND no nível 1.
+- Usar termos em Português SOMENTE.
+- Máximo 1 AND no nível 1, 2 AND no nível 2, 3 AND no nível 3.
 
 ========================================
 FASE 4 — IPC RECOMENDADAS
@@ -302,7 +308,9 @@ Liste 3-5 códigos IPC/CPC com justificativa técnica de 1 linha cada.
 ========================================
 AUTOVALIDAÇÃO (execute antes de retornar)
 ========================================
-- A query de nível 3 tem mais que 4 AND? Se sim, reduza.
+- Alguma query tem mais de 300 caracteres? Se sim, ENCURTE removendo sinônimos redundantes.
+- A query de nível 1 tem mais que 1 AND? REMOVA ANDs extras.
+- A query de nível 3 tem mais que 3 AND? REDUZA.
 - Algum termo parece conceitual/acadêmico demais? Substitua por funcional.
 - Algum bloco tecnológico existe isoladamente no estado da técnica? Marque isso na descrição.
 - Todos os termos compostos estão entre aspas nas queries?
