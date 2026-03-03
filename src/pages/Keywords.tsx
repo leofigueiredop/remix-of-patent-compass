@@ -1,15 +1,17 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, X, ListFilter, Braces, Search, Trash2, ArrowRight, Copy, ThumbsUp, ThumbsDown, Check } from "lucide-react";
+import { Plus, X, ListFilter, Braces, Search, Trash2, ArrowRight, Copy, ThumbsUp, ThumbsDown, Check, ChevronDown, ChevronUp, Info, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import AppLayout from "@/components/AppLayout";
 import WizardSteps from "@/components/WizardSteps";
 import LoadingTransition from "@/components/LoadingTransition";
 import { useResearch } from "@/contexts/ResearchContext";
 import { aiService } from "@/services/ai";
+import type { TechBlock, SearchLevel, IpcCode } from "@/contexts/ResearchContext";
 
 const steps = ["Briefing", "Transcrição", "Briefing Técnico", "Palavras-chave", "Resultados", "Análise", "Relatório"];
 
@@ -36,10 +38,16 @@ export default function Keywords() {
   }]);
 
   const [classifications, setClassifications] = useState<string[]>([]);
+  const [ipcDetails, setIpcDetails] = useState<IpcCode[]>([]);
+  const [techBlocks, setTechBlocks] = useState<TechBlock[]>([]);
+  const [searchLevels, setSearchLevels] = useState<SearchLevel[]>([]);
+  const [selectedLevel, setSelectedLevel] = useState<string>("custom");
+  const [showTechBlocks, setShowTechBlocks] = useState(true);
   const [newTerm, setNewTerm] = useState<{ blockId: string; groupId: string; value: string }>({ blockId: "", groupId: "", value: "" });
   const [newClassCode, setNewClassCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Populate from strategy when available
   useEffect(() => {
@@ -59,7 +67,26 @@ export default function Keywords() {
           ].filter(g => g.terms.length > 0)
         }]);
       }
-      setClassifications(strategy.ipc_codes || []);
+
+      // Parse IPC codes (support both string[] and IpcCode[] formats)
+      const ipcCodes: string[] = [];
+      const ipcDets: IpcCode[] = [];
+      for (const ipc of (strategy.ipc_codes || [])) {
+        if (typeof ipc === 'string') {
+          ipcCodes.push(ipc);
+        } else {
+          ipcCodes.push(ipc.code);
+          ipcDets.push(ipc);
+        }
+      }
+      setClassifications(ipcCodes);
+      setIpcDetails(ipcDets);
+
+      // Tech blocks
+      if (strategy.techBlocks) setTechBlocks(strategy.techBlocks);
+
+      // Search levels
+      if (strategy.searchLevels) setSearchLevels(strategy.searchLevels);
     }
   }, [strategy]);
 
@@ -127,20 +154,20 @@ export default function Keywords() {
 
   const removeClassification = (code: string) => {
     setClassifications(classifications.filter(c => c !== code));
+    setIpcDetails(ipcDetails.filter(d => d.code !== code));
   };
 
   const updateBlockConnector = (id: string, connector: "AND" | "OR") => {
     setBlocks(blocks.map(b => b.id === id ? { ...b, connector } : b));
   };
 
-  const renderQuery = (forApi = false) => {
+  // Build CQL query from blocks (Espacenet format)
+  const renderCqlQuery = () => {
     const blockQueries = blocks.map(block => {
       const groupQueries = block.groups
         .filter(g => g.terms.length > 0)
         .map(g => {
-          const terms = g.terms.map(t => {
-            return forApi ? `(ti all "${t}" OR ab all "${t}")` : t;
-          });
+          const terms = g.terms.map(t => `(ti all "${t}" OR ab all "${t}")`);
           return `(${terms.join(" OR ")})`;
         });
 
@@ -154,14 +181,38 @@ export default function Keywords() {
     }
 
     const classQuery = classifications.length > 0
-      ? ` AND (${classifications.map(c => forApi ? `ic="${c}"` : `IPC: ${c}`).join(" OR ")})`
+      ? ` AND (${classifications.map(c => `ic="${c}"`).join(" OR ")})`
       : "";
 
     if (!query && classifications.length === 0) return "";
     return `${query}${classQuery}`;
   };
 
-  // Construir a string booleana nativa para o INPI
+  // Build display-friendly query from blocks
+  const renderDisplayQuery = () => {
+    const blockQueries = blocks.map(block => {
+      const groupQueries = block.groups
+        .filter(g => g.terms.length > 0)
+        .map(g => `(${g.terms.join(" OR ")})`);
+
+      if (groupQueries.length === 0) return "";
+      return groupQueries.length === 1 ? groupQueries[0] : `(${groupQueries.join(" AND ")})`;
+    }).filter(q => q !== "");
+
+    let query = blockQueries.length > 0 ? blockQueries[0] : "";
+    for (let i = 1; i < blockQueries.length; i++) {
+      query = `(${query} ${blocks[i - 1].connector} ${blockQueries[i]})`;
+    }
+
+    const classQuery = classifications.length > 0
+      ? ` AND (${classifications.map(c => `IPC: ${c}`).join(" OR ")})`
+      : "";
+
+    if (!query && classifications.length === 0) return "";
+    return `${query}${classQuery}`;
+  };
+
+  // Build INPI boolean string from blocks
   const getInpiQuery = (): string => {
     const blockQueries = blocks.map(block => {
       const blockTerms = block.groups.flatMap(g => g.terms).filter(t => t.trim() !== "");
@@ -181,11 +232,33 @@ export default function Keywords() {
     return query;
   };
 
+  const getActiveCql = (): string => {
+    if (selectedLevel !== "custom") {
+      const lvl = searchLevels.find(l => l.level === Number(selectedLevel));
+      if (lvl) return lvl.cql;
+    }
+    return renderCqlQuery();
+  };
+
+  const getActiveInpi = (): string => {
+    if (selectedLevel !== "custom") {
+      const lvl = searchLevels.find(l => l.level === Number(selectedLevel));
+      if (lvl) return lvl.inpi;
+    }
+    return getInpiQuery();
+  };
+
+  const handleCopy = (text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
   const handleExecution = async () => {
     setError(null);
     setLoading(true);
-    const cql = renderQuery(true);
-    const inpiQuery = getInpiQuery();
+    const cql = getActiveCql();
+    const inpiQuery = getActiveInpi();
     setCqlQuery(cql);
 
     try {
@@ -196,6 +269,10 @@ export default function Keywords() {
       setError(err.message || "Erro na busca. Verifique as credenciais do Espacenet e INPI.");
       setLoading(false);
     }
+  };
+
+  const getIpcJustification = (code: string): string | undefined => {
+    return ipcDetails.find(d => d.code === code)?.justification;
   };
 
   return (
@@ -222,6 +299,46 @@ export default function Keywords() {
         {error && (
           <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg">
             {error}
+          </div>
+        )}
+
+        {/* Overconstraint Warning */}
+        {blocks.length > 3 && (
+          <div className="flex items-center gap-3 bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 text-sm p-3 rounded-lg border border-yellow-500/20">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>
+              <strong>Atenção:</strong> {blocks.length} camadas com AND pode gerar overconstraint.
+              Considere agrupar eixos relacionados para melhor recall.
+            </span>
+          </div>
+        )}
+
+        {/* Technology Blocks Section  */}
+        {techBlocks.length > 0 && (
+          <div className="bg-card/50 rounded-xl border p-5 space-y-3">
+            <button
+              onClick={() => setShowTechBlocks(!showTechBlocks)}
+              className="flex items-center justify-between w-full text-left"
+            >
+              <div className="flex items-center gap-2">
+                <Braces className="w-4 h-4 text-accent" />
+                <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                  Blocos Tecnológicos ({techBlocks.length})
+                </h2>
+              </div>
+              {showTechBlocks ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+            </button>
+
+            {showTechBlocks && (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
+                {techBlocks.map((tb) => (
+                  <div key={tb.id} className="bg-background rounded-lg border p-4 space-y-1.5">
+                    <p className="text-sm font-semibold">{tb.name}</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">{tb.description}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -340,18 +457,28 @@ export default function Keywords() {
 
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex flex-wrap gap-2 flex-1">
-              {classifications.map((code) => (
-                <Badge
-                  key={code}
-                  variant="outline"
-                  className="px-2 py-1 gap-2 font-mono text-xs bg-muted/20 border-border hover:bg-muted transition-colors"
-                >
-                  {code}
-                  <button onClick={() => removeClassification(code)} className="hover:text-destructive">
-                    <X className="w-3 h-3" />
-                  </button>
-                </Badge>
-              ))}
+              {classifications.map((code) => {
+                const justification = getIpcJustification(code);
+                return (
+                  <div key={code} className="relative group/ipc">
+                    <Badge
+                      variant="outline"
+                      className="px-2 py-1 gap-2 font-mono text-xs bg-muted/20 border-border hover:bg-muted transition-colors cursor-default"
+                    >
+                      {code}
+                      {justification && <Info className="w-3 h-3 text-muted-foreground" />}
+                      <button onClick={() => removeClassification(code)} className="hover:text-destructive">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </Badge>
+                    {justification && (
+                      <div className="absolute bottom-full left-0 mb-1 px-3 py-2 bg-popover text-popover-foreground text-xs rounded-lg shadow-lg border opacity-0 group-hover/ipc:opacity-100 transition-opacity z-30 whitespace-nowrap pointer-events-none">
+                        {justification}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               {classifications.length === 0 && (
                 <p className="text-xs text-muted-foreground italic">Nenhuma classificação adicionada...</p>
               )}
@@ -382,41 +509,92 @@ export default function Keywords() {
           </Button>
         </div>
 
-        {/* Query Helper */}
-        <div className="bg-muted/30 rounded-lg p-5 border border-dashed border-border mt-8">
-          <div className="flex items-start gap-3 text-muted-foreground">
-            <Search className="w-5 h-5 mt-1" />
-            <div className="flex-1">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground/50">Lógica Gerada pela IA (Copiável):</p>
-                <Badge variant="outline" className="text-[10px] gap-1 py-0 h-5 bg-green-50 text-green-700 border-green-200">
-                  <Check className="w-3 h-3" /> Lógica Otimizada
-                </Badge>
-              </div>
-              <div className="bg-slate-950 text-slate-300 font-mono text-[13px] p-4 rounded-lg border border-slate-800 shadow-inner relative group">
-                {renderQuery() || "(vazio — adicione termos acima)"}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="absolute top-2 right-2 h-6 w-6 text-slate-500 hover:text-white hover:bg-slate-800"
-                  onClick={() => navigator.clipboard.writeText(renderQuery())}
-                >
-                  <Copy className="w-3 h-3" />
-                </Button>
-              </div>
+        {/* Dual Query Preview */}
+        <div className="bg-muted/30 rounded-lg p-5 border border-dashed border-border mt-8 space-y-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Search className="w-5 h-5 text-muted-foreground" />
+              <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground/50">
+                Queries Geradas
+              </p>
+            </div>
+            <Badge variant="outline" className="text-[10px] gap-1 py-0 h-5 bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800">
+              <Check className="w-3 h-3" /> Lógica Otimizada
+            </Badge>
+          </div>
 
-              {/* Feedback Loop */}
-              <div className="flex justify-end gap-2 mt-2">
-                <p className="text-[10px] text-muted-foreground mr-2 self-center">Avaliar esta estratégia:</p>
-                <div className="flex gap-1">
-                  <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full hover:bg-green-100 hover:text-green-600 transition-colors">
-                    <ThumbsUp className="w-3 h-3" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full hover:bg-red-100 hover:text-red-600 transition-colors">
-                    <ThumbsDown className="w-3 h-3" />
-                  </Button>
-                </div>
-              </div>
+          {/* Search Level Selector */}
+          {searchLevels.length > 0 && (
+            <Tabs value={selectedLevel} onValueChange={setSelectedLevel}>
+              <TabsList className="w-full grid grid-cols-4">
+                <TabsTrigger value="custom" className="text-xs">Custom</TabsTrigger>
+                {searchLevels.map((lvl) => (
+                  <TabsTrigger key={lvl.level} value={String(lvl.level)} className="text-xs">
+                    Nível {lvl.level}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+
+              {searchLevels.map((lvl) => (
+                <TabsContent key={lvl.level} value={String(lvl.level)} className="mt-3">
+                  <p className="text-xs text-muted-foreground mb-3 font-medium">{lvl.label}</p>
+                </TabsContent>
+              ))}
+            </Tabs>
+          )}
+
+          {/* CQL Preview */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-accent">
+                CQL — Espacenet
+              </p>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-[10px] gap-1 text-muted-foreground hover:text-foreground"
+                onClick={() => handleCopy(getActiveCql(), 'cql')}
+              >
+                {copiedField === 'cql' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                {copiedField === 'cql' ? 'Copiado!' : 'Copiar'}
+              </Button>
+            </div>
+            <div className="bg-slate-950 text-slate-300 font-mono text-[12px] p-4 rounded-lg border border-slate-800 shadow-inner break-all leading-relaxed">
+              {getActiveCql() || "(vazio — adicione termos acima)"}
+            </div>
+          </div>
+
+          {/* INPI Preview */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500">
+                Boolean — INPI
+              </p>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-[10px] gap-1 text-muted-foreground hover:text-foreground"
+                onClick={() => handleCopy(getActiveInpi(), 'inpi')}
+              >
+                {copiedField === 'inpi' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                {copiedField === 'inpi' ? 'Copiado!' : 'Copiar'}
+              </Button>
+            </div>
+            <div className="bg-blue-950 text-blue-200 font-mono text-[12px] p-4 rounded-lg border border-blue-900 shadow-inner break-all leading-relaxed">
+              {getActiveInpi() || "(vazio — adicione termos acima)"}
+            </div>
+          </div>
+
+          {/* Feedback Loop */}
+          <div className="flex justify-end gap-2 mt-2">
+            <p className="text-[10px] text-muted-foreground mr-2 self-center">Avaliar esta estratégia:</p>
+            <div className="flex gap-1">
+              <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full hover:bg-green-100 hover:text-green-600 transition-colors">
+                <ThumbsUp className="w-3 h-3" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full hover:bg-red-100 hover:text-red-600 transition-colors">
+                <ThumbsDown className="w-3 h-3" />
+              </Button>
             </div>
           </div>
         </div>

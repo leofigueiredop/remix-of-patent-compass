@@ -55,9 +55,14 @@ export const aiService = {
     },
 
     /**
-     * Generates search keywords and IPC codes from a briefing using the secondary LLM.
+     * Generates search keywords, tech blocks, search levels, and IPC codes from a briefing.
      */
     generateStrategy: async (briefing: any): Promise<{
+        techBlocks?: {
+            id: string;
+            name: string;
+            description: string;
+        }[];
         blocks: {
             id: string;
             connector: "AND" | "OR";
@@ -66,7 +71,13 @@ export const aiService = {
                 terms: string[];
             }[];
         }[];
-        ipc_codes: string[];
+        searchLevels?: {
+            level: number;
+            label: string;
+            cql: string;
+            inpi: string;
+        }[];
+        ipc_codes: ({ code: string; justification: string } | string)[];
     }> => {
         const response = await api.post('/strategy', { briefing }, { timeout: 60000 });
         return response.data;

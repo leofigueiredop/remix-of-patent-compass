@@ -233,17 +233,87 @@ fastify.post('/strategy', async (request, reply) => {
     const { briefing } = request.body as { briefing: any };
     if (!briefing) return reply.code(400).send({ error: 'Briefing object is required' });
 
-    const prompt = `Com base no briefing técnico de uma invenção fornecido abaixo, crie uma estratégia de busca para anterioridade (patentes).
-A estratégia DEVE ser estruturada em "camadas lógicas" (blocks). Cada camada representa um conceito central ou eixo da invenção.
-Dentro de cada camada (block), crie 1 a 3 "grupos" (groups). Cada grupo deve conter sinônimos de uma vertente do conceito, misturando termos em Português e Inglês no mesmo grupo.
-A lógica visualizada será: (Grupo1 OR Grupo2) AND (Grupo3 OR Grupo4) AND etc.
-Portanto:
- - Termos dentro do mesmo grupo são juntados com OR (são sinônimos diretos, ex: "artificial intelligence", "inteligência artificial", "neural network").
- - Grupos dentro da mesma camada representam subtópicos do mesmo eixo e devem ter lógia OR entre si.
- - Camadas diferentes (blocks) conectam conceitos diferentes com AND.
+    const prompt = `Você é um engenheiro de busca de patentes e arquiteto de lógica de consulta.
 
-Responda APENAS um JSON estritamente neste formato:
+A partir do briefing técnico de uma invenção, execute um pipeline completo em 4 fases e retorne APENAS um JSON válido.
+
+========================================
+FASE 1 — DECOMPOSIÇÃO TECNOLÓGICA
+========================================
+Identifique os blocos tecnológicos independentes da invenção.
+Exemplos de blocos: dispositivo físico, sensoriamento, processamento de sinais, classificação, algoritmo adaptativo, sistema de intervenção, aprendizado incremental.
+Cada bloco deve ser descrito de forma técnica e genérica.
+
+========================================
+FASE 2 — GERAÇÃO DE KEYWORDS PATENTEÁVEIS
+========================================
+Para cada bloco tecnológico, gere keywords organizadas em camadas lógicas.
+
+REGRAS OBRIGATÓRIAS:
+- NÃO usar termos conceituais raros ou neologismos.
+- NÃO usar termos autorais ou de marca.
+- Priorizar terminologia encontrada em documentos reais de patente (USPTO, EPO, INPI).
+- Substituir termos subjetivos por termos funcionais observáveis.
+- Misturar termos em Inglês e Português no mesmo grupo de sinônimos.
+
+Estrutura lógica:
+- Termos dentro do mesmo grupo = OR (sinônimos diretos).
+- Grupos dentro da mesma camada = AND (sub-conceitos do mesmo eixo).
+- Camadas diferentes = AND (conceitos independentes).
+
+REGRA ANTI-OVERCONSTRAINT: Use no máximo 3-4 camadas. Se a invenção tiver mais eixos, agrupe eixos relacionados numa mesma camada.
+
+========================================
+FASE 3 — CONSTRUÇÃO DE QUERIES PRONTAS
+========================================
+Gere 3 níveis de busca com queries PRONTAS para uso direto:
+
+NÍVEL 1 — Busca ampla (alto recall):
+- Poucos AND, termos genéricos.
+- CQL Espacenet: Use ti= e ab= com operadores AND/OR. Use aspas em termos compostos.
+- INPI: String booleana simples em Português com AND/OR e aspas.
+
+NÍVEL 2 — Interseção tecnológica:
+- Cruza 2 eixos principais da invenção.
+- CQL Espacenet: Combine 2 blocos com AND.
+- INPI: Idem em Português.
+
+NÍVEL 3 — Busca refinada:
+- A assinatura específica da invenção (3+ conceitos).
+- CQL Espacenet: Interseção precisa mas sem excesso de AND.
+- INPI: Idem em Português.
+
+Formato CQL Espacenet válido:
+- ti all "termo" — busca no título
+- ab all "termo" — busca no abstract
+- Use AND/OR, parênteses, e aspas corretamente.
+- Exemplo: (ti all "wearable device" OR ab all "portable sensor") AND (ti all "biometric" OR ab all "physiological signal")
+
+Formato INPI válido:
+- String booleana nativa: ("termo1" OR "termo2") AND ("termo3" OR "termo4")
+- Usar termos em Português prioritariamente.
+- Menos operadores que o CQL. Máximo 2 AND no nível 1.
+
+========================================
+FASE 4 — IPC RECOMENDADAS
+========================================
+Liste 3-5 códigos IPC/CPC com justificativa técnica de 1 linha cada.
+
+========================================
+AUTOVALIDAÇÃO (execute antes de retornar)
+========================================
+- A query de nível 3 tem mais que 4 AND? Se sim, reduza.
+- Algum termo parece conceitual/acadêmico demais? Substitua por funcional.
+- Algum bloco tecnológico existe isoladamente no estado da técnica? Marque isso na descrição.
+- Todos os termos compostos estão entre aspas nas queries?
+
+========================================
+FORMATO DE RESPOSTA — JSON ESTRITO
+========================================
 {
+  "techBlocks": [
+    { "id": "tb1", "name": "Nome do Bloco", "description": "Descrição técnica funcional" }
+  ],
   "blocks": [
     {
       "id": "b1",
@@ -251,12 +321,34 @@ Responda APENAS um JSON estritamente neste formato:
       "groups": [
         {
           "id": "g1",
-          "terms": ["termo em pt", "termo em en", "sinônimo pt", "synonym en"]
+          "terms": ["termo_en", "termo_pt", "sinônimo_en", "sinônimo_pt"]
         }
       ]
     }
   ],
-  "ipc_codes": ["array de 3-5 códigos IPC relevantes no formato X00X 00/00"]
+  "searchLevels": [
+    {
+      "level": 1,
+      "label": "Busca Ampla (Alto Recall)",
+      "cql": "query CQL completa pronta para Espacenet",
+      "inpi": "query booleana completa pronta para INPI"
+    },
+    {
+      "level": 2,
+      "label": "Interseção Tecnológica",
+      "cql": "...",
+      "inpi": "..."
+    },
+    {
+      "level": 3,
+      "label": "Busca Refinada",
+      "cql": "...",
+      "inpi": "..."
+    }
+  ],
+  "ipc_codes": [
+    { "code": "A61B 5/00", "justification": "Diagnóstico por medição de sinais biométricos" }
+  ]
 }
 
 Briefing da invenção:
@@ -438,6 +530,7 @@ function searchInpiViaCurl(params: {
     titular?: string;
     inventor?: string;
     keywords?: string;
+    resumo?: string;
 }): any[] {
     const cookieFile = `/tmp/inpi_${randomUUID()}.txt`;
 
@@ -467,7 +560,7 @@ function searchInpiViaCurl(params: {
             ClassificacaoIPC: '',
             CatchWordIPC: '',
             Titulo: params.keywords?.trim() || '',
-            Resumo: '',
+            Resumo: params.resumo?.trim() || '',
             NomeDepositante: params.titular?.trim() || '',
             CpfCnpjDepositante: '',
             NomeInventor: params.inventor?.trim() || '',
@@ -496,7 +589,12 @@ function searchInpiViaCurl(params: {
     }
 }
 
-async function scrapeInpiBuscaWeb(keywords: string[], _ipcCodes: string[]): Promise<any[]> {
+async function scrapeInpiBuscaWeb(keywords: string[], _ipcCodes: string[], inpiQuery?: string): Promise<any[]> {
+    // If we have a pre-built INPI boolean query, use it in the Resumo field for better recall.
+    // Otherwise fallback to simple keyword join in Titulo.
+    if (inpiQuery) {
+        return searchInpiViaCurl({ resumo: inpiQuery });
+    }
     return searchInpiViaCurl({ keywords: keywords.join(' ') });
 }
 
@@ -637,7 +735,7 @@ fastify.post('/search', async (request, reply) => {
                 throw err;
             }
         })() : Promise.resolve([]),
-        inpiStr ? scrapeInpiBuscaWeb([inpiStr], ipc_codes || []) : Promise.resolve([])
+        inpiStr ? scrapeInpiBuscaWeb([inpiStr], ipc_codes || [], inpiQuery) : Promise.resolve([])
     ]);
 
     if (espacenetResult.status === 'fulfilled') results.espacenet = espacenetResult.value;

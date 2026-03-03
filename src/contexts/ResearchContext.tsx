@@ -27,9 +27,26 @@ export interface AnalyzedPatent extends PatentResult {
     justificativa: string;
 }
 
+export interface TechBlock {
+    id: string;
+    name: string;
+    description: string;
+}
+
+export interface SearchLevel {
+    level: number;
+    label: string;
+    cql: string;
+    inpi: string;
+}
+
+export interface IpcCode {
+    code: string;
+    justification: string;
+}
+
 export interface SearchStrategy {
-    keywords_pt?: string[]; // Mantido como fallback opcional
-    keywords_en?: string[]; // Mantido como fallback opcional
+    techBlocks?: TechBlock[];
     blocks?: {
         id: string;
         connector: "AND" | "OR";
@@ -38,7 +55,11 @@ export interface SearchStrategy {
             terms: string[];
         }[];
     }[];
-    ipc_codes: string[];
+    searchLevels?: SearchLevel[];
+    ipc_codes: (string | IpcCode)[];
+    // Legacy fallback
+    keywords_pt?: string[];
+    keywords_en?: string[];
 }
 
 interface ResearchState {
