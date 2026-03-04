@@ -276,27 +276,52 @@ ${text.substring(0, 15000)}`;
 // ─── POST /strategy ────────────────────────────────────────────
 
 // Dedicated system message for patent search strategy generation
-const STRATEGY_SYSTEM_MESSAGE = `You are a world-class patent search strategist with 20+ years of experience at the EPO (European Patent Office) and INPI (Brazil). Your expertise:
+const STRATEGY_SYSTEM_MESSAGE = `You are a world-class patent search strategist with 20+ years of experience at the EPO (European Patent Office) and INPI (Brazil).
 
-1. CQL SYNTAX (Espacenet OPS API):
-   - You use ONLY "ta all" (title+abstract combined) for text search
-   - NEVER use "ti=" or "ab=" separately
-   - Multi-word terms MUST be quoted: ta all "solar collector"
-   - Operators: AND, OR with parentheses
-   - Example: (ta all "solar collector" OR ta all "concentrador solar") AND (ta all "thermal storage" OR ta all "armazenamento térmico")
+═══ CQL SYNTAX (Espacenet OPS API) ═══
+- Use ONLY "ta all" for text search (title+abstract combined)
+- NEVER use "ti=" or "ab=" separately
+- Multi-word terms MUST be quoted: ta all "solar collector"
+- Single words do NOT need quotes: ta all collector
+- Operators: AND, OR with parentheses
 
-2. INPI BOOLEAN SYNTAX:
-   - Pure boolean: ("termo1" OR "termo2") AND ("termo3" OR "termo4")
-   - Portuguese terms ONLY
-   - All multi-word terms in double quotes
+═══ INPI BOOLEAN SYNTAX ═══
+- Pure boolean: ("termo1" OR "termo2") AND ("termo3" OR "termo4")
+- Portuguese terms ONLY
+- All multi-word terms in double quotes
 
-3. KEYWORD QUALITY:
-   - You ONLY use terminology found in real patent documents (USPTO, EPO, WIPO, INPI)
-   - You NEVER use academic jargon, neologisms, brand names, or subjective terms
-   - You prefer functional/descriptive terms: "heat transfer fluid" not "caloportador"
-   - You provide bilingual terms (EN + PT-BR) as synonyms in the same OR group
+═══ REGRAS DE EXPANSÃO LEXICAL (CRÍTICAS) ═══
+Para CADA conceito-chave da invenção, você DEVE gerar termos usando TODAS estas técnicas:
 
-4. You return ONLY valid JSON. No markdown, no explanations, no comments.`;
+a) TERMOS SIMPLES DE 1 PALAVRA PRIMEIRO (prioridade máxima):
+   - Substantivos genéricos: "máquina", "dispositivo", "aparelho", "equipamento"
+   - Em inglês: "machine", "device", "apparatus", "equipment"
+   
+b) VARIAÇÕES MORFOLÓGICAS (verbo → substantivo → adjetivo → agente):
+   - cortar → corte → cortador → cortante
+   - selar → selagem → selador → selante  
+   - aquecer → aquecimento → aquecedor → térmico
+   - cut → cutting → cutter
+   - seal → sealing → sealer
+   
+c) SINÔNIMOS DO COTIDIANO INDUSTRIAL (não apenas técnicos):
+   - "forno" = "estufa" = "câmara"
+   - "molde" = "forma" = "matriz"
+   - "prensa" = "compressor" = "máquina de prensar"
+   
+d) HIPERÔNIMOS (termos mais genéricos que capturam o conceito pai):
+   - "pastel" → "massa recheada" → "produto alimentício"
+   - "sensor" → "transdutor" → "elemento de medição"
+
+e) DEPOIS termos compostos mais específicos:
+   - "máquina de corte", "dispositivo de selagem"
+
+REGRA DE OURO: Comece SEMPRE com 3-4 termos SIMPLES de 1 palavra, depois adicione 4-6 termos compostos. Mínimo 7-10 termos por grupo.
+
+═══ OBJETIVO ═══
+MÁXIMO RECALL. Se existir QUALQUER patente remotamente similar à invenção, ela DEVE ser encontrável com estes termos. Prefira falsos positivos a falsos negativos. Termos simples e genéricos ampliam o recall.
+
+Retorne APENAS JSON válido. Sem markdown, sem explicações.`;
 
 // Format briefing as readable structured text for better LLM comprehension
 function formatBriefingForPrompt(briefing: any): string {
@@ -370,7 +395,7 @@ fastify.post('/strategy', async (request, reply) => {
 
     const formattedBriefing = formatBriefingForPrompt(briefing);
 
-    const prompt = `Analise o briefing técnico abaixo e gere uma estratégia de busca de patentes completa.
+    const prompt = `Analise o briefing técnico abaixo e gere uma estratégia de busca de patentes com MÁXIMO RECALL.
 
 ═══════════════════════════════════════
 BRIEFING DA INVENÇÃO
@@ -387,23 +412,26 @@ Use descrições funcionais curtas.
 
 2) CAMADAS DE KEYWORDS (blocks)
 Para cada eixo, crie 1 camada (block) com 1-2 grupos (groups) de sinônimos.
-- Cada grupo tem 4-6 termos bilingues (PT + EN) conectados por OR.
-- Grupos dentro da mesma camada = AND (sub-aspectos do mesmo eixo).
-- Camadas são conectadas por AND entre si.
-- MÁXIMO 3 camadas (blocks). Agrupe eixos relacionados se precisar.
+MÁXIMO 3 camadas (blocks). Agrupe eixos relacionados se necessário.
 
-REGRAS DE TERMOS:
-- Use APENAS termos encontráveis em claims/abstracts de patentes reais.
-- Prefira termos funcionais e descritivos, não acadêmicos.
-- Inclua variações morfológicas: "solar collector", "solar concentrator", "concentrador solar", "coletor solar".
-- NÃO use: termos de marca, neologismos, gírias técnicas locais.
+REGRAS CRÍTICAS DE TERMOS (siga na ordem):
+a) PRIMEIRO: 3-4 termos SIMPLES de 1 palavra (PT + EN) — substantivos genéricos.
+   Ex: "máquina", "machine", "dispositivo", "device", "aparelho", "apparatus"
+b) DEPOIS: variações morfológicas (verbo/substantivo/adjetivo/agente):
+   Ex: "cortar", "corte", "cortador" / "cut", "cutting", "cutter"
+c) DEPOIS: sinônimos do cotidiano industrial:
+   Ex: "prensa" = "compressor" / "molde" = "forma" = "matriz"
+d) POR ÚLTIMO: termos compostos mais específicos:
+   Ex: "máquina de corte", "cutting machine", "dispositivo de selagem"
+e) Mínimo 7-10 termos por grupo. Mix bilingue PT + EN.
+f) NÃO use: termos de marca, neologismos, gírias.
 
 3) SEARCH LEVELS (searchLevels) — 3 níveis de queries PRONTAS
 
 REGRAS CQL (Espacenet):
 - Sintaxe: ta all "termo" (SEMPRE "ta all", NUNCA "ti=" ou "ab=")
-- Máx 250 caracteres por query
-- Nível 1: máx 1 AND — busca ampla com 3-5 termos genéricos
+- Máx 300 caracteres por query
+- Nível 1: máx 1 AND — busca ampla, use termos SIMPLES de 1 palavra
 - Nível 2: máx 2 AND — cruza 2 conceitos
 - Nível 3: máx 3 AND — mais refinado
 
@@ -416,40 +444,29 @@ REGRAS INPI:
 3-5 códigos IPC/CPC mais relevantes com justificativa técnica de 1 linha.
 
 ═══════════════════════════════════════
-EXEMPLO DE INPUT/OUTPUT
+EXEMPLO COMPLETO
 ═══════════════════════════════════════
 
-INPUT (briefing):
-Problema: Aquecedores solares tradicionais perdem eficiência em dias nublados.
-Solução: Sistema com concentrador parabólico e reservatório térmico com PCM.
-Diferenciais: Material de mudança de fase (PCM), rastreamento solar automático.
-Aplicações: Aquecimento residencial, industrial.
+Briefing: Máquina automática para fabricação de pastéis com corte e selagem integrados.
 
-OUTPUT esperado:
 {
   "techBlocks": [
-    { "id": "tb1", "name": "Concentrador Solar", "description": "Dispositivo óptico de concentração de radiação solar usando geometria parabólica" },
-    { "id": "tb2", "name": "Armazenamento Térmico", "description": "Sistema de armazenamento de energia térmica com material de mudança de fase" },
-    { "id": "tb3", "name": "Sistema de Rastreamento", "description": "Mecanismo de rastreamento solar automático para otimizar captação" }
+    { "id": "tb1", "name": "Máquina de Conformação de Massa", "description": "Equipamento para moldar, recortar e fechar massa alimentícia recheada" },
+    { "id": "tb2", "name": "Sistema de Corte", "description": "Mecanismo para corte e separação de porções de massa" },
+    { "id": "tb3", "name": "Sistema de Selagem", "description": "Dispositivo para vedação e fechamento das bordas da massa" }
   ],
   "blocks": [
     {
       "id": "b1", "connector": "AND",
       "groups": [
-        { "id": "g1", "terms": ["solar concentrator", "parabolic collector", "concentrador solar", "coletor parabólico", "parabolic trough"] }
+        { "id": "g1", "terms": ["machine", "máquina", "apparatus", "aparelho", "device", "dispositivo", "equipment", "equipamento", "food machine", "máquina alimentícia", "pastel machine", "máquina de pastel", "empanada machine"] }
       ]
     },
     {
       "id": "b2", "connector": "AND",
       "groups": [
-        { "id": "g2", "terms": ["thermal storage", "heat accumulator", "armazenamento térmico", "reservatório térmico", "thermal reservoir"] },
-        { "id": "g3", "terms": ["phase change material", "PCM", "material de mudança de fase", "latent heat storage"] }
-      ]
-    },
-    {
-      "id": "b3", "connector": "AND",
-      "groups": [
-        { "id": "g4", "terms": ["solar tracking", "sun tracker", "rastreamento solar", "seguidor solar", "solar tracking system"] }
+        { "id": "g2", "terms": ["cutter", "cortador", "cutting", "corte", "cut", "cortar", "blade", "lâmina", "knife", "faca", "cutting device", "dispositivo de corte", "cutting wheel", "disco de corte"] },
+        { "id": "g3", "terms": ["sealer", "selador", "sealing", "selagem", "seal", "selar", "crimper", "recravador", "press", "prensa", "edge sealer", "selador de bordas", "heat sealer", "seladora térmica"] }
       ]
     }
   ],
@@ -457,32 +474,33 @@ OUTPUT esperado:
     {
       "level": 1,
       "label": "Busca Ampla",
-      "cql": "ta all \"solar concentrator\" OR ta all \"parabolic collector\" OR ta all \"solar thermal\"",
-      "inpi": "(\"concentrador solar\" OR \"coletor solar\" OR \"aquecimento solar\")"
+      "cql": "ta all machine OR ta all apparatus OR ta all \"food machine\" OR ta all pastry OR ta all empanada",
+      "inpi": "(\"máquina\" OR \"aparelho\" OR \"dispositivo\" OR \"pastel\" OR \"massa recheada\")"
     },
     {
       "level": 2,
       "label": "Interseção Tecnológica",
-      "cql": "(ta all \"solar concentrator\" OR ta all \"parabolic collector\") AND (ta all \"thermal storage\" OR ta all \"phase change material\")",
-      "inpi": "(\"concentrador solar\" OR \"coletor parabólico\") AND (\"armazenamento térmico\" OR \"material de mudança de fase\")"
+      "cql": "(ta all machine OR ta all apparatus OR ta all \"food machine\") AND (ta all cutting OR ta all sealing OR ta all crimping)",
+      "inpi": "(\"máquina\" OR \"aparelho\" OR \"equipamento\") AND (\"corte\" OR \"selagem\" OR \"fechamento\")"
     },
     {
       "level": 3,
       "label": "Busca Refinada",
-      "cql": "(ta all \"parabolic concentrator\" OR ta all \"solar collector\") AND (ta all \"phase change material\" OR ta all \"PCM\") AND (ta all \"solar tracking\" OR ta all \"sun tracker\")",
-      "inpi": "(\"concentrador parabólico\" OR \"coletor solar\") AND (\"material de mudança de fase\") AND (\"rastreamento solar\" OR \"seguidor solar\")"
+      "cql": "(ta all \"pastry machine\" OR ta all \"empanada machine\" OR ta all \"food forming\") AND (ta all cutting OR ta all cutter) AND (ta all sealing OR ta all crimping)",
+      "inpi": "(\"máquina de pastel\" OR \"máquina de massa\") AND (\"corte\" OR \"cortador\") AND (\"selagem\" OR \"selador\" OR \"fechamento\")"
     }
   ],
   "ipc_codes": [
-    { "code": "F24S 23/00", "justification": "Coletores solares com concentradores" },
-    { "code": "F28D 20/02", "justification": "Armazenamento de calor com mudança de fase" },
-    { "code": "F24S 30/00", "justification": "Sistemas de rastreamento solar para coletores" }
+    { "code": "A21C 11/00", "justification": "Máquinas para moldagem de massas alimentícias" },
+    { "code": "A21C 3/00", "justification": "Máquinas para divisão e corte de massa" },
+    { "code": "B65B 9/00", "justification": "Máquinas para embalar produtos em envoltórios formados a partir de material plano" }
   ]
 }
 
 ═══════════════════════════════════════
 AGORA GERE A ESTRATÉGIA PARA O BRIEFING ACIMA
 ═══════════════════════════════════════
+LEMBRE: termos SIMPLES de 1 palavra primeiro, depois compostos. Mínimo 7-10 termos por grupo.
 Retorne APENAS o JSON, sem texto adicional.`;
 
     try {
