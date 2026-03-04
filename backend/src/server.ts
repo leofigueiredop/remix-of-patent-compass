@@ -64,13 +64,20 @@ async function getOpsToken(): Promise<string> {
 
 // ─── Groq Helper (primary) ─────────────────────────────────────
 async function generateWithGroq(prompt: string, expectJson = true): Promise<string> {
+    // Split prompt into system (role) + user (content) for better instruction following.
+    // The system message sets the persona; the user message has the actual task.
+    const systemMessage = 'You are a senior patent search engineer and query architect. You are an expert in CQL (Espacenet OPS API), INPI boolean search, and IPC classification. You always respond in the requested format. When JSON is requested, return ONLY valid JSON without markdown or explanations. You are fluent in both Portuguese and English patent terminology.';
+
     const response = await axios.post(
         'https://api.groq.com/openai/v1/chat/completions',
         {
             model: 'llama-3.3-70b-versatile',
-            messages: [{ role: 'user', content: prompt }],
-            temperature: 0.2,
-            max_tokens: 4096,
+            messages: [
+                { role: 'system', content: systemMessage },
+                { role: 'user', content: prompt }
+            ],
+            temperature: 0.3,
+            max_tokens: 8192,
             ...(expectJson ? { response_format: { type: 'json_object' } } : {})
         },
         {
