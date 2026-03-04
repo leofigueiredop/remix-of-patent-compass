@@ -26,12 +26,13 @@ fastify.register(jwt, { secret: process.env.JWT_SECRET || 'patent-scope-secret-c
 
 // ─── Environment ───────────────────────────────────────────────
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 const WHISPER_BASE_URL = process.env.WHISPER_BASE_URL || 'http://whisper:8000';
 const OPS_CONSUMER_KEY = process.env.OPS_CONSUMER_KEY || '';
 const OPS_CONSUMER_SECRET = process.env.OPS_CONSUMER_SECRET || '';
 const INPI_MODE = process.env.INPI_MODE || 'scrape';
 
-// Inicializa SDK do Gemini (usaremos o 2.5-flash, que é rápido e super barato/grátis)
+// Inicializa SDK do Gemini (fallback)
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
 // ─── OPS Token Cache ───────────────────────────────────────────
@@ -61,8 +62,33 @@ async function getOpsToken(): Promise<string> {
     return opsAccessToken!;
 }
 
-// ─── Gemini Helper ─────────────────────────────────────────────
-async function generateWithGemini(prompt: string, expectJson = true): Promise<string> {
+// ─── Groq Helper (primary) ─────────────────────────────────────
+async function generateWithGroq(prompt: string, expectJson = true): Promise<string> {
+    const response = await axios.post(
+        'https://api.groq.com/openai/v1/chat/completions',
+        {
+            model: 'llama-3.3-70b-versatile',
+            messages: [{ role: 'user', content: prompt }],
+            temperature: 0.2,
+            max_tokens: 4096,
+            ...(expectJson ? { response_format: { type: 'json_object' } } : {})
+        },
+        {
+            headers: {
+                'Authorization': `Bearer ${GROQ_API_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            timeout: 60000
+        }
+    );
+
+    const text = response.data?.choices?.[0]?.message?.content;
+    if (!text) throw new Error('Groq retornou uma resposta vazia.');
+    return text;
+}
+
+// ─── Gemini Helper (fallback) ──────────────────────────────────
+async function generateWithGeminiDirect(prompt: string, expectJson = true): Promise<string> {
     if (!GEMINI_API_KEY) {
         throw new Error('GEMINI_API_KEY não configurada no servidor.');
     }
@@ -71,13 +97,27 @@ async function generateWithGemini(prompt: string, expectJson = true): Promise<st
         model: 'gemini-2.5-flash',
         contents: prompt,
         config: {
-            temperature: 0.2, // Baixa temperatura para fatos/análise técnica
+            temperature: 0.2,
             responseMimeType: expectJson ? "application/json" : "text/plain"
         }
     });
 
     if (!response.text) throw new Error("Gemini retornou uma resposta vazia.");
     return response.text;
+}
+
+// ─── Unified LLM Helper: Groq first, Gemini fallback ──────────
+async function generateWithGemini(prompt: string, expectJson = true): Promise<string> {
+    // Try Groq first (free tier, fast)
+    if (GROQ_API_KEY) {
+        try {
+            return await generateWithGroq(prompt, expectJson);
+        } catch (error: any) {
+            fastify.log.warn(`Groq failed, falling back to Gemini: ${error.message}`);
+        }
+    }
+    // Fallback to Gemini
+    return await generateWithGeminiDirect(prompt, expectJson);
 }
 
 // ─── POST /auth/register ───────────────────────────────────────
@@ -139,7 +179,7 @@ fastify.get('/auth/me', async (request, reply) => {
 fastify.get('/health', async () => {
     return {
         status: 'ok',
-        services: { gemini: GEMINI_API_KEY ? 'configured' : 'missing', whisper: WHISPER_BASE_URL },
+        services: { groq: GROQ_API_KEY ? 'configured' : 'missing', gemini: GEMINI_API_KEY ? 'configured' : 'missing', whisper: WHISPER_BASE_URL },
         ops: OPS_CONSUMER_KEY ? 'configured' : 'missing',
         inpi_mode: INPI_MODE
     };
