@@ -26,6 +26,83 @@ interface StrategyBlock {
   connector: "AND" | "OR";
 }
 
+// ─── Build deterministic search levels from blocks ──────────────────────
+function buildSearchLevelsFromBlocks(blocks: StrategyBlock[], classifications: string[]): SearchLevel[] {
+  const validBlocks = blocks.filter(b => b.groups.some(g => g.terms.length > 0));
+  if (validBlocks.length === 0) return [];
+
+  const buildCqlForBlocks = (bks: StrategyBlock[], maxTermsPerBlock = 6): string => {
+    const parts = bks.map(block => {
+      const allTerms = block.groups.flatMap(g => g.terms).filter(t => t.trim() !== '');
+      const limited = allTerms.slice(0, maxTermsPerBlock);
+      if (limited.length === 0) return '';
+      return `(${limited.map(t => t.includes(' ') ? `ta all "${t}"` : `ta all ${t}`).join(' OR ')})`;
+    }).filter(p => p !== '');
+    let q = parts.join(' AND ');
+    // Add IPC classification if available
+    if (classifications.length > 0) {
+      q += ` AND (${classifications.map(c => `ic="${c}"`).join(' OR ')})`;
+    }
+    // OPS limit: ~300 chars. Truncate if needed
+    if (q.length > 300) {
+      // Rebuild without classifications and with fewer terms
+      const shortParts = bks.map(block => {
+        const allTerms = block.groups.flatMap(g => g.terms).filter(t => t.trim() !== '');
+        const limited = allTerms.slice(0, 4);
+        if (limited.length === 0) return '';
+        return `(${limited.map(t => t.includes(' ') ? `ta all "${t}"` : `ta all ${t}`).join(' OR ')})`;
+      }).filter(p => p !== '');
+      q = shortParts.join(' AND ');
+    }
+    return q;
+  };
+
+  const buildInpiForBlocks = (bks: StrategyBlock[], maxTermsPerBlock = 8): string => {
+    const parts = bks.map(block => {
+      // INPI: only Portuguese terms (heuristic: skip terms that look purely English)
+      const allTerms = block.groups.flatMap(g => g.terms).filter(t => t.trim() !== '');
+      const limited = allTerms.slice(0, maxTermsPerBlock);
+      if (limited.length === 0) return '';
+      return `(${limited.map(t => `"${t}"`).join(' OR ')})`;
+    }).filter(p => p !== '');
+    return parts.join(' AND ');
+  };
+
+  const levels: SearchLevel[] = [];
+
+  // Level 1: Only first block — broad
+  if (validBlocks.length >= 1) {
+    levels.push({
+      level: 1,
+      label: `Busca Ampla — apenas camada 1 (${validBlocks[0].groups.flatMap(g => g.terms).length} termos)`,
+      cql: buildCqlForBlocks([validBlocks[0]], 8),
+      inpi: buildInpiForBlocks([validBlocks[0]], 10),
+    });
+  }
+
+  // Level 2: First two blocks — balanced
+  if (validBlocks.length >= 2) {
+    levels.push({
+      level: 2,
+      label: `Interseção — camada 1 AND camada 2`,
+      cql: buildCqlForBlocks(validBlocks.slice(0, 2)),
+      inpi: buildInpiForBlocks(validBlocks.slice(0, 2)),
+    });
+  }
+
+  // Level 3: All blocks — refined
+  if (validBlocks.length >= 3) {
+    levels.push({
+      level: 3,
+      label: `Busca Refinada — todas as ${validBlocks.length} camadas`,
+      cql: buildCqlForBlocks(validBlocks),
+      inpi: buildInpiForBlocks(validBlocks),
+    });
+  }
+
+  return levels;
+}
+
 export default function Keywords() {
   const navigate = useNavigate();
   const { strategy, setSearchResults, setCqlQuery, briefing } = useResearch();
@@ -41,7 +118,7 @@ export default function Keywords() {
   const [ipcDetails, setIpcDetails] = useState<IpcCode[]>([]);
   const [techBlocks, setTechBlocks] = useState<TechBlock[]>([]);
   const [searchLevels, setSearchLevels] = useState<SearchLevel[]>([]);
-  const [selectedLevel, setSelectedLevel] = useState<string>("2");
+  const [selectedLevel, setSelectedLevel] = useState<string>("custom");
   const [showTechBlocks, setShowTechBlocks] = useState(true);
   const [newTerm, setNewTerm] = useState<{ blockId: string; groupId: string; value: string }>({ blockId: "", groupId: "", value: "" });
   const [newClassCode, setNewClassCode] = useState("");
@@ -52,21 +129,23 @@ export default function Keywords() {
   // Populate from strategy when available
   useEffect(() => {
     if (strategy) {
+      let newBlocks: StrategyBlock[] = [];
       if (strategy.blocks && strategy.blocks.length > 0) {
-        setBlocks(strategy.blocks);
+        newBlocks = strategy.blocks;
       } else {
         // Fallback for old strategy format
         const ptTerms = strategy.keywords_pt || [];
         const enTerms = strategy.keywords_en || [];
-        setBlocks([{
+        newBlocks = [{
           id: "b1",
           connector: "AND",
           groups: [
             { id: "g1", terms: ptTerms.slice(0, 4) },
             { id: "g2", terms: enTerms.slice(0, 4) }
           ].filter(g => g.terms.length > 0)
-        }]);
+        }];
       }
+      setBlocks(newBlocks);
 
       // Parse IPC codes (support both string[] and IpcCode[] formats)
       const ipcCodes: string[] = [];
@@ -85,13 +164,19 @@ export default function Keywords() {
       // Tech blocks
       if (strategy.techBlocks) setTechBlocks(strategy.techBlocks);
 
-      // Search levels — default to Level 2 (balanced) if available
-      if (strategy.searchLevels && strategy.searchLevels.length > 0) {
-        setSearchLevels(strategy.searchLevels);
-        setSelectedLevel("2");
-      }
+      // Build search levels deterministically from blocks (not from LLM)
+      const deterministicLevels = buildSearchLevelsFromBlocks(newBlocks, ipcCodes);
+      setSearchLevels(deterministicLevels);
+      // Default to "custom" so the user always sees the full query from all blocks
+      setSelectedLevel("custom");
     }
   }, [strategy]);
+
+  // Rebuild search levels whenever blocks or classifications change
+  useEffect(() => {
+    const levels = buildSearchLevelsFromBlocks(blocks, classifications);
+    setSearchLevels(levels);
+  }, [blocks, classifications]);
 
   const addBlock = () => {
     setBlocks([...blocks, {

@@ -809,12 +809,21 @@ function searchInpiViaCurl(params: {
         const postBody = Object.entries(fields)
             .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
             .join('&');
-        fastify.log.info(`INPI curl search: ${postBody}`);
+        fastify.log.info(`INPI curl search body: ${postBody.substring(0, 500)}`);
 
-        const html = execSync(
-            `curl -s -b ${cookieFile} -X POST 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController' -d '${postBody}' | iconv -f ISO-8859-1 -t UTF-8`,
-            { timeout: 30000, encoding: 'utf-8', maxBuffer: 5 * 1024 * 1024 }
-        );
+        // Write postBody to temp file to avoid shell escaping issues
+        const dataFile = `/tmp/inpi_data_${randomUUID()}.txt`;
+        fs.writeFileSync(dataFile, postBody, 'utf-8');
+
+        let html: string;
+        try {
+            html = execSync(
+                `curl -s -b ${cookieFile} -X POST 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController' --data @${dataFile} | iconv -f ISO-8859-1 -t UTF-8`,
+                { timeout: 30000, encoding: 'utf-8', maxBuffer: 5 * 1024 * 1024 }
+            );
+        } finally {
+            try { fs.unlinkSync(dataFile); } catch { }
+        }
 
         // Cleanup
         try { execSync(`rm -f ${cookieFile}`); } catch { }
@@ -828,10 +837,11 @@ function searchInpiViaCurl(params: {
 }
 
 async function scrapeInpiBuscaWeb(keywords: string[], _ipcCodes: string[], inpiQuery?: string): Promise<any[]> {
-    // If we have a pre-built INPI boolean query, use it in the Resumo field for better recall.
-    // Otherwise fallback to simple keyword join in Titulo.
+    // If we have a pre-built INPI boolean query, use it in Titulo (which supports boolean).
+    // Also put simpler terms in Resumo for broader recall.
     if (inpiQuery) {
-        return searchInpiViaCurl({ resumo: inpiQuery });
+        fastify.log.info(`INPI boolean query: ${inpiQuery.substring(0, 300)}`);
+        return searchInpiViaCurl({ keywords: inpiQuery });
     }
     return searchInpiViaCurl({ keywords: keywords.join(' ') });
 }
@@ -953,6 +963,11 @@ fastify.post('/search', async (request, reply) => {
         keywords?: string[];
         ipc_codes: string[];
     };
+
+    fastify.log.info(`=== SEARCH REQUEST ===`);
+    fastify.log.info(`CQL query (${cql?.length || 0} chars): ${cql}`);
+    fastify.log.info(`INPI query (${inpiQuery?.length || 0} chars): ${inpiQuery}`);
+    fastify.log.info(`IPC codes: ${ipc_codes?.join(', ') || 'none'}`);
 
     const results: { espacenet: any[]; inpi: any[] } = { espacenet: [], inpi: [] };
 
