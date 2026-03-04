@@ -903,56 +903,75 @@ fastify.post('/analyze', async (request, reply) => {
     }
 
     try {
-        // Analyze patents in batches of 3 (avoid overloading LLM)
         const analyzed: any[] = [];
-        const batchSize = 3;
+        // Analyze 5 patents per LLM call to reduce total API calls
+        // 100 patents = ~20 calls instead of 100
+        const batchSize = 5;
 
         for (let i = 0; i < patents.length; i += batchSize) {
             const batch = patents.slice(i, i + batchSize);
 
-            const batchPromises = batch.map(async (patent: any) => {
-                const prompt = `Você é um especialista em propriedade intelectual. Compare a patente encontrada com a invenção do cliente e avalie o risco de colisão.
+            const patentsBlock = batch.map((p: any, idx: number) =>
+                `[PATENTE ${idx + 1}]
+Número: ${p.publicationNumber || p.number || 'N/A'}
+Título: ${p.title || 'Sem título'}
+Resumo: ${(p.abstract || '').substring(0, 300)}
+Titular: ${p.applicant || 'Desconhecido'}
+IPC: ${p.classification || 'N/A'}`
+            ).join('\n\n');
+
+            const prompt = `Você é um especialista em propriedade intelectual brasileiro. Compare CADA patente abaixo com a invenção do cliente e avalie o risco de colisão.
 
 INVENÇÃO DO CLIENTE:
 Problema: ${briefing.problemaTecnico || ''}
 Solução: ${briefing.solucaoProposta || ''}
 Diferenciais: ${briefing.diferenciais || ''}
 
-PATENTE ENCONTRADA:
-Número: ${patent.publicationNumber}
-Título: ${patent.title}
-Resumo: ${patent.abstract || 'Não disponível'}
-Titular: ${patent.applicant}
-Classificação: ${patent.classification || 'N/A'}
+${patentsBlock}
 
-Responda APENAS um JSON com:
+Responda um JSON com array "results" contendo EXATAMENTE ${batch.length} objetos, um para cada patente, NA MESMA ORDEM:
 {
-  "riskLevel": "high" ou "medium" ou "low",
-  "score": número de 0 a 100 indicando grau de sobreposição,
-  "justificativa": "explicação em português do grau de risco e sobreposição técnica (2-3 frases)"
+  "results": [
+    {
+      "index": 0,
+      "riskLevel": "high" ou "medium" ou "low",
+      "score": número de 0 a 100,
+      "justificativa": "explicação em PT-BR do risco (1-2 frases)"
+    }
+  ]
 }`;
 
-                try {
-                    const raw = await generateWithGemini(prompt, true);
-                    const parsed = JSON.parse(raw);
-                    return {
+            try {
+                const raw = await generateWithGemini(prompt, true);
+                const parsed = JSON.parse(raw);
+                const results = parsed.results || parsed.patents || [];
+
+                batch.forEach((patent: any, idx: number) => {
+                    const analysis = results[idx] || {};
+                    analyzed.push({
                         ...patent,
-                        riskLevel: parsed.riskLevel || 'medium',
-                        score: parsed.score ?? 50,
-                        justificativa: parsed.justificativa || ''
-                    };
-                } catch {
-                    return {
+                        riskLevel: analysis.riskLevel || 'medium',
+                        score: analysis.score ?? 50,
+                        justificativa: analysis.justificativa || ''
+                    });
+                });
+            } catch (err: any) {
+                fastify.log.warn(`Batch analysis failed (patents ${i + 1}-${i + batch.length}): ${err.message}`);
+                // Fallback: mark batch as unanalyzed
+                batch.forEach((patent: any) => {
+                    analyzed.push({
                         ...patent,
                         riskLevel: 'medium',
                         score: 50,
                         justificativa: 'Análise automática indisponível — avalie manualmente.'
-                    };
-                }
-            });
+                    });
+                });
+            }
 
-            const batchResults = await Promise.all(batchPromises);
-            analyzed.push(...batchResults);
+            // Rate limit delay: wait 1.5s between batches to avoid Groq throttling
+            if (i + batchSize < patents.length) {
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            }
         }
 
         // Sort by score descending
