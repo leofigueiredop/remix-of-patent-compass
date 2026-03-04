@@ -522,7 +522,7 @@ fastify.post('/search/espacenet', async (request, reply) => {
 
     try {
         const token = await getOpsToken();
-        const url = `http://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=${encodeURIComponent(cql)}`;
+        const url = `https://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=${encodeURIComponent(cql)}`;
 
         const response = await axios.get(url, {
             headers: {
@@ -838,7 +838,7 @@ fastify.post('/search/quick', async (request, reply) => {
 
             const cql = cqlParts.join(' AND ');
             const token = await getOpsToken();
-            const opsUrl = `http://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=${encodeURIComponent(cql)}`;
+            const opsUrl = `https://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=${encodeURIComponent(cql)}`;
 
             const response = await axios.get(opsUrl, {
                 headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
@@ -875,7 +875,7 @@ fastify.post('/search', async (request, reply) => {
         cql ? (async () => {
             try {
                 const token = await getOpsToken();
-                const url = `http://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=${encodeURIComponent(cql)}`;
+                const url = `https://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=${encodeURIComponent(cql)}`;
                 const response = await axios.get(url, {
                     headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
                     timeout: 30000
@@ -889,8 +889,16 @@ fastify.post('/search', async (request, reply) => {
         inpiStr ? scrapeInpiBuscaWeb([inpiStr], ipc_codes || [], inpiQuery) : Promise.resolve([])
     ]);
 
-    if (espacenetResult.status === 'fulfilled') results.espacenet = espacenetResult.value;
-    if (inpiResult.status === 'fulfilled') results.inpi = inpiResult.value;
+    if (espacenetResult.status === 'fulfilled') {
+        results.espacenet = espacenetResult.value;
+    } else {
+        fastify.log.error(`Espacenet search FAILED: ${espacenetResult.reason?.message || espacenetResult.reason}`);
+    }
+    if (inpiResult.status === 'fulfilled') {
+        results.inpi = inpiResult.value;
+    } else {
+        fastify.log.error(`INPI search FAILED: ${inpiResult.reason?.message || inpiResult.reason}`);
+    }
 
     return results;
 });
