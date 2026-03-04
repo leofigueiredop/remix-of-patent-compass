@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Maximize2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import AppLayout from "@/components/AppLayout";
 import WizardSteps from "@/components/WizardSteps";
 import LoadingTransition from "@/components/LoadingTransition";
@@ -28,6 +30,7 @@ export default function StructuredBriefing() {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [expandedField, setExpandedField] = useState<string | null>(null);
 
   const updateField = (key: string, value: string) => {
     setLocalBriefing((prev) => ({ ...prev, [key]: value }));
@@ -47,6 +50,10 @@ export default function StructuredBriefing() {
       setLoading(false);
     }
   };
+
+  const expandedFieldData = expandedField
+    ? fields.find(f => f.key === expandedField)
+    : null;
 
   return (
     <AppLayout>
@@ -72,17 +79,28 @@ export default function StructuredBriefing() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="space-y-5">
           {fields.map((field) => (
-            <div key={field.key} className="bg-card rounded-lg border p-5 flex flex-col h-full">
-              <label className="flex items-center gap-2 text-sm font-semibold mb-3">
-                <span>{field.icon}</span>
-                {field.label}
-              </label>
+            <div key={field.key} className="bg-card rounded-lg border p-5">
+              <div className="flex items-center justify-between mb-3">
+                <label className="flex items-center gap-2 text-sm font-semibold">
+                  <span>{field.icon}</span>
+                  {field.label}
+                </label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                  onClick={() => setExpandedField(field.key)}
+                  title="Maximizar"
+                >
+                  <Maximize2 className="w-3.5 h-3.5" />
+                </Button>
+              </div>
               <Textarea
                 value={localBriefing[field.key]}
                 onChange={(e) => updateField(field.key, e.target.value)}
-                className="min-h-[180px] flex-1 resize-y text-sm leading-relaxed"
+                className="min-h-[140px] resize-y text-sm leading-relaxed"
               />
             </div>
           ))}
@@ -97,6 +115,30 @@ export default function StructuredBriefing() {
           </Button>
         </div>
       </div>
+
+      {/* Maximize Modal */}
+      <Dialog open={!!expandedField} onOpenChange={(open) => !open && setExpandedField(null)}>
+        <DialogContent className="max-w-4xl w-[95vw] h-[85vh] flex flex-col p-0 gap-0">
+          {expandedFieldData && (
+            <>
+              <DialogHeader className="p-5 pb-3 border-b shrink-0">
+                <DialogTitle className="flex items-center gap-2 text-base">
+                  <span>{expandedFieldData.icon}</span>
+                  {expandedFieldData.label}
+                </DialogTitle>
+              </DialogHeader>
+              <div className="flex-1 p-5 min-h-0">
+                <Textarea
+                  value={localBriefing[expandedFieldData.key]}
+                  onChange={(e) => updateField(expandedFieldData.key, e.target.value)}
+                  className="w-full h-full resize-none text-sm leading-relaxed"
+                  autoFocus
+                />
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }
