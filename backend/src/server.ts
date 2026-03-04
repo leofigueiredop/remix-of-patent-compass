@@ -533,7 +533,8 @@ fastify.post('/search/espacenet', async (request, reply) => {
         });
 
         const results = parseOpsResponse(response.data);
-        return { results, total: results.length };
+        const translated = await translatePatentsToPortuguese(results);
+        return { results: translated, total: translated.length };
     } catch (error: any) {
         request.log.error(error);
         if (error.response?.status === 404) {
@@ -610,6 +611,80 @@ function parseOpsResponse(data: any): any[] {
     }
 
     return results;
+}
+
+// Heuristic: detect if text is likely already in Portuguese
+function isLikelyPortuguese(text: string): boolean {
+    if (!text || text.length < 10) return true;
+    const ptIndicators = /\b(de|da|do|das|dos|para|com|uma|um|que|não|por|são|pelo|pela|entre|sobre|como|mais|também|esta|este|ao|aos|nas|nos|seu|sua|pode|tem|foi|ser|ter|está)\b/i;
+    const words = text.split(/\s+/).slice(0, 20);
+    const ptMatches = words.filter(w => ptIndicators.test(w)).length;
+    return ptMatches >= 3;
+}
+
+// Batch translate patent titles and abstracts to PT-BR using LLM
+async function translatePatentsToPortuguese(patents: any[]): Promise<any[]> {
+    if (!patents.length) return patents;
+
+    // Filter patents that need translation (title or abstract not in PT)
+    const needsTranslation = patents.filter(
+        p => !isLikelyPortuguese(p.title) || (!isLikelyPortuguese(p.abstract) && p.abstract)
+    );
+
+    if (needsTranslation.length === 0) return patents;
+
+    // Process in batches of 10
+    const batchSize = 10;
+    const translatedMap = new Map<string, { title: string; abstract: string }>();
+
+    for (let i = 0; i < needsTranslation.length; i += batchSize) {
+        const batch = needsTranslation.slice(i, i + batchSize);
+
+        const items = batch.map((p, idx) =>
+            `[${idx}] TÍTULO: ${p.title}\nRESUMO: ${(p.abstract || '').substring(0, 400)}`
+        ).join('\n\n');
+
+        const prompt = `Traduza os títulos e resumos de patentes abaixo para Português Brasileiro (PT-BR). Mantenha terminologia técnica precisa.
+
+${items}
+
+Responda APENAS um JSON array com objetos na mesma ordem:
+[{"index":0,"title":"título traduzido","abstract":"resumo traduzido"},...]
+
+Se o texto já estiver em português, retorne-o sem alteração. Se o resumo estiver vazio, retorne string vazia.`;
+
+        try {
+            const raw = await generateWithGemini(prompt, true);
+            const parsed = JSON.parse(raw);
+            const translations = Array.isArray(parsed) ? parsed : (parsed.translations || parsed.results || []);
+
+            translations.forEach((t: any, idx: number) => {
+                if (batch[idx]) {
+                    translatedMap.set(batch[idx].publicationNumber, {
+                        title: t.title || batch[idx].title,
+                        abstract: t.abstract ?? batch[idx].abstract
+                    });
+                }
+            });
+        } catch (err: any) {
+            // Translation failed for this batch — keep originals
+            console.warn(`Translation batch failed: ${err.message}`);
+        }
+
+        // Small delay between translation batches
+        if (i + batchSize < needsTranslation.length) {
+            await new Promise(resolve => setTimeout(resolve, 800));
+        }
+    }
+
+    // Apply translations
+    return patents.map(p => {
+        const translation = translatedMap.get(p.publicationNumber);
+        if (translation) {
+            return { ...p, title: translation.title, abstract: translation.abstract };
+        }
+        return p;
+    });
 }
 
 // ─── POST /search/inpi ─────────────────────────────────────────
@@ -846,7 +921,8 @@ fastify.post('/search/quick', async (request, reply) => {
             });
 
             const opsResults = parseOpsResponse(response.data);
-            results.push(...opsResults);
+            const translatedOps = await translatePatentsToPortuguese(opsResults);
+            results.push(...translatedOps);
         } catch (err: any) {
             if (err.response?.status !== 404) {
                 fastify.log.warn(`Quick search Espacenet failed: ${err.message}`);
@@ -880,7 +956,8 @@ fastify.post('/search', async (request, reply) => {
                     headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
                     timeout: 30000
                 });
-                return parseOpsResponse(response.data);
+                const opsResults = parseOpsResponse(response.data);
+                return translatePatentsToPortuguese(opsResults);
             } catch (err: any) {
                 if (err.response?.status === 404) return [];
                 throw err;
