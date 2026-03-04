@@ -63,20 +63,18 @@ async function getOpsToken(): Promise<string> {
 }
 
 // ─── Groq Helper (primary) ─────────────────────────────────────
-async function generateWithGroq(prompt: string, expectJson = true): Promise<string> {
-    // Split prompt into system (role) + user (content) for better instruction following.
-    // The system message sets the persona; the user message has the actual task.
-    const systemMessage = 'You are a senior patent search engineer and query architect. You are an expert in CQL (Espacenet OPS API), INPI boolean search, and IPC classification. You always respond in the requested format. When JSON is requested, return ONLY valid JSON without markdown or explanations. You are fluent in both Portuguese and English patent terminology.';
+const DEFAULT_SYSTEM_MESSAGE = 'You are a senior patent search engineer and query architect. You are an expert in CQL (Espacenet OPS API), INPI boolean search, and IPC classification. You always respond in the requested format. When JSON is requested, return ONLY valid JSON without markdown or explanations. You are fluent in both Portuguese and English patent terminology.';
 
+async function generateWithGroq(prompt: string, expectJson = true, customSystemMessage?: string): Promise<string> {
     const response = await axios.post(
         'https://api.groq.com/openai/v1/chat/completions',
         {
             model: 'llama-3.3-70b-versatile',
             messages: [
-                { role: 'system', content: systemMessage },
+                { role: 'system', content: customSystemMessage || DEFAULT_SYSTEM_MESSAGE },
                 { role: 'user', content: prompt }
             ],
-            temperature: 0.3,
+            temperature: 0.2,
             max_tokens: 8192,
             ...(expectJson ? { response_format: { type: 'json_object' } } : {})
         },
@@ -114,11 +112,11 @@ async function generateWithGeminiDirect(prompt: string, expectJson = true): Prom
 }
 
 // ─── Unified LLM Helper: Groq first, Gemini fallback ──────────
-async function generateWithGemini(prompt: string, expectJson = true): Promise<string> {
+async function generateWithGemini(prompt: string, expectJson = true, customSystemMessage?: string): Promise<string> {
     // Try Groq first (free tier, fast)
     if (GROQ_API_KEY) {
         try {
-            return await generateWithGroq(prompt, expectJson);
+            return await generateWithGroq(prompt, expectJson, customSystemMessage);
         } catch (error: any) {
             fastify.log.warn(`Groq failed, falling back to Gemini: ${error.message}`);
         }
@@ -276,142 +274,222 @@ ${text.substring(0, 15000)}`;
 });
 
 // ─── POST /strategy ────────────────────────────────────────────
+
+// Dedicated system message for patent search strategy generation
+const STRATEGY_SYSTEM_MESSAGE = `You are a world-class patent search strategist with 20+ years of experience at the EPO (European Patent Office) and INPI (Brazil). Your expertise:
+
+1. CQL SYNTAX (Espacenet OPS API):
+   - You use ONLY "ta all" (title+abstract combined) for text search
+   - NEVER use "ti=" or "ab=" separately
+   - Multi-word terms MUST be quoted: ta all "solar collector"
+   - Operators: AND, OR with parentheses
+   - Example: (ta all "solar collector" OR ta all "concentrador solar") AND (ta all "thermal storage" OR ta all "armazenamento térmico")
+
+2. INPI BOOLEAN SYNTAX:
+   - Pure boolean: ("termo1" OR "termo2") AND ("termo3" OR "termo4")
+   - Portuguese terms ONLY
+   - All multi-word terms in double quotes
+
+3. KEYWORD QUALITY:
+   - You ONLY use terminology found in real patent documents (USPTO, EPO, WIPO, INPI)
+   - You NEVER use academic jargon, neologisms, brand names, or subjective terms
+   - You prefer functional/descriptive terms: "heat transfer fluid" not "caloportador"
+   - You provide bilingual terms (EN + PT-BR) as synonyms in the same OR group
+
+4. You return ONLY valid JSON. No markdown, no explanations, no comments.`;
+
+// Format briefing as readable structured text for better LLM comprehension
+function formatBriefingForPrompt(briefing: any): string {
+    const parts: string[] = [];
+    if (briefing.problemaTecnico) parts.push(`PROBLEMA TÉCNICO:\n${briefing.problemaTecnico}`);
+    if (briefing.solucaoProposta) parts.push(`SOLUÇÃO PROPOSTA:\n${briefing.solucaoProposta}`);
+    if (briefing.diferenciais) parts.push(`DIFERENCIAIS TÉCNICOS:\n${briefing.diferenciais}`);
+    if (briefing.aplicacoes) parts.push(`APLICAÇÕES INDUSTRIAIS:\n${briefing.aplicacoes}`);
+    return parts.join('\n\n');
+}
+
+// Post-process and validate strategy output from LLM
+function validateAndFixStrategy(parsed: any): any {
+    // Ensure required fields exist
+    if (!parsed.techBlocks) parsed.techBlocks = [];
+    if (!parsed.blocks) parsed.blocks = [];
+    if (!parsed.searchLevels) parsed.searchLevels = [];
+    if (!parsed.ipc_codes) parsed.ipc_codes = [];
+
+    // Fix blocks: ensure each has id, connector, and groups
+    parsed.blocks = parsed.blocks.map((b: any, i: number) => ({
+        id: b.id || `b${i + 1}`,
+        connector: b.connector || 'AND',
+        groups: (b.groups || []).map((g: any, j: number) => ({
+            id: g.id || `g${i + 1}-${j + 1}`,
+            terms: (g.terms || []).filter((t: any) => typeof t === 'string' && t.trim() !== '')
+        })).filter((g: any) => g.terms.length > 0)
+    })).filter((b: any) => b.groups.length > 0);
+
+    // Fix searchLevels: validate CQL syntax and enforce character limits
+    parsed.searchLevels = parsed.searchLevels.map((lvl: any) => {
+        let cql = (lvl.cql || '').trim();
+        let inpi = (lvl.inpi || '').trim();
+
+        // Fix common CQL mistakes: replace ti= or ab= with ta all
+        cql = cql.replace(/\bti\s*=\s*/gi, 'ta all ');
+        cql = cql.replace(/\bab\s*=\s*/gi, 'ta all ');
+        // Fix ta= without "all"
+        cql = cql.replace(/\bta\s*=\s*/gi, 'ta all ');
+        // Fix double spaces
+        cql = cql.replace(/\s{2,}/g, ' ');
+        inpi = inpi.replace(/\s{2,}/g, ' ');
+
+        return {
+            level: lvl.level,
+            label: lvl.label || `Nível ${lvl.level}`,
+            cql,
+            inpi
+        };
+    });
+
+    // Fix IPC codes: normalize format
+    parsed.ipc_codes = parsed.ipc_codes.map((ipc: any) => {
+        if (typeof ipc === 'string') return { code: ipc.trim(), justification: '' };
+        return { code: (ipc.code || '').trim(), justification: (ipc.justification || '').trim() };
+    }).filter((ipc: any) => ipc.code.length > 0);
+
+    // Fix techBlocks
+    parsed.techBlocks = parsed.techBlocks.map((tb: any, i: number) => ({
+        id: tb.id || `tb${i + 1}`,
+        name: tb.name || `Bloco ${i + 1}`,
+        description: tb.description || ''
+    }));
+
+    return parsed;
+}
+
 fastify.post('/strategy', async (request, reply) => {
     const { briefing } = request.body as { briefing: any };
     if (!briefing) return reply.code(400).send({ error: 'Briefing object is required' });
 
-    const prompt = `Você é um engenheiro de busca de patentes e arquiteto de lógica de consulta.
+    const formattedBriefing = formatBriefingForPrompt(briefing);
 
-A partir do briefing técnico de uma invenção, execute um pipeline completo em 4 fases e retorne APENAS um JSON válido.
+    const prompt = `Analise o briefing técnico abaixo e gere uma estratégia de busca de patentes completa.
 
-========================================
-FASE 1 — DECOMPOSIÇÃO TECNOLÓGICA
-========================================
-Identifique os blocos tecnológicos independentes da invenção.
-Exemplos de blocos: dispositivo físico, sensoriamento, processamento de sinais, classificação, algoritmo adaptativo, sistema de intervenção, aprendizado incremental.
-Cada bloco deve ser descrito de forma técnica e genérica.
+═══════════════════════════════════════
+BRIEFING DA INVENÇÃO
+═══════════════════════════════════════
+${formattedBriefing}
 
-========================================
-FASE 2 — GERAÇÃO DE KEYWORDS PATENTEÁVEIS
-========================================
-Para cada bloco tecnológico, gere keywords organizadas em camadas lógicas.
+═══════════════════════════════════════
+INSTRUÇÕES
+═══════════════════════════════════════
 
-REGRAS OBRIGATÓRIAS:
-- NÃO usar termos conceituais raros ou neologismos.
-- NÃO usar termos autorais ou de marca.
-- Priorizar terminologia encontrada em documentos reais de patente (USPTO, EPO, INPI).
-- Substituir termos subjetivos por termos funcionais observáveis.
-- Misturar termos em Inglês e Português no mesmo grupo de sinônimos.
+1) BLOCOS TECNOLÓGICOS (techBlocks)
+Identifique 2-4 eixos tecnológicos independentes da invenção.
+Use descrições funcionais curtas.
 
-Estrutura lógica:
-- Termos dentro do mesmo grupo = OR (sinônimos diretos).
-- Grupos dentro da mesma camada = AND (sub-conceitos do mesmo eixo).
-- Camadas diferentes = AND (conceitos independentes).
+2) CAMADAS DE KEYWORDS (blocks)
+Para cada eixo, crie 1 camada (block) com 1-2 grupos (groups) de sinônimos.
+- Cada grupo tem 4-6 termos bilingues (PT + EN) conectados por OR.
+- Grupos dentro da mesma camada = AND (sub-aspectos do mesmo eixo).
+- Camadas são conectadas por AND entre si.
+- MÁXIMO 3 camadas (blocks). Agrupe eixos relacionados se precisar.
 
-REGRA ANTI-OVERCONSTRAINT: Use no máximo 3-4 camadas. Se a invenção tiver mais eixos, agrupe eixos relacionados numa mesma camada.
+REGRAS DE TERMOS:
+- Use APENAS termos encontráveis em claims/abstracts de patentes reais.
+- Prefira termos funcionais e descritivos, não acadêmicos.
+- Inclua variações morfológicas: "solar collector", "solar concentrator", "concentrador solar", "coletor solar".
+- NÃO use: termos de marca, neologismos, gírias técnicas locais.
 
-========================================
-FASE 3 — CONSTRUÇÃO DE QUERIES PRONTAS
-========================================
-Gere 3 níveis de busca com queries PRONTAS para uso direto:
+3) SEARCH LEVELS (searchLevels) — 3 níveis de queries PRONTAS
 
-REGRAS CRÍTICAS para todas as queries:
-- Queries CURTAS e FUNCIONAIS. Máximo 300 caracteres por query.
-- Use poucos termos por OR (3-5 no máximo).
-- Nível 1: MÁXIMO 1 AND. Nível 2: MÁXIMO 2 AND. Nível 3: MÁXIMO 3 AND.
+REGRAS CQL (Espacenet):
+- Sintaxe: ta all "termo" (SEMPRE "ta all", NUNCA "ti=" ou "ab=")
+- Máx 250 caracteres por query
+- Nível 1: máx 1 AND — busca ampla com 3-5 termos genéricos
+- Nível 2: máx 2 AND — cruza 2 conceitos
+- Nível 3: máx 3 AND — mais refinado
 
-NÍVEL 1 — Busca ampla (alto recall):
-- 0 ou 1 AND, termos genéricos e curtos.
-- CQL: Use ta= (busca em título + abstract combinados).
-- INPI: String booleana simples com 2-3 termos em PT.
+REGRAS INPI:
+- Sintaxe: ("termo1" OR "termo2") AND ("termo3" OR "termo4")
+- SOMENTE termos em Português
+- Mesmas restrições de AND por nível
 
-NÍVEL 2 — Interseção tecnológica:
-- Cruza 2 eixos com AND.
-- CQL: 2 blocos OR conectados com AND.
-- INPI: Idem em Português.
+4) CÓDIGOS IPC (ipc_codes)
+3-5 códigos IPC/CPC mais relevantes com justificativa técnica de 1 linha.
 
-NÍVEL 3 — Busca refinada:
-- Máximo 3 AND.
-- CQL: Interseção precisa mas COMPACTA.
-- INPI: Idem em Português.
+═══════════════════════════════════════
+EXEMPLO DE INPUT/OUTPUT
+═══════════════════════════════════════
 
-Formato CQL Espacenet válido:
-- ta all "termo" — busca no título E abstract combinados
-- NÃO use ti= e ab= separadamente. Use APENAS ta=.
-- Use AND/OR, parênteses, e aspas corretamente.
-- Exemplo Nível 1: ta all "wearable" OR ta all "portable sensor" OR ta all "vestível"
-- Exemplo Nível 2: (ta all "wearable" OR ta all "portable device") AND (ta all "biometric" OR ta all "physiological")
+INPUT (briefing):
+Problema: Aquecedores solares tradicionais perdem eficiência em dias nublados.
+Solução: Sistema com concentrador parabólico e reservatório térmico com PCM.
+Diferenciais: Material de mudança de fase (PCM), rastreamento solar automático.
+Aplicações: Aquecimento residencial, industrial.
 
-Formato INPI válido:
-- String booleana nativa: ("termo1" OR "termo2") AND ("termo3" OR "termo4")
-- Usar termos em Português SOMENTE.
-- Máximo 1 AND no nível 1, 2 AND no nível 2, 3 AND no nível 3.
-
-========================================
-FASE 4 — IPC RECOMENDADAS
-========================================
-Liste 3-5 códigos IPC/CPC com justificativa técnica de 1 linha cada.
-
-========================================
-AUTOVALIDAÇÃO (execute antes de retornar)
-========================================
-- Alguma query tem mais de 300 caracteres? Se sim, ENCURTE removendo sinônimos redundantes.
-- A query de nível 1 tem mais que 1 AND? REMOVA ANDs extras.
-- A query de nível 3 tem mais que 3 AND? REDUZA.
-- Algum termo parece conceitual/acadêmico demais? Substitua por funcional.
-- Algum bloco tecnológico existe isoladamente no estado da técnica? Marque isso na descrição.
-- Todos os termos compostos estão entre aspas nas queries?
-
-========================================
-FORMATO DE RESPOSTA — JSON ESTRITO
-========================================
+OUTPUT esperado:
 {
   "techBlocks": [
-    { "id": "tb1", "name": "Nome do Bloco", "description": "Descrição técnica funcional" }
+    { "id": "tb1", "name": "Concentrador Solar", "description": "Dispositivo óptico de concentração de radiação solar usando geometria parabólica" },
+    { "id": "tb2", "name": "Armazenamento Térmico", "description": "Sistema de armazenamento de energia térmica com material de mudança de fase" },
+    { "id": "tb3", "name": "Sistema de Rastreamento", "description": "Mecanismo de rastreamento solar automático para otimizar captação" }
   ],
   "blocks": [
     {
-      "id": "b1",
-      "connector": "AND",
+      "id": "b1", "connector": "AND",
       "groups": [
-        {
-          "id": "g1",
-          "terms": ["termo_en", "termo_pt", "sinônimo_en", "sinônimo_pt"]
-        }
+        { "id": "g1", "terms": ["solar concentrator", "parabolic collector", "concentrador solar", "coletor parabólico", "parabolic trough"] }
+      ]
+    },
+    {
+      "id": "b2", "connector": "AND",
+      "groups": [
+        { "id": "g2", "terms": ["thermal storage", "heat accumulator", "armazenamento térmico", "reservatório térmico", "thermal reservoir"] },
+        { "id": "g3", "terms": ["phase change material", "PCM", "material de mudança de fase", "latent heat storage"] }
+      ]
+    },
+    {
+      "id": "b3", "connector": "AND",
+      "groups": [
+        { "id": "g4", "terms": ["solar tracking", "sun tracker", "rastreamento solar", "seguidor solar", "solar tracking system"] }
       ]
     }
   ],
   "searchLevels": [
     {
       "level": 1,
-      "label": "Busca Ampla (Alto Recall)",
-      "cql": "query CQL completa pronta para Espacenet",
-      "inpi": "query booleana completa pronta para INPI"
+      "label": "Busca Ampla",
+      "cql": "ta all \"solar concentrator\" OR ta all \"parabolic collector\" OR ta all \"solar thermal\"",
+      "inpi": "(\"concentrador solar\" OR \"coletor solar\" OR \"aquecimento solar\")"
     },
     {
       "level": 2,
       "label": "Interseção Tecnológica",
-      "cql": "...",
-      "inpi": "..."
+      "cql": "(ta all \"solar concentrator\" OR ta all \"parabolic collector\") AND (ta all \"thermal storage\" OR ta all \"phase change material\")",
+      "inpi": "(\"concentrador solar\" OR \"coletor parabólico\") AND (\"armazenamento térmico\" OR \"material de mudança de fase\")"
     },
     {
       "level": 3,
       "label": "Busca Refinada",
-      "cql": "...",
-      "inpi": "..."
+      "cql": "(ta all \"parabolic concentrator\" OR ta all \"solar collector\") AND (ta all \"phase change material\" OR ta all \"PCM\") AND (ta all \"solar tracking\" OR ta all \"sun tracker\")",
+      "inpi": "(\"concentrador parabólico\" OR \"coletor solar\") AND (\"material de mudança de fase\") AND (\"rastreamento solar\" OR \"seguidor solar\")"
     }
   ],
   "ipc_codes": [
-    { "code": "A61B 5/00", "justification": "Diagnóstico por medição de sinais biométricos" }
+    { "code": "F24S 23/00", "justification": "Coletores solares com concentradores" },
+    { "code": "F28D 20/02", "justification": "Armazenamento de calor com mudança de fase" },
+    { "code": "F24S 30/00", "justification": "Sistemas de rastreamento solar para coletores" }
   ]
 }
 
-Briefing da invenção:
-${JSON.stringify(briefing)}`;
+═══════════════════════════════════════
+AGORA GERE A ESTRATÉGIA PARA O BRIEFING ACIMA
+═══════════════════════════════════════
+Retorne APENAS o JSON, sem texto adicional.`;
 
     try {
-        const raw = await generateWithGemini(prompt, true);
-        const parsed = JSON.parse(raw);
+        const raw = await generateWithGemini(prompt, true, STRATEGY_SYSTEM_MESSAGE);
+        let parsed = JSON.parse(raw);
+        parsed = validateAndFixStrategy(parsed);
+        fastify.log.info(`Strategy generated: ${parsed.techBlocks?.length || 0} tech blocks, ${parsed.blocks?.length || 0} keyword blocks, ${parsed.searchLevels?.length || 0} search levels, ${parsed.ipc_codes?.length || 0} IPC codes`);
         return parsed;
     } catch (error: any) {
         request.log.error(error);
