@@ -411,18 +411,25 @@ Identifique 2-4 eixos tecnológicos independentes da invenção.
 Use descrições funcionais curtas.
 
 2) CAMADAS DE KEYWORDS (blocks)
-Para cada eixo, crie 1 camada (block) com 1-2 grupos (groups) de sinônimos.
-MÁXIMO 3 camadas (blocks). Agrupe eixos relacionados se necessário.
+Crie EXATAMENTE 3 camadas obrigatórias, cada uma representando uma DIMENSÃO da invenção:
 
-REGRAS CRÍTICAS DE TERMOS (siga na ordem):
-a) PRIMEIRO: 3-4 termos SIMPLES de 1 palavra (PT + EN) — substantivos genéricos.
-   Ex: "máquina", "machine", "dispositivo", "device", "aparelho", "apparatus"
+CAMADA 1 — OBJETO (o que É): tipo de dispositivo, aparelho, sistema, estrutura.
+  Ex: "dispositivo", "device", "aparelho", "apparatus", "sensor", "wearable"
+
+CAMADA 2 — AÇÃO/FUNÇÃO (o que FAZ): verbos e substantivos de ação que descrevem a função principal.
+  Ex: "monitorar", "monitor", "monitoramento", "monitoring", "medir", "measure", "aquecer", "heat", "resfriar", "cool"
+
+CAMADA 3 — DOMÍNIO/APLICAÇÃO (onde/para que): área de aplicação, material, ou finalidade.
+  Ex: "saúde", "health", "construção civil", "building", "alimento", "food"
+
+REGRAS CRÍTICAS DE TERMOS (siga na ordem para CADA grupo):
+a) PRIMEIRO: 3-4 termos SIMPLES de 1 palavra (PT + EN) — substantivos/verbos genéricos.
 b) DEPOIS: variações morfológicas (verbo/substantivo/adjetivo/agente):
-   Ex: "cortar", "corte", "cortador" / "cut", "cutting", "cutter"
+   Ex: "monitorar", "monitoramento", "monitor" / "cortar", "corte", "cortador"
 c) DEPOIS: sinônimos do cotidiano industrial:
-   Ex: "prensa" = "compressor" / "molde" = "forma" = "matriz"
+   Ex: "medir" = "aferir" = "mensurar" / "prensa" = "compressor"
 d) POR ÚLTIMO: termos compostos mais específicos:
-   Ex: "máquina de corte", "cutting machine", "dispositivo de selagem"
+   Ex: "dispositivo de monitoramento", "monitoring device"
 e) Mínimo 7-10 termos por grupo. Mix bilingue PT + EN.
 f) NÃO use: termos de marca, neologismos, gírias.
 
@@ -432,8 +439,8 @@ REGRAS CQL (Espacenet):
 - Sintaxe: ta all "termo" (SEMPRE "ta all", NUNCA "ti=" ou "ab=")
 - Máx 300 caracteres por query
 - Nível 1: máx 1 AND — busca ampla, use termos SIMPLES de 1 palavra
-- Nível 2: máx 2 AND — cruza 2 conceitos
-- Nível 3: máx 3 AND — mais refinado
+- Nível 2: máx 2 AND — cruza OBJETO + AÇÃO
+- Nível 3: máx 3 AND — cruza OBJETO + AÇÃO + DOMÍNIO
 
 REGRAS INPI:
 - Sintaxe: ("termo1" OR "termo2") AND ("termo3" OR "termo4")
@@ -447,26 +454,31 @@ REGRAS INPI:
 EXEMPLO COMPLETO
 ═══════════════════════════════════════
 
-Briefing: Máquina automática para fabricação de pastéis com corte e selagem integrados.
+Briefing: Dispositivo vestível para monitoramento contínuo de saúde com coleta de dados fisiológicos.
 
 {
   "techBlocks": [
-    { "id": "tb1", "name": "Máquina de Conformação de Massa", "description": "Equipamento para moldar, recortar e fechar massa alimentícia recheada" },
-    { "id": "tb2", "name": "Sistema de Corte", "description": "Mecanismo para corte e separação de porções de massa" },
-    { "id": "tb3", "name": "Sistema de Selagem", "description": "Dispositivo para vedação e fechamento das bordas da massa" }
+    { "id": "tb1", "name": "Dispositivo Vestível", "description": "Equipamento portátil vestível para uso contínuo no corpo" },
+    { "id": "tb2", "name": "Monitoramento Fisiológico", "description": "Captação e análise de dados biométricos e fisiológicos" },
+    { "id": "tb3", "name": "Saúde e Bem-Estar", "description": "Aplicação em saúde preventiva e acompanhamento clínico" }
   ],
   "blocks": [
     {
       "id": "b1", "connector": "AND",
       "groups": [
-        { "id": "g1", "terms": ["machine", "máquina", "apparatus", "aparelho", "device", "dispositivo", "equipment", "equipamento", "food machine", "máquina alimentícia", "pastel machine", "máquina de pastel", "empanada machine"] }
+        { "id": "g1", "terms": ["device", "dispositivo", "apparatus", "aparelho", "equipment", "equipamento", "wearable", "vestível", "sensor", "portable", "portátil", "wearable device", "dispositivo vestível"] }
       ]
     },
     {
       "id": "b2", "connector": "AND",
       "groups": [
-        { "id": "g2", "terms": ["cutter", "cortador", "cutting", "corte", "cut", "cortar", "blade", "lâmina", "knife", "faca", "cutting device", "dispositivo de corte", "cutting wheel", "disco de corte"] },
-        { "id": "g3", "terms": ["sealer", "selador", "sealing", "selagem", "seal", "selar", "crimper", "recravador", "press", "prensa", "edge sealer", "selador de bordas", "heat sealer", "seladora térmica"] }
+        { "id": "g2", "terms": ["monitor", "monitorar", "monitoring", "monitoramento", "measure", "medir", "medição", "detect", "detectar", "detecção", "track", "rastrear", "sense", "sensoriamento", "collect", "coletar", "coleta de dados", "data acquisition"] }
+      ]
+    },
+    {
+      "id": "b3", "connector": "AND",
+      "groups": [
+        { "id": "g3", "terms": ["health", "saúde", "medical", "médico", "clinical", "clínico", "physiological", "fisiológico", "biometric", "biométrico", "wellness", "bem-estar", "vital signs", "sinais vitais", "heart rate", "frequência cardíaca"] }
       ]
     }
   ],
@@ -474,33 +486,33 @@ Briefing: Máquina automática para fabricação de pastéis com corte e selagem
     {
       "level": 1,
       "label": "Busca Ampla",
-      "cql": "ta all machine OR ta all apparatus OR ta all \"food machine\" OR ta all pastry OR ta all empanada",
-      "inpi": "(\"máquina\" OR \"aparelho\" OR \"dispositivo\" OR \"pastel\" OR \"massa recheada\")"
+      "cql": "ta all wearable OR ta all sensor OR ta all \"wearable device\" OR ta all \"portable device\"",
+      "inpi": "(\"dispositivo\" OR \"vestível\" OR \"sensor\" OR \"aparelho\" OR \"portátil\")"
     },
     {
       "level": 2,
-      "label": "Interseção Tecnológica",
-      "cql": "(ta all machine OR ta all apparatus OR ta all \"food machine\") AND (ta all cutting OR ta all sealing OR ta all crimping)",
-      "inpi": "(\"máquina\" OR \"aparelho\" OR \"equipamento\") AND (\"corte\" OR \"selagem\" OR \"fechamento\")"
+      "label": "Interseção: Objeto + Ação",
+      "cql": "(ta all wearable OR ta all sensor OR ta all device) AND (ta all monitoring OR ta all measuring OR ta all detecting)",
+      "inpi": "(\"dispositivo\" OR \"vestível\" OR \"sensor\") AND (\"monitoramento\" OR \"medição\" OR \"detecção\")"
     },
     {
       "level": 3,
-      "label": "Busca Refinada",
-      "cql": "(ta all \"pastry machine\" OR ta all \"empanada machine\" OR ta all \"food forming\") AND (ta all cutting OR ta all cutter) AND (ta all sealing OR ta all crimping)",
-      "inpi": "(\"máquina de pastel\" OR \"máquina de massa\") AND (\"corte\" OR \"cortador\") AND (\"selagem\" OR \"selador\" OR \"fechamento\")"
+      "label": "Busca Refinada: Objeto + Ação + Domínio",
+      "cql": "(ta all wearable OR ta all sensor) AND (ta all monitoring OR ta all measuring) AND (ta all health OR ta all physiological OR ta all biometric)",
+      "inpi": "(\"vestível\" OR \"sensor\") AND (\"monitoramento\" OR \"medição\") AND (\"saúde\" OR \"fisiológico\" OR \"biométrico\")"
     }
   ],
   "ipc_codes": [
-    { "code": "A21C 11/00", "justification": "Máquinas para moldagem de massas alimentícias" },
-    { "code": "A21C 3/00", "justification": "Máquinas para divisão e corte de massa" },
-    { "code": "B65B 9/00", "justification": "Máquinas para embalar produtos em envoltórios formados a partir de material plano" }
+    { "code": "A61B 5/00", "justification": "Medição para fins de diagnóstico; identificação de pessoas" },
+    { "code": "G16H 40/67", "justification": "Informática em saúde com dispositivos vestíveis" },
+    { "code": "A61B 5/024", "justification": "Medição de frequência cardíaca ou pressão arterial" }
   ]
 }
 
 ═══════════════════════════════════════
 AGORA GERE A ESTRATÉGIA PARA O BRIEFING ACIMA
 ═══════════════════════════════════════
-LEMBRE: termos SIMPLES de 1 palavra primeiro, depois compostos. Mínimo 7-10 termos por grupo.
+LEMBRE: 3 CAMADAS OBRIGATÓRIAS (Objeto + Ação + Domínio). Termos simples primeiro, depois compostos. Mínimo 7-10 termos por grupo.
 Retorne APENAS o JSON, sem texto adicional.`;
 
     try {
