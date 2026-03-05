@@ -27,76 +27,81 @@ interface StrategyBlock {
 }
 
 // ─── Build deterministic search levels from blocks ──────────────────────
+// OPS CQL limit: ~300 chars. INPI Titulo: only OR is reliable (AND+parentheses hangs).
 function buildSearchLevelsFromBlocks(blocks: StrategyBlock[], classifications: string[]): SearchLevel[] {
   const validBlocks = blocks.filter(b => b.groups.some(g => g.terms.length > 0));
   if (validBlocks.length === 0) return [];
 
-  const buildCqlForBlocks = (bks: StrategyBlock[], maxTermsPerBlock = 6): string => {
-    const parts = bks.map(block => {
+  // Pick the N shortest single-word terms first, then add multi-word if room.
+  const pickTerms = (bks: StrategyBlock[], maxPerBlock: number) => {
+    return bks.map(block => {
       const allTerms = block.groups.flatMap(g => g.terms).filter(t => t.trim() !== '');
-      const limited = allTerms.slice(0, maxTermsPerBlock);
-      if (limited.length === 0) return '';
-      return `(${limited.map(t => t.includes(' ') ? `ta all "${t}"` : `ta all ${t}`).join(' OR ')})`;
+      // Sort: single-word first, then by length ascending
+      const sorted = [...allTerms].sort((a, b) => {
+        const aSingle = !a.includes(' ') ? 0 : 1;
+        const bSingle = !b.includes(' ') ? 0 : 1;
+        return aSingle - bSingle || a.length - b.length;
+      });
+      return sorted.slice(0, maxPerBlock);
+    });
+  };
+
+  const buildCql = (bks: StrategyBlock[], maxTerms = 5): string => {
+    const termSets = pickTerms(bks, maxTerms);
+    const parts = termSets.map(terms => {
+      if (terms.length === 0) return '';
+      return `(${terms.map(t => t.includes(' ') ? `ta all "${t}"` : `ta all ${t}`).join(' OR ')})`;
     }).filter(p => p !== '');
     let q = parts.join(' AND ');
-    // Add IPC classification if available
+    // Add IPC if available and room
     if (classifications.length > 0) {
-      q += ` AND (${classifications.map(c => `ic="${c}"`).join(' OR ')})`;
+      const ipcPart = ` AND (${classifications.slice(0, 2).map(c => `ic="${c}"`).join(' OR ')})`;
+      if ((q + ipcPart).length <= 300) q += ipcPart;
     }
-    // OPS limit: ~300 chars. Truncate if needed
+    // If still over 300 chars, reduce terms
     if (q.length > 300) {
-      // Rebuild without classifications and with fewer terms
-      const shortParts = bks.map(block => {
-        const allTerms = block.groups.flatMap(g => g.terms).filter(t => t.trim() !== '');
-        const limited = allTerms.slice(0, 4);
-        if (limited.length === 0) return '';
-        return `(${limited.map(t => t.includes(' ') ? `ta all "${t}"` : `ta all ${t}`).join(' OR ')})`;
-      }).filter(p => p !== '');
-      q = shortParts.join(' AND ');
+      return buildCql(bks, Math.max(2, maxTerms - 1));
     }
     return q;
   };
 
-  const buildInpiForBlocks = (bks: StrategyBlock[], maxTermsPerBlock = 8): string => {
-    const parts = bks.map(block => {
-      // INPI: only Portuguese terms (heuristic: skip terms that look purely English)
-      const allTerms = block.groups.flatMap(g => g.terms).filter(t => t.trim() !== '');
-      const limited = allTerms.slice(0, maxTermsPerBlock);
-      if (limited.length === 0) return '';
-      return `(${limited.map(t => `"${t}"`).join(' OR ')})`;
-    }).filter(p => p !== '');
-    return parts.join(' AND ');
+  // INPI: only OR is reliable. AND+parentheses causes timeouts.
+  // So we just OR together the best Portuguese terms from the selected blocks.
+  const buildInpi = (bks: StrategyBlock[], maxTerms = 8): string => {
+    const allTerms = bks.flatMap(block =>
+      block.groups.flatMap(g => g.terms).filter(t => t.trim() !== '')
+    );
+    // Prefer shorter terms for recall
+    const sorted = [...allTerms].sort((a, b) => a.length - b.length);
+    const limited = sorted.slice(0, maxTerms);
+    if (limited.length === 0) return '';
+    return limited.map(t => t).join(' OR ');
   };
 
   const levels: SearchLevel[] = [];
 
-  // Level 1: Only first block — broad
   if (validBlocks.length >= 1) {
     levels.push({
       level: 1,
       label: `Busca Ampla — apenas camada 1 (${validBlocks[0].groups.flatMap(g => g.terms).length} termos)`,
-      cql: buildCqlForBlocks([validBlocks[0]], 8),
-      inpi: buildInpiForBlocks([validBlocks[0]], 10),
+      cql: buildCql([validBlocks[0]], 6),
+      inpi: buildInpi([validBlocks[0]], 10),
     });
   }
-
-  // Level 2: First two blocks — balanced
   if (validBlocks.length >= 2) {
     levels.push({
       level: 2,
       label: `Interseção — camada 1 AND camada 2`,
-      cql: buildCqlForBlocks(validBlocks.slice(0, 2)),
-      inpi: buildInpiForBlocks(validBlocks.slice(0, 2)),
+      cql: buildCql(validBlocks.slice(0, 2), 4),
+      inpi: buildInpi(validBlocks.slice(0, 2), 10),
     });
   }
-
-  // Level 3: All blocks — refined
   if (validBlocks.length >= 3) {
     levels.push({
       level: 3,
       label: `Busca Refinada — todas as ${validBlocks.length} camadas`,
-      cql: buildCqlForBlocks(validBlocks),
-      inpi: buildInpiForBlocks(validBlocks),
+      cql: buildCql(validBlocks, 3),
+      inpi: buildInpi(validBlocks, 12),
     });
   }
 
@@ -250,22 +255,19 @@ export default function Keywords() {
   };
 
   // Build CQL query from blocks (Espacenet format)
-  // Each block = one concept layer. All terms within a block are OR'd (synonyms).
-  // Blocks are connected via their connector (AND by default).
-  // Uses ta= (title+abstract combined) instead of duplicating ti/ab per term.
+  // Must stay under 300 chars for OPS API.
   const renderCqlQuery = () => {
     const blockQueries = blocks.map(block => {
-      // Flatten all terms across all groups in this block — they're all synonyms
       const allTerms = block.groups.flatMap(g => g.terms).filter(t => t.trim() !== "");
       if (allTerms.length === 0) return "";
-
-      const termsStr = allTerms.map(t => `ta all "${t}"`).join(" OR ");
+      // Prefer shorter terms first for space efficiency
+      const sorted = [...allTerms].sort((a, b) => a.length - b.length);
+      const termsStr = sorted.map(t => t.includes(' ') ? `ta all "${t}"` : `ta all ${t}`).join(" OR ");
       return `(${termsStr})`;
     }).filter(q => q !== "");
 
     if (blockQueries.length === 0 && classifications.length === 0) return "";
 
-    // Join blocks with their connectors (AND between concept layers)
     let query = blockQueries.length > 0 ? blockQueries[0] : "";
     for (let i = 1; i < blockQueries.length; i++) {
       query = `${query} ${blocks[i - 1].connector} ${blockQueries[i]}`;
@@ -275,7 +277,26 @@ export default function Keywords() {
       ? `${query ? " AND " : ""}(${classifications.map(c => `ic="${c}"`).join(" OR ")})`
       : "";
 
-    return `${query}${classQuery}`;
+    let fullQuery = `${query}${classQuery}`;
+
+    // Enforce 300-char limit: progressively drop terms from largest block
+    if (fullQuery.length > 300) {
+      const reduced = blocks.map(block => {
+        const allTerms = block.groups.flatMap(g => g.terms).filter(t => t.trim() !== "");
+        // Keep max 4 shortest terms
+        const sorted = [...allTerms].sort((a, b) => a.length - b.length).slice(0, 4);
+        if (sorted.length === 0) return "";
+        return `(${sorted.map(t => t.includes(' ') ? `ta all "${t}"` : `ta all ${t}`).join(" OR ")})`;
+      }).filter(q => q !== "");
+
+      query = reduced.length > 0 ? reduced[0] : "";
+      for (let i = 1; i < reduced.length; i++) {
+        query = `${query} AND ${reduced[i]}`;
+      }
+      fullQuery = query;
+    }
+
+    return fullQuery;
   };
 
   // Build display-friendly query from blocks
@@ -303,23 +324,17 @@ export default function Keywords() {
   };
 
   // Build INPI boolean string from blocks
+  // INPI Titulo field only supports OR reliably. AND+parentheses causes timeouts.
+  // So we flatten all terms from all blocks into a single OR query.
   const getInpiQuery = (): string => {
-    const blockQueries = blocks.map(block => {
-      const blockTerms = block.groups.flatMap(g => g.terms).filter(t => t.trim() !== "");
-      if (blockTerms.length === 0) return "";
-
-      const orString = blockTerms.map(t => `"${t}"`).join(" OR ");
-      return `(${orString})`;
-    }).filter(q => q !== "");
-
-    if (blockQueries.length === 0) return "";
-
-    let query = blockQueries[0];
-    for (let i = 1; i < blockQueries.length; i++) {
-      query = `${query} ${blocks[i - 1].connector} ${blockQueries[i]}`;
-    }
-
-    return query;
+    const allTerms = blocks.flatMap(block =>
+      block.groups.flatMap(g => g.terms).filter(t => t.trim() !== "")
+    );
+    if (allTerms.length === 0) return "";
+    // Prefer shorter terms first, limit to ~15 for reliability
+    const sorted = [...allTerms].sort((a, b) => a.length - b.length);
+    const limited = sorted.slice(0, 15);
+    return limited.join(" OR ");
   };
 
   const getActiveCql = (): string => {
