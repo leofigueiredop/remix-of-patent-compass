@@ -34,9 +34,9 @@ function buildSearchLevelsFromBlocks(blocks: StrategyBlock[], classifications: s
   if (validBlocks.length === 0) return [];
 
   // Pick the N shortest single-word terms first, then add multi-word if room.
-  const pickTerms = (bks: StrategyBlock[], maxPerBlock: number, lang: 'pt'|'en') => {
+  const pickTerms = (bks: StrategyBlock[], maxPerBlock: number, lang: 'pt' | 'en') => {
     return bks.map(block => {
-      const allTerms = block.groups.flatMap(g => lang === 'pt' ? (g.terms_pt||[]) : (g.terms_en||[])).filter((t: string) => t && t.trim() !== '');
+      const allTerms = block.groups.flatMap(g => lang === 'pt' ? (g.terms_pt || []) : (g.terms_en || [])).filter((t: string) => t && t.trim() !== '');
       // Sort: single-word first, then by length ascending
       const sorted = [...allTerms].sort((a, b) => {
         const aSingle = !a.includes(' ') ? 0 : 1;
@@ -56,8 +56,12 @@ function buildSearchLevelsFromBlocks(blocks: StrategyBlock[], classifications: s
     let q = parts.join(' AND ');
     // Add IPC if available and room
     if (classifications.length > 0) {
-      const ipcPart = ` AND (${classifications.slice(0, 2).map(c => `ic="${c}"`).join(' OR ')})`;
-      if ((q + ipcPart).length <= 300) q += ipcPart;
+      const ipcPart = `(${classifications.slice(0, 2).map(c => `ic="${c}"`).join(' OR ')})`;
+      if (q) {
+        if ((q + ' AND ' + ipcPart).length <= 300) q += ` AND ${ipcPart}`;
+      } else {
+        if (ipcPart.length <= 300) q = ipcPart;
+      }
     }
     // If still over 300 chars, reduce terms
     if (q.length > 300) {
@@ -70,13 +74,13 @@ function buildSearchLevelsFromBlocks(blocks: StrategyBlock[], classifications: s
   // So we just OR together the best Portuguese terms from the selected blocks.
   const buildInpi = (bks: StrategyBlock[], maxTerms = 8): string => {
     const allTerms = bks.flatMap(block =>
-      block.groups.flatMap(g => (g.terms_pt||[])).filter((t: string) => t && t.trim() !== '')
+      block.groups.flatMap(g => (g.terms_pt || [])).filter((t: string) => t && t.trim() !== '')
     );
     // Prefer shorter terms for recall
     const sorted = [...allTerms].sort((a, b) => a.length - b.length);
     const limited = sorted.slice(0, maxTerms);
     if (limited.length === 0) return '';
-    return limited.map(t => t).join(' OR ');
+    return limited.map(t => t.includes(' ') ? `"${t}"` : t).join(' OR ');
   };
 
   const levels: SearchLevel[] = [];
@@ -84,7 +88,7 @@ function buildSearchLevelsFromBlocks(blocks: StrategyBlock[], classifications: s
   if (validBlocks.length >= 1) {
     levels.push({
       level: 1,
-      label: `Busca Ampla — apenas camada 1 (${validBlocks[0].groups.flatMap(g => [...(g.terms_pt||[]), ...(g.terms_en||[])]).length} termos)`,
+      label: `Busca Ampla — apenas camada 1 (${validBlocks[0].groups.flatMap(g => [...(g.terms_pt || []), ...(g.terms_en || [])]).length} termos)`,
       cql: buildCql([validBlocks[0]], 6),
       inpi: buildInpi([validBlocks[0]], 10),
     });
@@ -126,7 +130,7 @@ export default function Keywords() {
   const [searchLevels, setSearchLevels] = useState<SearchLevel[]>([]);
   const [selectedLevel, setSelectedLevel] = useState<string>("custom");
   const [showTechBlocks, setShowTechBlocks] = useState(true);
-  const [newTerm, setNewTerm] = useState<{ blockId: string; groupId: string; value: string; lang: 'pt'|'en' }>({ blockId: "", groupId: "", value: "", lang: 'pt' });
+  const [newTerm, setNewTerm] = useState<{ blockId: string; groupId: string; value: string; lang: 'pt' | 'en' }>({ blockId: "", groupId: "", value: "", lang: 'pt' });
   const [newClassCode, setNewClassCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -137,7 +141,15 @@ export default function Keywords() {
     if (strategy) {
       let newBlocks: StrategyBlock[] = [];
       if (strategy.blocks && strategy.blocks.length > 0) {
-        newBlocks = strategy.blocks;
+        // Map old format to new format just in case
+        newBlocks = strategy.blocks.map((b: any) => ({
+          ...b,
+          groups: b.groups.map((g: any) => ({
+            ...g,
+            terms_pt: g.terms_pt || g.termsPt || g.terms || [],
+            terms_en: g.terms_en || g.termsEn || []
+          }))
+        }));
       } else {
         // Fallback for old strategy format
         const ptTerms = strategy.keywords_pt || [];
@@ -207,11 +219,11 @@ export default function Keywords() {
     setBlocks(blocks.map(b => {
       if (b.id !== blockId) return b;
       const newGroups = b.groups.filter(g => g.id !== groupId);
-      return { ...b, groups: newGroups.length > 0 ? newGroups : [{ id: `g-${Date.now()}`, terms: [] }] };
+      return { ...b, groups: newGroups.length > 0 ? newGroups : [{ id: `g-${Date.now()}`, terms_pt: [], terms_en: [] }] };
     }));
   };
 
-  const addTermToGroup = (blockId: string, groupId: string, lang: 'pt'|'en') => {
+  const addTermToGroup = (blockId: string, groupId: string, lang: 'pt' | 'en') => {
     if (!newTerm.value.trim() || newTerm.blockId !== blockId || newTerm.groupId !== groupId) return;
     setBlocks(blocks.map(b => {
       if (b.id !== blockId) return b;
@@ -220,22 +232,25 @@ export default function Keywords() {
         groups: b.groups.map(g => {
           if (g.id !== groupId) return g;
           return lang === 'pt'
-            ? { ...g, terms_pt: [...(g.terms_pt||[]), newTerm.value.trim()] }
-            : { ...g, terms_en: [...(g.terms_en||[]), newTerm.value.trim()] };
+            ? { ...g, terms_pt: [...(g.terms_pt || []), newTerm.value.trim()] }
+            : { ...g, terms_en: [...(g.terms_en || []), newTerm.value.trim()] };
         })
       };
     }));
     setNewTerm({ blockId: "", groupId: "", value: "", lang: 'pt' });
   };
 
-  const removeTerm = (blockId: string, groupId: string, term: string) => {
+  const removeTerm = (blockId: string, groupId: string, term: string, lang: 'pt' | 'en') => {
     setBlocks(blocks.map(b => {
       if (b.id !== blockId) return b;
       return {
         ...b,
-        groups: b.groups.map(g =>
-          g.id === groupId ? { ...g, terms: g.terms.filter(t => t !== term) } : g
-        )
+        groups: b.groups.map(g => {
+          if (g.id !== groupId) return g;
+          return lang === 'pt'
+            ? { ...g, terms_pt: (g.terms_pt || []).filter(t => t !== term) }
+            : { ...g, terms_en: (g.terms_en || []).filter(t => t !== term) };
+        })
       };
     }));
   };
@@ -261,7 +276,7 @@ export default function Keywords() {
   // Must stay under 300 chars for OPS API.
   const renderCqlQuery = () => {
     const blockQueries = blocks.map(block => {
-      const allTerms = block.groups.flatMap(g => (g.terms_en||[])).filter(t => t && t.trim() !== "");
+      const allTerms = block.groups.flatMap(g => (g.terms_en || [])).filter(t => t && t.trim() !== "");
       if (allTerms.length === 0) return "";
       // Prefer shorter terms first for space efficiency
       const sorted = [...allTerms].sort((a, b) => a.length - b.length);
@@ -285,7 +300,7 @@ export default function Keywords() {
     // Enforce 300-char limit: progressively drop terms from largest block
     if (fullQuery.length > 300) {
       const reduced = blocks.map(block => {
-        const allTerms = block.groups.flatMap(g => (g.terms_en||[])).filter(t => t && t.trim() !== "");
+        const allTerms = block.groups.flatMap(g => (g.terms_en || [])).filter(t => t && t.trim() !== "");
         // Keep max 4 shortest terms
         const sorted = [...allTerms].sort((a, b) => a.length - b.length).slice(0, 4);
         if (sorted.length === 0) return "";
@@ -307,7 +322,7 @@ export default function Keywords() {
     const blockQueries = blocks.map(block => {
       const groupQueries = block.groups
         .filter(g => (g.terms_pt && g.terms_pt.length > 0) || (g.terms_en && g.terms_en.length > 0))
-        .map(g => `(${[...(g.terms_pt||[]), ...(g.terms_en||[])].join(" OR ")})`);
+        .map(g => `(${[...(g.terms_pt || []), ...(g.terms_en || [])].join(" OR ")})`);
 
       if (groupQueries.length === 0) return "";
       return groupQueries.length === 1 ? groupQueries[0] : `(${groupQueries.join(" AND ")})`;
@@ -331,13 +346,13 @@ export default function Keywords() {
   // So we flatten all terms from all blocks into a single OR query.
   const getInpiQuery = (): string => {
     const allTerms = blocks.flatMap(block =>
-      block.groups.flatMap(g => (g.terms_pt||[])).filter(t => t && t.trim() !== "")
+      block.groups.flatMap(g => (g.terms_pt || [])).filter(t => t && t.trim() !== "")
     );
     if (allTerms.length === 0) return "";
     // Prefer shorter terms first, limit to ~15 for reliability
     const sorted = [...allTerms].sort((a, b) => a.length - b.length);
     const limited = sorted.slice(0, 15);
-    return limited.join(" OR ");
+    return limited.map(t => t.includes(' ') ? `"${t}"` : t).join(" OR ");
   };
 
   const getActiveCql = (): string => {
@@ -493,7 +508,7 @@ export default function Keywords() {
                               <span>🇧🇷 INPI (PT)</span>
                             </div>
                             <div className="flex flex-wrap gap-1.5 mb-2 min-h-[24px]">
-                              {(group.terms_pt||[]).map((term) => (
+                              {(group.terms_pt || []).map((term) => (
                                 <Badge key={term} variant="secondary" className="px-1.5 py-0.5 gap-1 text-[11px] bg-muted/60 hover:bg-muted border-none">
                                   {term}
                                   <button onClick={() => removeTerm(block.id, group.id, term, 'pt')} className="hover:text-destructive"><X className="w-2.5 h-2.5" /></button>
@@ -512,7 +527,7 @@ export default function Keywords() {
                               <span>🇬🇧 Espacenet (EN)</span>
                             </div>
                             <div className="flex flex-wrap gap-1.5 mb-2 min-h-[24px]">
-                              {(group.terms_en||[]).map((term) => (
+                              {(group.terms_en || []).map((term) => (
                                 <Badge key={term} variant="secondary" className="px-1.5 py-0.5 gap-1 text-[11px] bg-sky-900/20 text-sky-400 hover:bg-sky-900/40 border-none">
                                   {term}
                                   <button onClick={() => removeTerm(block.id, group.id, term, 'en')} className="hover:text-destructive"><X className="w-2.5 h-2.5" /></button>

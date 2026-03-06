@@ -11,9 +11,12 @@ import { createWriteStream } from 'fs';
 import FormData from 'form-data';
 import * as cheerio from 'cheerio';
 import bcrypt from 'bcryptjs';
-import { execSync } from 'child_process';
+import { exec, execSync } from 'child_process';
+import { promisify } from 'util';
 import { randomUUID } from 'crypto';
 import { PrismaClient } from '@prisma/client';
+
+const execAsync = promisify(exec);
 
 import { GoogleGenAI } from '@google/genai';
 
@@ -31,6 +34,48 @@ const WHISPER_BASE_URL = process.env.WHISPER_BASE_URL || 'http://whisper:8000';
 const OPS_CONSUMER_KEY = process.env.OPS_CONSUMER_KEY || '';
 const OPS_CONSUMER_SECRET = process.env.OPS_CONSUMER_SECRET || '';
 const INPI_MODE = process.env.INPI_MODE || 'scrape';
+
+// ─── Queues (Throttle APIs) ───────────────────────────────────
+class AsyncQueue {
+    private queue: (() => Promise<void>)[] = [];
+    private running: boolean = false;
+    private delayMs: number;
+
+    constructor(delayMs: number = 0) {
+        this.delayMs = delayMs;
+    }
+
+    async enqueue<T>(task: () => Promise<T>): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
+            this.queue.push(async () => {
+                try {
+                    const res = await task();
+                    resolve(res);
+                } catch (err) {
+                    reject(err);
+                }
+            });
+            this.process();
+        });
+    }
+
+    private async process() {
+        if (this.running || this.queue.length === 0) return;
+        this.running = true;
+        const task = this.queue.shift();
+        if (task) {
+            await task();
+            if (this.delayMs > 0) {
+                await new Promise(r => setTimeout(r, this.delayMs));
+            }
+        }
+        this.running = false;
+        this.process();
+    }
+}
+
+const espacenetQueue = new AsyncQueue(800); // 800ms between calls
+const inpiQueue = new AsyncQueue(1500); // 1.5s between calls
 
 // Inicializa SDK do Gemini (fallback)
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
@@ -347,8 +392,8 @@ function validateAndFixStrategy(parsed: any): any {
         connector: b.connector || 'AND',
         groups: (b.groups || []).map((g: any, j: number) => ({
             id: g.id || `g${i + 1}-${j + 1}`,
-            terms_pt: (g.terms_pt || g.terms || []).filter((t: any) => typeof t === 'string' && t.trim() !== ''),
-            terms_en: (g.terms_en || []).filter((t: any) => typeof t === 'string' && t.trim() !== '')
+            terms_pt: (g.terms_pt || g.termsPt || g.terms_PT || g.terms || []).filter((t: any) => typeof t === 'string' && t.trim() !== ''),
+            terms_en: (g.terms_en || g.termsEn || g.terms_EN || []).filter((t: any) => typeof t === 'string' && t.trim() !== '')
         })).filter((g: any) => g.terms_pt.length > 0 || g.terms_en.length > 0)
     })).filter((b: any) => b.groups.length > 0);
 
@@ -538,13 +583,13 @@ fastify.post('/search/espacenet', async (request, reply) => {
         const token = await getOpsToken();
         const url = `https://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=${encodeURIComponent(cql)}`;
 
-        const response = await axios.get(url, {
+        const response = await espacenetQueue.enqueue(() => axios.get(url, {
             headers: {
                 'Authorization': `Bearer ${token}`,
                 'Accept': 'application/json'
             },
             timeout: 30000
-        });
+        }));
 
         const results = parseOpsResponse(response.data);
         const translated = await translatePatentsToPortuguese(results);
@@ -765,18 +810,18 @@ function parseInpiResults(html: string): any[] {
     return results;
 }
 
-function searchInpiViaCurl(params: {
+async function searchInpiViaCurl(params: {
     number?: string;
     titular?: string;
     inventor?: string;
     keywords?: string;
     resumo?: string;
-}): any[] {
+}): Promise<any[]> {
     const cookieFile = `/tmp/inpi_${randomUUID()}.txt`;
 
     try {
         // Step 1: Anonymous login — curl handles redirects & cookies perfectly
-        execSync(
+        await execAsync(
             `curl -s -c ${cookieFile} -L 'https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login' -o /dev/null`,
             { timeout: 15000 }
         );
@@ -813,15 +858,15 @@ function searchInpiViaCurl(params: {
             .join('&');
         fastify.log.info(`INPI curl search: Titulo="${(params.keywords || '').substring(0, 100)}" Resumo="${(params.resumo || '').substring(0, 100)}"`);
 
-        const html = execSync(
+        const { stdout } = await execAsync(
             `curl -s -b ${cookieFile} -X POST 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController' -d '${postBody}' | iconv -f ISO-8859-1 -t UTF-8`,
-            { timeout: 30000, encoding: 'utf-8', maxBuffer: 5 * 1024 * 1024 }
+            { timeout: 30000, maxBuffer: 5 * 1024 * 1024 }
         );
 
         // Cleanup
         try { execSync(`rm -f ${cookieFile}`); } catch { }
 
-        return parseInpiResults(html);
+        return parseInpiResults(stdout);
     } catch (error: any) {
         try { execSync(`rm -f ${cookieFile}`); } catch { }
         fastify.log.warn(`INPI curl search failed: ${error.message}`);
@@ -834,9 +879,9 @@ async function scrapeInpiBuscaWeb(keywords: string[], _ipcCodes: string[], inpiQ
     // Also put simpler terms in Resumo for broader recall.
     if (inpiQuery) {
         fastify.log.info(`INPI boolean query: ${inpiQuery.substring(0, 300)}`);
-        return searchInpiViaCurl({ keywords: inpiQuery });
+        return inpiQueue.enqueue(() => searchInpiViaCurl({ keywords: inpiQuery }));
     }
-    return searchInpiViaCurl({ keywords: keywords.join(' ') });
+    return inpiQueue.enqueue(() => searchInpiViaCurl({ keywords: keywords.join(' ') }));
 }
 
 // ─── GET /search/inpi/detail/:codPedido ────────────────────────
@@ -847,13 +892,14 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
     const cookieFile = `/tmp/inpi_detail_${randomUUID()}.txt`;
     try {
         // Login anônimo
-        execSync(`curl -s -c ${cookieFile} -L 'https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login' -o /dev/null`, { timeout: 15000 });
+        await execAsync(`curl -s -c ${cookieFile} -L 'https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login' -o /dev/null`, { timeout: 15000 });
 
         // Buscar página de detalhe
-        const html = execSync(
+        const { stdout } = await inpiQueue.enqueue(() => execAsync(
             `curl -s -b ${cookieFile} 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${codPedido}' | iconv -f ISO-8859-1 -t UTF-8`,
-            { timeout: 30000, encoding: 'utf-8', maxBuffer: 5 * 1024 * 1024 }
-        );
+            { timeout: 30000, maxBuffer: 5 * 1024 * 1024 }
+        ));
+        const html = stdout;
 
         try { execSync(`rm -f ${cookieFile}`); } catch { }
 
@@ -911,7 +957,7 @@ fastify.post('/search/quick', async (request, reply) => {
 
     // 1. Search INPI via advanced search (POST with session)
     try {
-        const inpiResults = searchInpiViaCurl({ number, titular, inventor, keywords });
+        const inpiResults = await inpiQueue.enqueue(() => searchInpiViaCurl({ number, titular, inventor, keywords }));
         results.push(...inpiResults);
     } catch (err: any) {
         fastify.log.warn(`Quick search INPI failed: ${err.message}`);
@@ -930,10 +976,10 @@ fastify.post('/search/quick', async (request, reply) => {
             const token = await getOpsToken();
             const opsUrl = `https://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=${encodeURIComponent(cql)}`;
 
-            const response = await axios.get(opsUrl, {
+            const response = await espacenetQueue.enqueue(() => axios.get(opsUrl, {
                 headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
                 timeout: 30000
-            });
+            }));
 
             const opsResults = parseOpsResponse(response.data);
             const translatedOps = await translatePatentsToPortuguese(opsResults);
@@ -972,10 +1018,10 @@ fastify.post('/search', async (request, reply) => {
             try {
                 const token = await getOpsToken();
                 const url = `https://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=${encodeURIComponent(cql)}`;
-                const response = await axios.get(url, {
+                const response = await espacenetQueue.enqueue(() => axios.get(url, {
                     headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
                     timeout: 30000
-                });
+                }));
                 const opsResults = parseOpsResponse(response.data);
                 return translatePatentsToPortuguese(opsResults);
             } catch (err: any) {
