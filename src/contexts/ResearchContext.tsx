@@ -52,7 +52,8 @@ export interface SearchStrategy {
         connector: "AND" | "OR";
         groups: {
             id: string;
-            terms: string[];
+            terms_pt: string[];
+            terms_en: string[];
         }[];
     }[];
     searchLevels?: SearchLevel[];

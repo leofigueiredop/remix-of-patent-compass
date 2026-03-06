@@ -17,7 +17,8 @@ const steps = ["Briefing", "Transcrição", "Briefing Técnico", "Palavras-chave
 
 interface KeywordGroup {
   id: string;
-  terms: string[];
+  terms_pt: string[];
+  terms_en: string[];
 }
 
 interface StrategyBlock {
@@ -29,13 +30,13 @@ interface StrategyBlock {
 // ─── Build deterministic search levels from blocks ──────────────────────
 // OPS CQL limit: ~300 chars. INPI Titulo: only OR is reliable (AND+parentheses hangs).
 function buildSearchLevelsFromBlocks(blocks: StrategyBlock[], classifications: string[]): SearchLevel[] {
-  const validBlocks = blocks.filter(b => b.groups.some(g => g.terms.length > 0));
+  const validBlocks = blocks.filter(b => b.groups.some(g => (g.terms_pt && g.terms_pt.length > 0) || (g.terms_en && g.terms_en.length > 0)));
   if (validBlocks.length === 0) return [];
 
   // Pick the N shortest single-word terms first, then add multi-word if room.
-  const pickTerms = (bks: StrategyBlock[], maxPerBlock: number) => {
+  const pickTerms = (bks: StrategyBlock[], maxPerBlock: number, lang: 'pt'|'en') => {
     return bks.map(block => {
-      const allTerms = block.groups.flatMap(g => g.terms).filter(t => t.trim() !== '');
+      const allTerms = block.groups.flatMap(g => lang === 'pt' ? (g.terms_pt||[]) : (g.terms_en||[])).filter((t: string) => t && t.trim() !== '');
       // Sort: single-word first, then by length ascending
       const sorted = [...allTerms].sort((a, b) => {
         const aSingle = !a.includes(' ') ? 0 : 1;
@@ -47,7 +48,7 @@ function buildSearchLevelsFromBlocks(blocks: StrategyBlock[], classifications: s
   };
 
   const buildCql = (bks: StrategyBlock[], maxTerms = 5): string => {
-    const termSets = pickTerms(bks, maxTerms);
+    const termSets = pickTerms(bks, maxTerms, 'en');
     const parts = termSets.map(terms => {
       if (terms.length === 0) return '';
       return `(${terms.map(t => t.includes(' ') ? `ta all "${t}"` : `ta all ${t}`).join(' OR ')})`;
@@ -69,7 +70,7 @@ function buildSearchLevelsFromBlocks(blocks: StrategyBlock[], classifications: s
   // So we just OR together the best Portuguese terms from the selected blocks.
   const buildInpi = (bks: StrategyBlock[], maxTerms = 8): string => {
     const allTerms = bks.flatMap(block =>
-      block.groups.flatMap(g => g.terms).filter(t => t.trim() !== '')
+      block.groups.flatMap(g => (g.terms_pt||[])).filter((t: string) => t && t.trim() !== '')
     );
     // Prefer shorter terms for recall
     const sorted = [...allTerms].sort((a, b) => a.length - b.length);
@@ -83,7 +84,7 @@ function buildSearchLevelsFromBlocks(blocks: StrategyBlock[], classifications: s
   if (validBlocks.length >= 1) {
     levels.push({
       level: 1,
-      label: `Busca Ampla — apenas camada 1 (${validBlocks[0].groups.flatMap(g => g.terms).length} termos)`,
+      label: `Busca Ampla — apenas camada 1 (${validBlocks[0].groups.flatMap(g => [...(g.terms_pt||[]), ...(g.terms_en||[])]).length} termos)`,
       cql: buildCql([validBlocks[0]], 6),
       inpi: buildInpi([validBlocks[0]], 10),
     });
@@ -116,7 +117,7 @@ export default function Keywords() {
   const [blocks, setBlocks] = useState<StrategyBlock[]>([{
     id: "b1",
     connector: "AND",
-    groups: [{ id: "g1", terms: [] }]
+    groups: [{ id: "g1", terms_pt: [], terms_en: [] }]
   }]);
 
   const [classifications, setClassifications] = useState<string[]>([]);
@@ -125,7 +126,7 @@ export default function Keywords() {
   const [searchLevels, setSearchLevels] = useState<SearchLevel[]>([]);
   const [selectedLevel, setSelectedLevel] = useState<string>("custom");
   const [showTechBlocks, setShowTechBlocks] = useState(true);
-  const [newTerm, setNewTerm] = useState<{ blockId: string; groupId: string; value: string }>({ blockId: "", groupId: "", value: "" });
+  const [newTerm, setNewTerm] = useState<{ blockId: string; groupId: string; value: string; lang: 'pt'|'en' }>({ blockId: "", groupId: "", value: "", lang: 'pt' });
   const [newClassCode, setNewClassCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -145,9 +146,8 @@ export default function Keywords() {
           id: "b1",
           connector: "AND",
           groups: [
-            { id: "g1", terms: ptTerms.slice(0, 4) },
-            { id: "g2", terms: enTerms.slice(0, 4) }
-          ].filter(g => g.terms.length > 0)
+            { id: "g1", terms_pt: ptTerms.slice(0, 4), terms_en: enTerms.slice(0, 4) }
+          ].filter(g => (g.terms_pt && g.terms_pt.length > 0) || (g.terms_en && g.terms_en.length > 0))
         }];
       }
       setBlocks(newBlocks);
@@ -187,7 +187,7 @@ export default function Keywords() {
     setBlocks([...blocks, {
       id: Date.now().toString(),
       connector: "AND",
-      groups: [{ id: `g-${Date.now()}`, terms: [] }]
+      groups: [{ id: `g-${Date.now()}`, terms_pt: [], terms_en: [] }]
     }]);
   };
 
@@ -198,7 +198,7 @@ export default function Keywords() {
   const addGroupToBlock = (blockId: string) => {
     setBlocks(blocks.map(b =>
       b.id === blockId
-        ? { ...b, groups: [...b.groups, { id: `g-${Date.now()}`, terms: [] }] }
+        ? { ...b, groups: [...b.groups, { id: `g-${Date.now()}`, terms_pt: [], terms_en: [] }] }
         : b
     ));
   };
@@ -211,18 +211,21 @@ export default function Keywords() {
     }));
   };
 
-  const addTermToGroup = (blockId: string, groupId: string) => {
+  const addTermToGroup = (blockId: string, groupId: string, lang: 'pt'|'en') => {
     if (!newTerm.value.trim() || newTerm.blockId !== blockId || newTerm.groupId !== groupId) return;
     setBlocks(blocks.map(b => {
       if (b.id !== blockId) return b;
       return {
         ...b,
-        groups: b.groups.map(g =>
-          g.id === groupId ? { ...g, terms: [...g.terms, newTerm.value.trim()] } : g
-        )
+        groups: b.groups.map(g => {
+          if (g.id !== groupId) return g;
+          return lang === 'pt'
+            ? { ...g, terms_pt: [...(g.terms_pt||[]), newTerm.value.trim()] }
+            : { ...g, terms_en: [...(g.terms_en||[]), newTerm.value.trim()] };
+        })
       };
     }));
-    setNewTerm({ blockId: "", groupId: "", value: "" });
+    setNewTerm({ blockId: "", groupId: "", value: "", lang: 'pt' });
   };
 
   const removeTerm = (blockId: string, groupId: string, term: string) => {
@@ -258,7 +261,7 @@ export default function Keywords() {
   // Must stay under 300 chars for OPS API.
   const renderCqlQuery = () => {
     const blockQueries = blocks.map(block => {
-      const allTerms = block.groups.flatMap(g => g.terms).filter(t => t.trim() !== "");
+      const allTerms = block.groups.flatMap(g => (g.terms_en||[])).filter(t => t && t.trim() !== "");
       if (allTerms.length === 0) return "";
       // Prefer shorter terms first for space efficiency
       const sorted = [...allTerms].sort((a, b) => a.length - b.length);
@@ -282,7 +285,7 @@ export default function Keywords() {
     // Enforce 300-char limit: progressively drop terms from largest block
     if (fullQuery.length > 300) {
       const reduced = blocks.map(block => {
-        const allTerms = block.groups.flatMap(g => g.terms).filter(t => t.trim() !== "");
+        const allTerms = block.groups.flatMap(g => (g.terms_en||[])).filter(t => t && t.trim() !== "");
         // Keep max 4 shortest terms
         const sorted = [...allTerms].sort((a, b) => a.length - b.length).slice(0, 4);
         if (sorted.length === 0) return "";
@@ -303,8 +306,8 @@ export default function Keywords() {
   const renderDisplayQuery = () => {
     const blockQueries = blocks.map(block => {
       const groupQueries = block.groups
-        .filter(g => g.terms.length > 0)
-        .map(g => `(${g.terms.join(" OR ")})`);
+        .filter(g => (g.terms_pt && g.terms_pt.length > 0) || (g.terms_en && g.terms_en.length > 0))
+        .map(g => `(${[...(g.terms_pt||[]), ...(g.terms_en||[])].join(" OR ")})`);
 
       if (groupQueries.length === 0) return "";
       return groupQueries.length === 1 ? groupQueries[0] : `(${groupQueries.join(" AND ")})`;
@@ -328,7 +331,7 @@ export default function Keywords() {
   // So we flatten all terms from all blocks into a single OR query.
   const getInpiQuery = (): string => {
     const allTerms = blocks.flatMap(block =>
-      block.groups.flatMap(g => g.terms).filter(t => t.trim() !== "")
+      block.groups.flatMap(g => (g.terms_pt||[])).filter(t => t && t.trim() !== "")
     );
     if (allTerms.length === 0) return "";
     // Prefer shorter terms first, limit to ~15 for reliability
@@ -483,32 +486,44 @@ export default function Keywords() {
                           </button>
                         </div>
 
-                        <div className="flex flex-wrap gap-1.5 mb-3 min-h-[32px]">
-                          {group.terms.map((term) => (
-                            <Badge
-                              key={term}
-                              variant="secondary"
-                              className="px-1.5 py-0.5 gap-1 text-[11px] bg-muted/60 hover:bg-muted border-none"
-                            >
-                              {term}
-                              <button onClick={() => removeTerm(block.id, group.id, term)} className="hover:text-destructive">
-                                <X className="w-2.5 h-2.5" />
-                              </button>
-                            </Badge>
-                          ))}
-                        </div>
+                        <div className="space-y-3">
+                          {/* PT Section */}
+                          <div className="bg-muted/30 p-2 rounded border border-border/50">
+                            <div className="text-[10px] uppercase font-bold text-muted-foreground mb-2 flex items-center justify-between">
+                              <span>🇧🇷 INPI (PT)</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5 mb-2 min-h-[24px]">
+                              {(group.terms_pt||[]).map((term) => (
+                                <Badge key={term} variant="secondary" className="px-1.5 py-0.5 gap-1 text-[11px] bg-muted/60 hover:bg-muted border-none">
+                                  {term}
+                                  <button onClick={() => removeTerm(block.id, group.id, term, 'pt')} className="hover:text-destructive"><X className="w-2.5 h-2.5" /></button>
+                                </Badge>
+                              ))}
+                            </div>
+                            <div className="flex gap-1">
+                              <Input placeholder="Termo PT..." value={(newTerm.blockId === block.id && newTerm.groupId === group.id && newTerm.lang === 'pt') ? newTerm.value : ""} onChange={(e) => setNewTerm({ blockId: block.id, groupId: group.id, value: e.target.value, lang: 'pt' })} onKeyDown={(e) => e.key === "Enter" && addTermToGroup(block.id, group.id, 'pt')} className="text-xs h-6 px-2 bg-background" />
+                              <Button size="icon" onClick={() => addTermToGroup(block.id, group.id, 'pt')} className="h-6 w-6"><Plus className="w-3 h-3" /></Button>
+                            </div>
+                          </div>
 
-                        <div className="flex gap-1">
-                          <Input
-                            placeholder="Termo..."
-                            value={(newTerm.blockId === block.id && newTerm.groupId === group.id) ? newTerm.value : ""}
-                            onChange={(e) => setNewTerm({ blockId: block.id, groupId: group.id, value: e.target.value })}
-                            onKeyDown={(e) => e.key === "Enter" && addTermToGroup(block.id, group.id)}
-                            className="text-xs h-7 px-2"
-                          />
-                          <Button size="icon" onClick={() => addTermToGroup(block.id, group.id)} className="h-7 w-7">
-                            <Plus className="w-3 h-3" />
-                          </Button>
+                          {/* EN Section */}
+                          <div className="bg-muted/30 p-2 rounded border border-border/50">
+                            <div className="text-[10px] uppercase font-bold text-muted-foreground mb-2 flex items-center justify-between">
+                              <span>🇬🇧 Espacenet (EN)</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5 mb-2 min-h-[24px]">
+                              {(group.terms_en||[]).map((term) => (
+                                <Badge key={term} variant="secondary" className="px-1.5 py-0.5 gap-1 text-[11px] bg-sky-900/20 text-sky-400 hover:bg-sky-900/40 border-none">
+                                  {term}
+                                  <button onClick={() => removeTerm(block.id, group.id, term, 'en')} className="hover:text-destructive"><X className="w-2.5 h-2.5" /></button>
+                                </Badge>
+                              ))}
+                            </div>
+                            <div className="flex gap-1">
+                              <Input placeholder="Termo EN..." value={(newTerm.blockId === block.id && newTerm.groupId === group.id && newTerm.lang === 'en') ? newTerm.value : ""} onChange={(e) => setNewTerm({ blockId: block.id, groupId: group.id, value: e.target.value, lang: 'en' })} onKeyDown={(e) => e.key === "Enter" && addTermToGroup(block.id, group.id, 'en')} className="text-xs h-6 px-2 bg-background" />
+                              <Button size="icon" onClick={() => addTermToGroup(block.id, group.id, 'en')} className="h-6 w-6"><Plus className="w-3 h-3" /></Button>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>

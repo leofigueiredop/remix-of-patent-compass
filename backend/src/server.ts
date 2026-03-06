@@ -347,8 +347,9 @@ function validateAndFixStrategy(parsed: any): any {
         connector: b.connector || 'AND',
         groups: (b.groups || []).map((g: any, j: number) => ({
             id: g.id || `g${i + 1}-${j + 1}`,
-            terms: (g.terms || []).filter((t: any) => typeof t === 'string' && t.trim() !== '')
-        })).filter((g: any) => g.terms.length > 0)
+            terms_pt: (g.terms_pt || g.terms || []).filter((t: any) => typeof t === 'string' && t.trim() !== ''),
+            terms_en: (g.terms_en || []).filter((t: any) => typeof t === 'string' && t.trim() !== '')
+        })).filter((g: any) => g.terms_pt.length > 0 || g.terms_en.length > 0)
     })).filter((b: any) => b.groups.length > 0);
 
     // Fix searchLevels: validate CQL syntax and enforce character limits
@@ -423,15 +424,16 @@ CAMADA 3 — DOMÍNIO/APLICAÇÃO (onde/para que): área de aplicação, materia
   Ex: "saúde", "health", "construção civil", "building", "alimento", "food"
 
 REGRAS CRÍTICAS DE TERMOS (siga na ordem para CADA grupo):
-a) PRIMEIRO: 3-4 termos SIMPLES de 1 palavra (PT + EN) — substantivos/verbos genéricos.
-b) DEPOIS: variações morfológicas (verbo/substantivo/adjetivo/agente):
-   Ex: "monitorar", "monitoramento", "monitor" / "cortar", "corte", "cortador"
-c) DEPOIS: sinônimos do cotidiano industrial:
+a) SEPARE ESTRITAMENTE POR IDIOMA: Não misture idiomas. Use "terms_pt" APENAS para português e "terms_en" APENAS para inglês.
+b) PRIMEIRO: 3-4 termos SIMPLES de 1 palavra — substantivos/verbos genéricos rigorosamente sinônimos.
+c) DEPOIS: variações morfológicas do idioma (verbo/substantivo/adjetivo/agente):
+   Ex PT: "monitorar", "monitoramento" / Ex EN: "monitor", "monitoring"
+d) DEPOIS: sinônimos do cotidiano industrial na respectiva língua:
    Ex: "medir" = "aferir" = "mensurar" / "prensa" = "compressor"
-d) POR ÚLTIMO: termos compostos mais específicos:
+e) POR ÚLTIMO: termos compostos mais específicos:
    Ex: "dispositivo de monitoramento", "monitoring device"
-e) Mínimo 7-10 termos por grupo. Mix bilingue PT + EN.
-f) NÃO use: termos de marca, neologismos, gírias.
+f) Mínimo 7-10 termos por grupo SOMANDO OS DOIS IDIOMAS.
+g) NÃO use: termos de marca, neologismos, gírias.
 
 3) SEARCH LEVELS (searchLevels) — 3 níveis de queries PRONTAS
 
@@ -466,19 +468,19 @@ Briefing: Dispositivo vestível para monitoramento contínuo de saúde com colet
     {
       "id": "b1", "connector": "AND",
       "groups": [
-        { "id": "g1", "terms": ["device", "dispositivo", "apparatus", "aparelho", "equipment", "equipamento", "wearable", "vestível", "sensor", "portable", "portátil", "wearable device", "dispositivo vestível"] }
+        { "id": "g1", "terms_pt": ["dispositivo", "aparelho", "equipamento", "vestível", "sensor", "portátil", "dispositivo vestível"], "terms_en": ["device", "apparatus", "equipment", "wearable", "sensor", "portable", "wearable device"] }
       ]
     },
     {
       "id": "b2", "connector": "AND",
       "groups": [
-        { "id": "g2", "terms": ["monitor", "monitorar", "monitoring", "monitoramento", "measure", "medir", "medição", "detect", "detectar", "detecção", "track", "rastrear", "sense", "sensoriamento", "collect", "coletar", "coleta de dados", "data acquisition"] }
+        { "id": "g2", "terms_pt": ["monitorar", "monitoramento", "medir", "medição", "detecção", "rastrear", "sensoriamento", "coletar", "coleta de dados"], "terms_en": ["monitor", "monitoring", "measure", "detect", "track", "sense", "collect", "data acquisition"] }
       ]
     },
     {
       "id": "b3", "connector": "AND",
       "groups": [
-        { "id": "g3", "terms": ["health", "saúde", "medical", "médico", "clinical", "clínico", "physiological", "fisiológico", "biometric", "biométrico", "wellness", "bem-estar", "vital signs", "sinais vitais", "heart rate", "frequência cardíaca"] }
+        { "id": "g3", "terms_pt": ["saúde", "médico", "clínico", "fisiológico", "biométrico", "bem-estar", "sinais vitais", "frequência cardíaca"], "terms_en": ["health", "medical", "clinical", "physiological", "biometric", "wellness", "vital signs", "heart rate"] }
       ]
     }
   ],
