@@ -665,6 +665,15 @@ function parseOpsResponse(data: any): any[] {
                 applicant = extractText(appObj?.['applicant-name']?.['name']) || 'Desconhecido';
             }
 
+            let inventor = '';
+            const inventors = toArray(bibData?.['parties']?.['inventors']?.['inventor']);
+            if (inventors.length > 0) {
+                inventor = inventors
+                    .map((inv: any) => extractText(inv?.['inventor-name']?.['name']))
+                    .filter(Boolean)
+                    .join('; ');
+            }
+
             const pubRef = toArray(bibData?.['publication-reference']?.['document-id']);
             const docDb = pubRef.find((r: any) => r?.['@document-id-type'] === 'docdb') || pubRef[0] || {};
             const pubDate = extractText(docDb?.['date']);
@@ -686,10 +695,12 @@ function parseOpsResponse(data: any): any[] {
                 publicationNumber: publicationNumber || `${country} ${pubNum}`.trim(),
                 title,
                 applicant,
+                inventor,
                 date: pubDate,
                 abstract,
                 classification,
                 source: 'Espacenet',
+                figures: [],
                 url: publicationNumber
                     ? `https://worldwide.espacenet.com/patent/search?q=pn%3D${publicationNumber}`
                     : `https://worldwide.espacenet.com/patent/search?q=${encodeURIComponent(title)}`
@@ -931,6 +942,54 @@ async function scrapeInpiBuscaWeb(keywords: string[], _ipcCodes: string[], inpiQ
     return inpiQueue.enqueue(() => searchInpiViaCurl({ keywords: keywords.join(' '), resumo: resumoFromQuery }));
 }
 
+function extractInpiFigureUrls(html: string): string[] {
+    const $ = cheerio.load(html);
+    const baseUrl = 'https://busca.inpi.gov.br/pePI/';
+    const blockedTokens = ['logo', 'banner', 'sprite', 'seta', 'icone', 'icon', 'blank', 'spacer', '.css', '.js'];
+    const figureTokens = ['fig', 'image', 'imagem', 'desenho', 'thumbnail', 'thumb', 'patente'];
+    const figures = new Set<string>();
+
+    const normalizeUrl = (value: string): string => {
+        const decoded = value.trim().replace(/&amp;/g, '&');
+        if (!decoded) return '';
+        try {
+            return new URL(decoded, baseUrl).toString();
+        } catch {
+            return '';
+        }
+    };
+
+    const collect = (rawValue?: string) => {
+        if (!rawValue) return;
+        const normalized = normalizeUrl(rawValue);
+        if (!normalized) return;
+        const lower = normalized.toLowerCase();
+        if (blockedTokens.some(token => lower.includes(token))) return;
+        const hasImageExtension = /\.(jpg|jpeg|png|gif|webp|bmp|tif|tiff)(\?|$)/i.test(lower);
+        const hasFigureToken = figureTokens.some(token => lower.includes(token));
+        if (!hasImageExtension && !hasFigureToken) return;
+        figures.add(normalized);
+    };
+
+    $('img').each((_, el) => {
+        collect($(el).attr('src'));
+        collect($(el).attr('data-src'));
+        collect($(el).attr('data-original'));
+    });
+
+    $('a').each((_, el) => {
+        collect($(el).attr('href'));
+        const onclick = $(el).attr('onclick') || '';
+        const quotedMatches = onclick.match(/['"]([^'"]+\.(?:jpg|jpeg|png|gif|webp|bmp|tif|tiff)[^'"]*)['"]/gi) || [];
+        quotedMatches.forEach((match) => {
+            const cleaned = match.replace(/^['"]|['"]$/g, '');
+            collect(cleaned);
+        });
+    });
+
+    return Array.from(figures).slice(0, 20);
+}
+
 // ─── GET /search/inpi/detail/:codPedido ────────────────────────
 fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
     const { codPedido } = request.params as { codPedido: string };
@@ -951,7 +1010,7 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
         try { execSync(`rm -f ${cookieFile}`); } catch { }
 
         const $ = cheerio.load(html);
-        const detail: Record<string, string> = {};
+        const detail: Record<string, any> = {};
 
         // INPI detail page has <td> with labels followed by <td> with values
         $('table tr').each((_, row) => {
@@ -973,6 +1032,7 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
         // Also try to extract abstract from specific div if exists
         const resumoDiv = $('div.resumo, #resumo, .abstract').text().trim();
         if (resumoDiv && !detail.abstract) detail.abstract = resumoDiv;
+        detail.figures = extractInpiFigureUrls(html);
 
         return {
             codPedido,
@@ -1000,12 +1060,13 @@ fastify.post('/search/quick', async (request, reply) => {
         return reply.code(400).send({ error: 'Informe pelo menos um critério de busca' });
     }
 
-    const results: any[] = [];
+    const inpiResults: any[] = [];
+    const espacenetResults: any[] = [];
 
     // 1. Search INPI via advanced search (POST with session)
     try {
-        const inpiResults = await inpiQueue.enqueue(() => searchInpiViaCurl({ number, titular, inventor, keywords }));
-        results.push(...inpiResults);
+        const inpi = await inpiQueue.enqueue(() => searchInpiViaCurl({ number, titular, inventor, keywords }));
+        inpiResults.push(...inpi);
     } catch (err: any) {
         fastify.log.warn(`Quick search INPI failed: ${err.message}`);
     }
@@ -1030,7 +1091,7 @@ fastify.post('/search/quick', async (request, reply) => {
 
             const opsResults = parseOpsResponse(response.data);
             const translatedOps = await translatePatentsToPortuguese(opsResults);
-            results.push(...translatedOps);
+            espacenetResults.push(...translatedOps);
         } catch (err: any) {
             if (err.response?.status !== 404) {
                 fastify.log.warn(`Quick search Espacenet failed: ${err.message}`);
@@ -1038,7 +1099,17 @@ fastify.post('/search/quick', async (request, reply) => {
         }
     }
 
-    return { results, total: results.length };
+    return {
+        inpi: inpiResults,
+        espacenet: espacenetResults,
+        totals: {
+            inpi: inpiResults.length,
+            espacenet: espacenetResults.length,
+            all: inpiResults.length + espacenetResults.length
+        },
+        results: [...inpiResults, ...espacenetResults],
+        total: inpiResults.length + espacenetResults.length
+    };
 });
 
 // ─── POST /search (unified) ────────────────────────────────────

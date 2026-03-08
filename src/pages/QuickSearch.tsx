@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { Search, Loader2, ExternalLink, Hash, User, UserCheck, FileText, X, ChevronDown, ChevronUp, Building2, Lightbulb } from "lucide-react";
+import { Search, Loader2, ExternalLink, Hash, User, UserCheck, FileText, X, ChevronDown, ChevronUp, Building2, Lightbulb, ChevronLeft, ChevronRight, Expand } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import AppLayout from "@/components/AppLayout";
 import axios from "axios";
 
@@ -17,6 +19,7 @@ interface PatentResult {
     classification: string;
     source: string;
     url: string;
+    figures?: string[];
 }
 
 interface PatentDetail {
@@ -27,6 +30,18 @@ interface PatentDetail {
     filingDate?: string;
     title?: string;
     status?: string;
+    figures?: string[];
+}
+
+interface QuickSearchResponse {
+    inpi?: PatentResult[];
+    espacenet?: PatentResult[];
+    totals?: {
+        inpi?: number;
+        espacenet?: number;
+        all?: number;
+    };
+    results?: PatentResult[];
 }
 
 export default function QuickSearch() {
@@ -34,15 +49,69 @@ export default function QuickSearch() {
     const [titular, setTitular] = useState("");
     const [inventor, setInventor] = useState("");
     const [keywords, setKeywords] = useState("");
-    const [results, setResults] = useState<PatentResult[]>([]);
+    const [inpiResults, setInpiResults] = useState<PatentResult[]>([]);
+    const [espacenetResults, setEspacenetResults] = useState<PatentResult[]>([]);
     const [loading, setLoading] = useState(false);
     const [searched, setSearched] = useState(false);
     const [error, setError] = useState("");
+    const [tab, setTab] = useState<"inpi" | "espacenet">("inpi");
     const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
     const [detailCache, setDetailCache] = useState<Record<string, PatentDetail>>({});
-    const [loadingDetail, setLoadingDetail] = useState<number | null>(null);
+    const [loadingDetails, setLoadingDetails] = useState<Record<string, boolean>>({});
+    const [figureIndexByPatent, setFigureIndexByPatent] = useState<Record<string, number>>({});
+    const [modalOpen, setModalOpen] = useState(false);
+    const [modalFigures, setModalFigures] = useState<string[]>([]);
+    const [modalIndex, setModalIndex] = useState(0);
 
     const hasInput = number || titular || inventor || keywords;
+    const totalResults = inpiResults.length + espacenetResults.length;
+
+    const getCodPedido = (patent: PatentResult): string | null => {
+        const codMatch = patent.url?.match(/CodPedido=(\d+)/);
+        return codMatch ? codMatch[1] : null;
+    };
+
+    const loadInpiDetail = async (codPedido: string) => {
+        if (!codPedido) return;
+        if (detailCache[codPedido]) return;
+        if (loadingDetails[codPedido]) return;
+
+        setLoadingDetails(prev => ({ ...prev, [codPedido]: true }));
+        try {
+            const response = await axios.get(`${API_URL}/search/inpi/detail/${codPedido}`);
+            setDetailCache(prev => ({ ...prev, [codPedido]: response.data }));
+        } catch (err) {
+            console.warn("Failed to load detail:", err);
+        } finally {
+            setLoadingDetails(prev => {
+                const next = { ...prev };
+                delete next[codPedido];
+                return next;
+            });
+        }
+    };
+
+    const preloadInpiDetails = async (patents: PatentResult[]) => {
+        const cods = [...new Set(
+            patents
+                .filter((patent) => patent.source === "INPI")
+                .map((patent) => getCodPedido(patent))
+                .filter((value): value is string => Boolean(value))
+        )];
+
+        if (!cods.length) return;
+
+        const concurrency = Math.min(2, cods.length);
+        let cursor = 0;
+        const workers = Array.from({ length: concurrency }, async () => {
+            while (cursor < cods.length) {
+                const current = cods[cursor];
+                cursor += 1;
+                await loadInpiDetail(current);
+            }
+        });
+        await Promise.all(workers);
+    };
 
     const handleSearch = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -52,18 +121,28 @@ export default function QuickSearch() {
         setError("");
         setSearched(true);
         setExpandedIdx(null);
+        setFigureIndexByPatent({});
 
         try {
-            const response = await axios.post(`${API_URL}/search/quick`, {
+            const response = await axios.post<QuickSearchResponse>(`${API_URL}/search/quick`, {
                 number: number || undefined,
                 titular: titular || undefined,
                 inventor: inventor || undefined,
                 keywords: keywords || undefined,
             });
-            setResults(response.data.results || []);
-        } catch (err: any) {
-            setError(err.response?.data?.error || "Erro ao buscar patentes");
-            setResults([]);
+            const fetchedInpi = response.data.inpi || [];
+            const fetchedEspacenet = response.data.espacenet || [];
+            setInpiResults(fetchedInpi);
+            setEspacenetResults(fetchedEspacenet);
+            setTab("inpi");
+            void preloadInpiDetails(fetchedInpi);
+        } catch (err: unknown) {
+            const message = axios.isAxiosError(err)
+                ? (err.response?.data?.error as string | undefined)
+                : undefined;
+            setError(message || "Erro ao buscar patentes");
+            setInpiResults([]);
+            setEspacenetResults([]);
         } finally {
             setLoading(false);
         }
@@ -76,28 +155,49 @@ export default function QuickSearch() {
         }
         setExpandedIdx(idx);
 
-        // Extract codPedido from URL
-        const codMatch = patent.url?.match(/CodPedido=(\d+)/);
-        if (!codMatch || patent.source !== "INPI") return;
-
-        const codPedido = codMatch[1];
-        if (detailCache[codPedido]) return; // Already fetched
-
-        setLoadingDetail(idx);
-        try {
-            const response = await axios.get(`${API_URL}/search/inpi/detail/${codPedido}`);
-            setDetailCache(prev => ({ ...prev, [codPedido]: response.data }));
-        } catch (err) {
-            console.warn("Failed to load detail:", err);
-        } finally {
-            setLoadingDetail(null);
-        }
+        if (patent.source !== "INPI") return;
+        const codPedido = getCodPedido(patent);
+        if (!codPedido) return;
+        await loadInpiDetail(codPedido);
     };
 
     const getDetail = (patent: PatentResult): PatentDetail | null => {
-        const codMatch = patent.url?.match(/CodPedido=(\d+)/);
-        if (!codMatch) return null;
-        return detailCache[codMatch[1]] || null;
+        const codPedido = getCodPedido(patent);
+        if (!codPedido) return null;
+        return detailCache[codPedido] || null;
+    };
+
+    const getPatentKey = (patent: PatentResult, idx: number) => {
+        return `${patent.source}-${patent.publicationNumber || idx}`;
+    };
+
+    const getPatentFigures = (patent: PatentResult, detail: PatentDetail | null): string[] => {
+        const detailFigures = detail?.figures || [];
+        const baseFigures = patent.figures || [];
+        if (detailFigures.length > 0) return detailFigures;
+        return baseFigures;
+    };
+
+    const getCurrentFigureIndex = (patent: PatentResult, idx: number, total: number) => {
+        if (total <= 0) return 0;
+        const key = getPatentKey(patent, idx);
+        const current = figureIndexByPatent[key] || 0;
+        return Math.min(current, total - 1);
+    };
+
+    const setFigureIndex = (patent: PatentResult, idx: number, nextIndex: number, total: number) => {
+        if (total <= 0) return;
+        const bounded = ((nextIndex % total) + total) % total;
+        const key = getPatentKey(patent, idx);
+        setFigureIndexByPatent(prev => ({ ...prev, [key]: bounded }));
+    };
+
+    const openFigureModal = (figures: string[], index: number) => {
+        if (!figures.length) return;
+        const bounded = Math.min(Math.max(index, 0), figures.length - 1);
+        setModalFigures(figures);
+        setModalIndex(bounded);
+        setModalOpen(true);
     };
 
     const clearAll = () => {
@@ -105,10 +205,16 @@ export default function QuickSearch() {
         setTitular("");
         setInventor("");
         setKeywords("");
-        setResults([]);
+        setInpiResults([]);
+        setEspacenetResults([]);
         setSearched(false);
         setError("");
         setExpandedIdx(null);
+        setTab("inpi");
+        setFigureIndexByPatent({});
+        setModalOpen(false);
+        setModalFigures([]);
+        setModalIndex(0);
     };
 
     return (
@@ -207,16 +313,11 @@ export default function QuickSearch() {
                     <div className="space-y-3">
                         <div className="flex items-center justify-between">
                             <h2 className="text-lg font-semibold">
-                                {results.length > 0 ? `${results.length} resultado${results.length > 1 ? "s" : ""} encontrado${results.length > 1 ? "s" : ""}` : "Nenhum resultado"}
+                                {totalResults > 0 ? `${totalResults} resultado${totalResults > 1 ? "s" : ""} encontrado${totalResults > 1 ? "s" : ""}` : "Nenhum resultado"}
                             </h2>
-                            {results.length > 0 && (
-                                <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-full">
-                                    Fonte: {[...new Set(results.map(r => r.source))].join(" + ")}
-                                </span>
-                            )}
                         </div>
 
-                        {results.length === 0 ? (
+                        {totalResults === 0 ? (
                             <div className="bg-card rounded-xl border p-12 text-center">
                                 <Search className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
                                 <p className="text-muted-foreground">
@@ -227,131 +328,319 @@ export default function QuickSearch() {
                                 </p>
                             </div>
                         ) : (
-                            <div className="space-y-3">
-                                {results.map((patent, idx) => {
-                                    const isExpanded = expandedIdx === idx;
-                                    const detail = getDetail(patent);
-                                    const isLoadingThis = loadingDetail === idx;
+                            <Tabs value={tab} onValueChange={(value) => setTab(value as "inpi" | "espacenet")} className="space-y-3">
+                                <TabsList>
+                                    <TabsTrigger value="inpi">INPI ({inpiResults.length})</TabsTrigger>
+                                    <TabsTrigger value="espacenet">Espacenet ({espacenetResults.length})</TabsTrigger>
+                                </TabsList>
 
-                                    return (
-                                        <div key={idx} className="bg-card rounded-xl border hover:shadow-md transition-shadow overflow-hidden">
-                                            {/* Main card */}
-                                            <div
-                                                className="p-5 cursor-pointer"
-                                                onClick={() => toggleDetail(idx, patent)}
-                                            >
-                                                <div className="flex items-start justify-between gap-4">
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                                            <span className="text-xs font-mono font-medium text-accent bg-accent/10 px-2 py-0.5 rounded">
-                                                                {patent.publicationNumber}
-                                                            </span>
-                                                            <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-                                                                {patent.source}
-                                                            </span>
-                                                            {patent.date && (
-                                                                <span className="text-xs text-muted-foreground">
-                                                                    {patent.date}
-                                                                </span>
-                                                            )}
+                                <TabsContent value="inpi" className="space-y-3 mt-0">
+                                    {inpiResults.length === 0 ? (
+                                        <div className="bg-card rounded-xl border p-6 text-center text-sm text-muted-foreground">
+                                            Nenhum resultado do INPI para os critérios informados.
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {inpiResults.map((patent, idx) => {
+                                                const isExpanded = expandedIdx === idx;
+                                                const detail = getDetail(patent);
+                                                const codPedido = getCodPedido(patent);
+                                                const isLoadingThis = Boolean(codPedido && loadingDetails[codPedido]);
+                                                const applicantText = detail?.applicant || patent.applicant;
+                                                const inventorText = detail?.inventor || patent.inventor || "";
+                                                const abstractText = detail?.abstract || patent.abstract || "";
+                                                const figures = getPatentFigures(patent, detail);
+                                                const currentFigureIndex = getCurrentFigureIndex(patent, idx, figures.length);
+                                                const currentFigure = figures[currentFigureIndex];
+
+                                                return (
+                                                    <div key={idx} className="bg-card rounded-xl border hover:shadow-md transition-shadow overflow-hidden">
+                                                        <div
+                                                            className="p-5 cursor-pointer"
+                                                            onClick={() => toggleDetail(idx, patent)}
+                                                        >
+                                                            <div className="flex items-start justify-between gap-4">
+                                                                <div className="flex-1 min-w-0">
+                                                                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                                                        <span className="text-xs font-mono font-medium text-accent bg-accent/10 px-2 py-0.5 rounded">
+                                                                            {patent.publicationNumber}
+                                                                        </span>
+                                                                        <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                                                                            INPI
+                                                                        </span>
+                                                                        {patent.date && (
+                                                                            <span className="text-xs text-muted-foreground">
+                                                                                {patent.date}
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                    <h3 className="font-semibold text-sm mb-1 line-clamp-2">
+                                                                        {detail?.title || patent.title}
+                                                                    </h3>
+                                                                    {applicantText && (
+                                                                        <p className="text-xs text-muted-foreground mb-1">
+                                                                            <span className="font-medium">Titular:</span> {applicantText}
+                                                                        </p>
+                                                                    )}
+                                                                    {inventorText && (
+                                                                        <p className="text-xs text-muted-foreground mb-1">
+                                                                            <span className="font-medium">Inventor:</span> {inventorText}
+                                                                        </p>
+                                                                    )}
+                                                                    {abstractText && (
+                                                                        <p className="text-xs text-muted-foreground line-clamp-2">
+                                                                            <span className="font-medium">Resumo:</span> {abstractText}
+                                                                        </p>
+                                                                    )}
+                                                                    {patent.classification && (
+                                                                        <p className="text-xs text-muted-foreground">
+                                                                            <span className="font-medium">IPC:</span> {patent.classification}
+                                                                        </p>
+                                                                    )}
+                                                                </div>
+                                                                <div className="flex items-center gap-1 shrink-0">
+                                                                    <a
+                                                                        href={patent.url}
+                                                                        target="_blank"
+                                                                        rel="noopener noreferrer"
+                                                                        className="p-2 rounded-lg hover:bg-muted transition-colors"
+                                                                        title="Abrir no site original"
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                    >
+                                                                        <ExternalLink className="w-4 h-4 text-muted-foreground" />
+                                                                    </a>
+                                                                    <div className="p-2">
+                                                                        {isExpanded
+                                                                            ? <ChevronUp className="w-4 h-4 text-muted-foreground" />
+                                                                            : <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                                                                        }
+                                                                    </div>
+                                                                </div>
+                                                            </div>
                                                         </div>
-                                                        <h3 className="font-semibold text-sm mb-1 line-clamp-2">
-                                                            {patent.title}
-                                                        </h3>
-                                                        {patent.classification && (
-                                                            <p className="text-xs text-muted-foreground">
-                                                                <span className="font-medium">IPC:</span> {patent.classification}
-                                                            </p>
+
+                                                        {isExpanded && (
+                                                            <div className="border-t px-5 py-4 bg-muted/20 space-y-3">
+                                                                {isLoadingThis ? (
+                                                                    <div className="flex items-center gap-2 text-sm text-muted-foreground py-4 justify-center">
+                                                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                                                        Carregando detalhes do INPI...
+                                                                    </div>
+                                                                ) : (
+                                                                    <>
+                                                                        {applicantText && (
+                                                                            <div className="flex items-start gap-2">
+                                                                                <Building2 className="w-4 h-4 text-accent mt-0.5 shrink-0" />
+                                                                                <div>
+                                                                                    <p className="text-xs font-medium text-muted-foreground">Depositante / Titular</p>
+                                                                                    <p className="text-sm">{applicantText}</p>
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                        {inventorText && (
+                                                                            <div className="flex items-start gap-2">
+                                                                                <Lightbulb className="w-4 h-4 text-yellow-500 mt-0.5 shrink-0" />
+                                                                                <div>
+                                                                                    <p className="text-xs font-medium text-muted-foreground">Inventor(es)</p>
+                                                                                    <p className="text-sm">{inventorText}</p>
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                        {abstractText && (
+                                                                            <div>
+                                                                                <p className="text-xs font-medium text-muted-foreground mb-1">Resumo</p>
+                                                                                <p className="text-sm text-muted-foreground leading-relaxed">{abstractText}</p>
+                                                                            </div>
+                                                                        )}
+                                                                        {(detail?.classification || patent.classification) && (
+                                                                            <div>
+                                                                                <p className="text-xs font-medium text-muted-foreground mb-1">Classificação Completa</p>
+                                                                                <p className="text-sm font-mono">{detail?.classification || patent.classification}</p>
+                                                                            </div>
+                                                                        )}
+                                                                        {detail?.status && (
+                                                                            <div>
+                                                                                <p className="text-xs font-medium text-muted-foreground mb-1">Situação</p>
+                                                                                <p className="text-sm">{detail.status}</p>
+                                                                            </div>
+                                                                        )}
+                                                                        {figures.length > 0 && currentFigure && (
+                                                                            <div className="space-y-2">
+                                                                                <div className="flex items-center justify-between">
+                                                                                    <p className="text-xs font-medium text-muted-foreground">Figuras</p>
+                                                                                    <p className="text-xs text-muted-foreground">
+                                                                                        {currentFigureIndex + 1} de {figures.length}
+                                                                                    </p>
+                                                                                </div>
+                                                                                <div className="relative rounded-lg border bg-background overflow-hidden">
+                                                                                    <img
+                                                                                        src={currentFigure}
+                                                                                        alt={`Figura ${currentFigureIndex + 1} da patente ${patent.publicationNumber}`}
+                                                                                        className="w-full h-64 object-contain bg-muted/30"
+                                                                                    />
+                                                                                    {figures.length > 1 && (
+                                                                                        <>
+                                                                                            <Button
+                                                                                                type="button"
+                                                                                                variant="secondary"
+                                                                                                size="icon"
+                                                                                                className="absolute left-3 top-1/2 -translate-y-1/2"
+                                                                                                onClick={() => setFigureIndex(patent, idx, currentFigureIndex - 1, figures.length)}
+                                                                                            >
+                                                                                                <ChevronLeft className="w-4 h-4" />
+                                                                                            </Button>
+                                                                                            <Button
+                                                                                                type="button"
+                                                                                                variant="secondary"
+                                                                                                size="icon"
+                                                                                                className="absolute right-3 top-1/2 -translate-y-1/2"
+                                                                                                onClick={() => setFigureIndex(patent, idx, currentFigureIndex + 1, figures.length)}
+                                                                                            >
+                                                                                                <ChevronRight className="w-4 h-4" />
+                                                                                            </Button>
+                                                                                        </>
+                                                                                    )}
+                                                                                    <Button
+                                                                                        type="button"
+                                                                                        variant="secondary"
+                                                                                        size="icon"
+                                                                                        className="absolute right-3 top-3"
+                                                                                        onClick={() => openFigureModal(figures, currentFigureIndex)}
+                                                                                    >
+                                                                                        <Expand className="w-4 h-4" />
+                                                                                    </Button>
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                        {!applicantText && !inventorText && !abstractText && figures.length === 0 && (
+                                                                            <p className="text-sm text-muted-foreground text-center py-2">
+                                                                                Detalhes não disponíveis para esta patente.
+                                                                            </p>
+                                                                        )}
+                                                                    </>
+                                                                )}
+                                                            </div>
                                                         )}
                                                     </div>
-                                                    <div className="flex items-center gap-1 shrink-0">
-                                                        <a
-                                                            href={patent.url}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
-                                                            className="p-2 rounded-lg hover:bg-muted transition-colors"
-                                                            title="Abrir no site original"
-                                                            onClick={(e) => e.stopPropagation()}
-                                                        >
-                                                            <ExternalLink className="w-4 h-4 text-muted-foreground" />
-                                                        </a>
-                                                        <div className="p-2">
-                                                            {isExpanded
-                                                                ? <ChevronUp className="w-4 h-4 text-muted-foreground" />
-                                                                : <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                                                            }
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </TabsContent>
+
+                                <TabsContent value="espacenet" className="space-y-3 mt-0">
+                                    {espacenetResults.length === 0 ? (
+                                        <div className="bg-card rounded-xl border p-6 text-center text-sm text-muted-foreground">
+                                            Nenhum resultado do Espacenet para os critérios informados.
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {espacenetResults.map((patent, idx) => (
+                                                <div key={`esp-${idx}`} className="bg-card rounded-xl border hover:shadow-md transition-shadow overflow-hidden">
+                                                    <div className="p-5">
+                                                        <div className="flex items-start justify-between gap-4">
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                                                    <span className="text-xs font-mono font-medium text-accent bg-accent/10 px-2 py-0.5 rounded">
+                                                                        {patent.publicationNumber}
+                                                                    </span>
+                                                                    <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                                                                        Espacenet
+                                                                    </span>
+                                                                    {patent.date && (
+                                                                        <span className="text-xs text-muted-foreground">
+                                                                            {patent.date}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                <h3 className="font-semibold text-sm mb-1 line-clamp-2">
+                                                                    {patent.title}
+                                                                </h3>
+                                                                {patent.applicant && (
+                                                                    <p className="text-xs text-muted-foreground mb-1">
+                                                                        <span className="font-medium">Titular:</span> {patent.applicant}
+                                                                    </p>
+                                                                )}
+                                                                {patent.inventor && (
+                                                                    <p className="text-xs text-muted-foreground mb-1">
+                                                                        <span className="font-medium">Inventor:</span> {patent.inventor}
+                                                                    </p>
+                                                                )}
+                                                                {patent.abstract && (
+                                                                    <p className="text-xs text-muted-foreground line-clamp-2">
+                                                                        <span className="font-medium">Resumo:</span> {patent.abstract}
+                                                                    </p>
+                                                                )}
+                                                                {patent.classification && (
+                                                                    <p className="text-xs text-muted-foreground">
+                                                                        <span className="font-medium">IPC:</span> {patent.classification}
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                            <a
+                                                                href={patent.url}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="p-2 rounded-lg hover:bg-muted transition-colors shrink-0"
+                                                                title="Abrir no site original"
+                                                            >
+                                                                <ExternalLink className="w-4 h-4 text-muted-foreground" />
+                                                            </a>
                                                         </div>
                                                     </div>
                                                 </div>
-                                            </div>
-
-                                            {/* Expanded detail */}
-                                            {isExpanded && (
-                                                <div className="border-t px-5 py-4 bg-muted/20 space-y-3">
-                                                    {isLoadingThis ? (
-                                                        <div className="flex items-center gap-2 text-sm text-muted-foreground py-4 justify-center">
-                                                            <Loader2 className="w-4 h-4 animate-spin" />
-                                                            Carregando detalhes do INPI...
-                                                        </div>
-                                                    ) : detail ? (
-                                                        <>
-                                                            {detail.applicant && (
-                                                                <div className="flex items-start gap-2">
-                                                                    <Building2 className="w-4 h-4 text-accent mt-0.5 shrink-0" />
-                                                                    <div>
-                                                                        <p className="text-xs font-medium text-muted-foreground">Depositante / Titular</p>
-                                                                        <p className="text-sm">{detail.applicant}</p>
-                                                                    </div>
-                                                                </div>
-                                                            )}
-                                                            {detail.inventor && (
-                                                                <div className="flex items-start gap-2">
-                                                                    <Lightbulb className="w-4 h-4 text-yellow-500 mt-0.5 shrink-0" />
-                                                                    <div>
-                                                                        <p className="text-xs font-medium text-muted-foreground">Inventor(es)</p>
-                                                                        <p className="text-sm">{detail.inventor}</p>
-                                                                    </div>
-                                                                </div>
-                                                            )}
-                                                            {detail.abstract && (
-                                                                <div>
-                                                                    <p className="text-xs font-medium text-muted-foreground mb-1">Resumo</p>
-                                                                    <p className="text-sm text-muted-foreground leading-relaxed">{detail.abstract}</p>
-                                                                </div>
-                                                            )}
-                                                            {detail.classification && (
-                                                                <div>
-                                                                    <p className="text-xs font-medium text-muted-foreground mb-1">Classificação Completa</p>
-                                                                    <p className="text-sm font-mono">{detail.classification}</p>
-                                                                </div>
-                                                            )}
-                                                            {detail.status && (
-                                                                <div>
-                                                                    <p className="text-xs font-medium text-muted-foreground mb-1">Situação</p>
-                                                                    <p className="text-sm">{detail.status}</p>
-                                                                </div>
-                                                            )}
-                                                            {!detail.applicant && !detail.inventor && !detail.abstract && (
-                                                                <p className="text-sm text-muted-foreground text-center py-2">
-                                                                    Detalhes não disponíveis para esta patente.
-                                                                </p>
-                                                            )}
-                                                        </>
-                                                    ) : (
-                                                        <p className="text-sm text-muted-foreground text-center py-2">
-                                                            Clique em "Abrir" para ver os detalhes no site do INPI.
-                                                        </p>
-                                                    )}
-                                                </div>
-                                            )}
+                                            ))}
                                         </div>
-                                    );
-                                })}
-                            </div>
+                                    )}
+                                </TabsContent>
+                            </Tabs>
                         )}
                     </div>
                 )}
             </div>
+            <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+                <DialogContent className="max-w-6xl p-4">
+                    {modalFigures.length > 0 && (
+                        <div className="space-y-3">
+                            <div className="flex items-center justify-between pr-10">
+                                <p className="text-sm font-medium">Figura ampliada</p>
+                                <p className="text-xs text-muted-foreground">
+                                    {modalIndex + 1} de {modalFigures.length}
+                                </p>
+                            </div>
+                            <div className="relative rounded-lg border bg-muted/20 overflow-hidden">
+                                <img
+                                    src={modalFigures[modalIndex]}
+                                    alt={`Figura ampliada ${modalIndex + 1}`}
+                                    className="w-full max-h-[75vh] object-contain"
+                                />
+                                {modalFigures.length > 1 && (
+                                    <>
+                                        <Button
+                                            type="button"
+                                            variant="secondary"
+                                            size="icon"
+                                            className="absolute left-3 top-1/2 -translate-y-1/2"
+                                            onClick={() => setModalIndex((prev) => (prev - 1 + modalFigures.length) % modalFigures.length)}
+                                        >
+                                            <ChevronLeft className="w-4 h-4" />
+                                        </Button>
+                                        <Button
+                                            type="button"
+                                            variant="secondary"
+                                            size="icon"
+                                            className="absolute right-3 top-1/2 -translate-y-1/2"
+                                            onClick={() => setModalIndex((prev) => (prev + 1) % modalFigures.length)}
+                                        >
+                                            <ChevronRight className="w-4 h-4" />
+                                        </Button>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </DialogContent>
+            </Dialog>
         </AppLayout>
     );
 }
