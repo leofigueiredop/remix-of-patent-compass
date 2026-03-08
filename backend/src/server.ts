@@ -77,8 +77,8 @@ class AsyncQueue {
 const espacenetQueue = new AsyncQueue(800); // 800ms between calls
 const inpiQueue = new AsyncQueue(1500); // 1.5s between calls
 
-// Inicializa SDK do Gemini (fallback)
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+// Inicializa SDK do Gemini somente se configurado
+const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
 // ─── OPS Token Cache ───────────────────────────────────────────
 let opsAccessToken: string | null = null;
@@ -139,8 +139,8 @@ async function generateWithGroq(prompt: string, expectJson = true, customSystemM
 
 // ─── Gemini Helper (fallback) ──────────────────────────────────
 async function generateWithGeminiDirect(prompt: string, expectJson = true): Promise<string> {
-    if (!GEMINI_API_KEY) {
-        throw new Error('GEMINI_API_KEY não configurada no servidor.');
+    if (!ai) {
+        throw new Error('Gemini não configurado no servidor.');
     }
 
     const response = await ai.models.generateContent({
@@ -158,15 +158,20 @@ async function generateWithGeminiDirect(prompt: string, expectJson = true): Prom
 
 // ─── Unified LLM Helper: Groq first, Gemini fallback ──────────
 async function generateWithGemini(prompt: string, expectJson = true, customSystemMessage?: string): Promise<string> {
-    // Try Groq first (free tier, fast)
     if (GROQ_API_KEY) {
         try {
             return await generateWithGroq(prompt, expectJson, customSystemMessage);
         } catch (error: any) {
-            fastify.log.warn(`Groq failed, falling back to Gemini: ${error.message}`);
+            if (ai) {
+                fastify.log.warn(`Groq falhou, usando fallback Gemini: ${error.message}`);
+            } else {
+                fastify.log.warn(`Groq falhou e Gemini não está configurado: ${error.message}`);
+            }
         }
     }
-    // Fallback to Gemini
+    if (!GROQ_API_KEY && !ai) {
+        throw new Error('Nenhum provedor LLM configurado. Configure GROQ_API_KEY.');
+    }
     return await generateWithGeminiDirect(prompt, expectJson);
 }
 
@@ -608,68 +613,92 @@ function parseOpsResponse(data: any): any[] {
     const biblioData = data?.['ops:world-patent-data']?.['ops:biblio-search']?.['ops:search-result']?.['exchange-documents'];
     if (!biblioData) return [];
 
-    const docs = Array.isArray(biblioData) ? biblioData : [biblioData];
+    const toArray = (value: any): any[] => {
+        if (!value) return [];
+        return Array.isArray(value) ? value : [value];
+    };
+
+    const extractText = (value: any): string => {
+        if (!value) return '';
+        if (typeof value === 'string') return value.trim();
+        if (Array.isArray(value)) {
+            return value.map(extractText).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+        }
+        if (typeof value === 'object') {
+            if (typeof value.$ === 'string') return value.$.trim();
+            if (typeof value._ === 'string') return value._.trim();
+            return Object.values(value).map(extractText).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+        }
+        return '';
+    };
+
+    const docs = toArray(biblioData);
 
     for (const doc of docs) {
-        const exchangeDoc = doc?.['exchange-document'];
-        if (!exchangeDoc) continue;
+        const exchangeDocs = doc?.['exchange-document']
+            ? toArray(doc['exchange-document'])
+            : (doc?.['bibliographic-data'] ? [doc] : []);
 
-        const bibData = exchangeDoc['bibliographic-data'];
+        for (const exchangeDoc of exchangeDocs) {
+            if (!exchangeDoc) continue;
+            const bibData = exchangeDoc['bibliographic-data'];
+            if (!bibData) continue;
 
-        // Title
-        let title = 'Sem Título';
-        const invTitle = bibData?.['invention-title'];
-        if (Array.isArray(invTitle)) {
-            title = invTitle.find((t: any) => t['@lang'] === 'en' || t['@lang'] === 'pt')?.['$'] || invTitle[0]?.['$'];
-        } else if (invTitle) {
-            title = invTitle['$'];
+            let title = 'Sem Título';
+            const invTitle = toArray(bibData?.['invention-title']);
+            if (invTitle.length > 0) {
+                const preferredTitle = invTitle.find((t: any) => t?.['@lang'] === 'pt' || t?.['@lang'] === 'en') || invTitle[0];
+                title = extractText(preferredTitle) || 'Sem Título';
+            }
+
+            let abstract = '';
+            const absData = toArray(exchangeDoc['abstract']);
+            if (absData.length > 0) {
+                const preferredAbs = absData.find((a: any) => a?.['@lang'] === 'pt' || a?.['@lang'] === 'en') || absData[0];
+                abstract = extractText(preferredAbs?.p ?? preferredAbs);
+            }
+
+            let applicant = 'Desconhecido';
+            const parties = toArray(bibData?.['parties']?.['applicants']?.['applicant']);
+            if (parties.length > 0) {
+                const appObj = parties[0];
+                applicant = extractText(appObj?.['applicant-name']?.['name']) || 'Desconhecido';
+            }
+
+            const pubRef = toArray(bibData?.['publication-reference']?.['document-id']);
+            const docDb = pubRef.find((r: any) => r?.['@document-id-type'] === 'docdb') || pubRef[0] || {};
+            const pubDate = extractText(docDb?.['date']);
+            const pubNum = extractText(docDb?.['doc-number']);
+            const country = extractText(docDb?.['country']);
+            const kind = extractText(docDb?.['kind']);
+            const publicationNumber = `${country}${pubNum}${kind}`.trim();
+
+            let classification = '';
+            const classData = toArray(bibData?.['patent-classifications']?.['patent-classification']);
+            if (classData.length > 0) {
+                const cls = classData[0];
+                classification = `${extractText(cls?.['section'])}${extractText(cls?.['class'])}${extractText(cls?.['subclass'])} ${extractText(cls?.['main-group'])}/${extractText(cls?.['subgroup'])}`.trim();
+            }
+
+            if (!publicationNumber && !title) continue;
+
+            results.push({
+                publicationNumber: publicationNumber || `${country} ${pubNum}`.trim(),
+                title,
+                applicant,
+                date: pubDate,
+                abstract,
+                classification,
+                source: 'Espacenet',
+                url: publicationNumber
+                    ? `https://worldwide.espacenet.com/patent/search?q=pn%3D${publicationNumber}`
+                    : `https://worldwide.espacenet.com/patent/search?q=${encodeURIComponent(title)}`
+            });
         }
-
-        // Abstract
-        let abstract = '';
-        const absData = exchangeDoc['abstract'];
-        if (Array.isArray(absData)) {
-            abstract = absData.find((a: any) => a['@lang'] === 'en')?.['p']?.['$'] || absData[0]?.['p']?.['$'] || '';
-        } else if (absData) {
-            abstract = absData['p']?.['$'] || '';
-        }
-
-        // Applicant
-        let applicant = 'Desconhecido';
-        const parties = bibData?.['parties']?.['applicants']?.['applicant'];
-        if (parties) {
-            const appObj = Array.isArray(parties) ? parties[0] : parties;
-            applicant = appObj['applicant-name']?.['name']?.['$'] || '';
-        }
-
-        // Publication ref
-        const pubRef = bibData?.['publication-reference']?.['document-id'];
-        const docDb = Array.isArray(pubRef) ? pubRef.find((r: any) => r['@document-id-type'] === 'docdb') : pubRef;
-        const pubDate = docDb?.['date']?.['$'] || '';
-        const pubNum = docDb?.['doc-number']?.['$'] || '';
-        const country = docDb?.['country']?.['$'] || '';
-
-        // Classification
-        let classification = '';
-        const classData = bibData?.['patent-classifications']?.['patent-classification'];
-        if (classData) {
-            const cls = Array.isArray(classData) ? classData[0] : classData;
-            classification = `${cls?.['section']?.['$'] || ''}${cls?.['class']?.['$'] || ''}${cls?.['subclass']?.['$'] || ''} ${cls?.['main-group']?.['$'] || ''}/${cls?.['subgroup']?.['$'] || ''}`;
-        }
-
-        results.push({
-            publicationNumber: `${country} ${pubNum}`.trim(),
-            title,
-            applicant,
-            date: pubDate,
-            abstract,
-            classification,
-            source: 'Espacenet',
-            url: `https://worldwide.espacenet.com/patent/search?q=pn%3D${country}${pubNum}`
-        });
     }
-
-    return results;
+    return results.filter((item, index, arr) =>
+        arr.findIndex((x) => x.publicationNumber === item.publicationNumber && x.source === item.source) === index
+    );
 }
 
 // Heuristic: detect if text is likely already in Portuguese
@@ -767,25 +796,38 @@ function parseInpiResults(html: string): any[] {
     const results: any[] = [];
 
     $('table tr').each((_, row) => {
-        const bgColor = $(row).attr('bgcolor');
-        if (!bgColor || (bgColor !== '#E0E0E0' && bgColor !== 'white')) return;
+        const link = $(row).find('a[href*="PatenteServletController"]').first();
+        if (!link.length) return;
 
         const cells = $(row).find('td');
-        if (cells.length < 3) return;
-
-        const link = $(cells[0]).find('a').first();
-        if (!link.length) return;
+        if (cells.length < 2) return;
 
         const number = link.text().trim();
         if (!number) return;
 
         const href = link.attr('href') || '';
-        const codMatch = href.match(/CodPedido=(\d+)/);
+        const onclick = link.attr('onclick') || '';
+        const codMatch = (href.match(/[?&]CodPedido=(\d+)/i) || onclick.match(/[?&]CodPedido=(\d+)/i));
         const codPedido = codMatch ? codMatch[1] : '';
 
-        const date = $(cells[1]).text().trim();
-        const title = $(cells[2]).find('b').text().trim() || $(cells[2]).text().trim();
-        const classification = cells.length > 3 ? $(cells[3]).text().trim() : '';
+        const cellTexts = cells.toArray()
+            .map((c) => $(c).text().replace(/\s+/g, ' ').trim())
+            .filter(Boolean);
+
+        const dateFromCell = cells.length > 1 ? $(cells[1]).text().replace(/\s+/g, ' ').trim() : '';
+        const dateFromRow = cellTexts.find((text) => /\d{2}\/\d{2}\/\d{4}/.test(text)) || '';
+        const date = dateFromCell || dateFromRow;
+
+        let title = cells.length > 2
+            ? ($(cells[2]).find('b').first().text().trim() || $(cells[2]).text().replace(/\s+/g, ' ').trim())
+            : '';
+        if (!title) {
+            title = cellTexts.find((text) => text !== number && text !== date && text.length > 12) || '';
+        }
+
+        const classificationByCell = cells.length > 3 ? $(cells[3]).text().replace(/\s+/g, ' ').trim() : '';
+        const classificationByPattern = cellTexts.find((text) => /^[A-H]\d{2}[A-Z]/i.test(text)) || '';
+        const classification = classificationByCell || classificationByPattern;
 
         if (number && title) {
             results.push({
@@ -818,15 +860,14 @@ async function searchInpiViaCurl(params: {
     resumo?: string;
 }): Promise<any[]> {
     const cookieFile = `/tmp/inpi_${randomUUID()}.txt`;
+    const payloadFile = `/tmp/inpi_payload_${randomUUID()}.txt`;
 
     try {
-        // Step 1: Anonymous login — curl handles redirects & cookies perfectly
         await execAsync(
             `curl -s -c ${cookieFile} -L 'https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login' -o /dev/null`,
             { timeout: 15000 }
         );
 
-        // Step 2: POST advanced search — INPI requires ALL fields (even empty)
         const fields: Record<string, string> = {
             Action: 'SearchAvancado',
             NumPedido: params.number?.trim() || '',
@@ -856,32 +897,38 @@ async function searchInpiViaCurl(params: {
         const postBody = Object.entries(fields)
             .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
             .join('&');
+        fs.writeFileSync(payloadFile, postBody, 'utf8');
         fastify.log.info(`INPI curl search: Titulo="${(params.keywords || '').substring(0, 100)}" Resumo="${(params.resumo || '').substring(0, 100)}"`);
 
         const { stdout } = await execAsync(
-            `curl -s -b ${cookieFile} -X POST 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController' -d '${postBody}' | iconv -f ISO-8859-1 -t UTF-8`,
+            `curl -s -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -X POST 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController' --data-binary @${payloadFile} | iconv -f ISO-8859-1 -t UTF-8`,
             { timeout: 30000, maxBuffer: 5 * 1024 * 1024 }
         );
 
-        // Cleanup
-        try { execSync(`rm -f ${cookieFile}`); } catch { }
+        try { fs.unlinkSync(cookieFile); } catch { }
+        try { fs.unlinkSync(payloadFile); } catch { }
 
         return parseInpiResults(stdout);
     } catch (error: any) {
-        try { execSync(`rm -f ${cookieFile}`); } catch { }
+        try { fs.unlinkSync(cookieFile); } catch { }
+        try { fs.unlinkSync(payloadFile); } catch { }
         fastify.log.warn(`INPI curl search failed: ${error.message}`);
         return [];
     }
 }
 
 async function scrapeInpiBuscaWeb(keywords: string[], _ipcCodes: string[], inpiQuery?: string): Promise<any[]> {
-    // If we have a pre-built INPI boolean query, use it in Titulo (which supports boolean).
-    // Also put simpler terms in Resumo for broader recall.
+    const resumoFromQuery = (inpiQuery || keywords.join(' '))
+        .replace(/[()"]/g, ' ')
+        .replace(/\b(AND|OR|NOT|E|OU|NÃO|NAO)\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
     if (inpiQuery) {
         fastify.log.info(`INPI boolean query: ${inpiQuery.substring(0, 300)}`);
-        return inpiQueue.enqueue(() => searchInpiViaCurl({ keywords: inpiQuery }));
+        return inpiQueue.enqueue(() => searchInpiViaCurl({ keywords: inpiQuery, resumo: resumoFromQuery }));
     }
-    return inpiQueue.enqueue(() => searchInpiViaCurl({ keywords: keywords.join(' ') }));
+    return inpiQueue.enqueue(() => searchInpiViaCurl({ keywords: keywords.join(' '), resumo: resumoFromQuery }));
 }
 
 // ─── GET /search/inpi/detail/:codPedido ────────────────────────
@@ -970,7 +1017,7 @@ fastify.post('/search/quick', async (request, reply) => {
             if (number) cqlParts.push(`pn=${number.trim()}`);
             if (titular) cqlParts.push(`pa="${titular.trim()}"`);
             if (inventor) cqlParts.push(`in="${inventor.trim()}"`);
-            if (keywords) cqlParts.push(`txt="${keywords.trim()}"`);
+            if (keywords) cqlParts.push(`ta all "${keywords.trim().replace(/"/g, '\\"')}"`);
 
             const cql = cqlParts.join(' AND ');
             const token = await getOpsToken();
