@@ -1076,10 +1076,10 @@ function parseInpiResults(html: string): any[] {
         const classificationByPattern = cellTexts.find((text) => /^[A-H]\d{2}[A-Z]/i.test(text)) || '';
         const classification = classificationByCell || classificationByPattern;
 
-        if (number && title) {
+        if (number) {
             results.push({
                 publicationNumber: number,
-                title,
+                title: title || '(Sem título)',
                 applicant: '',
                 date,
                 abstract: '',
@@ -1101,23 +1101,34 @@ async function initializeInpiAnonymousSession(cookieFile: string): Promise<void>
     const payloadFilePrimary = `/tmp/inpi_login_primary_${randomUUID()}.txt`;
     const payloadFileFallback = `/tmp/inpi_login_fallback_${randomUUID()}.txt`;
     const loginUrl = 'https://busca.inpi.gov.br/pePI/servlet/LoginController';
+    const debugLog = `/tmp/inpi_init_${randomUUID()}.log`;
+    
+    fs.writeFileSync(debugLog, `Init session start for ${cookieFile}\n`);
+
     try {
+        fs.appendFileSync(debugLog, 'Step 1: Accessing login page...\n');
         await execAsync(
-            `curl -s -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -c ${cookieFile} '${loginUrl}?action=login' -o /dev/null`,
-            { timeout: 15000 }
+            `curl -v -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -c ${cookieFile} '${loginUrl}?action=login' -o /dev/null`,
+            { timeout: 20000 }
         );
 
         fs.writeFileSync(payloadFilePrimary, 'submission=continuar', 'utf8');
+        fs.appendFileSync(debugLog, 'Step 2: Posting submission=continuar...\n');
         await execAsync(
-            `curl -s -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -c ${cookieFile} -X POST '${loginUrl}' --data-binary @${payloadFilePrimary} -o /dev/null`,
-            { timeout: 20000 }
+            `curl -v -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -c ${cookieFile} -X POST '${loginUrl}' --data-binary @${payloadFilePrimary} -o /dev/null`,
+            { timeout: 25000 }
         );
 
         fs.writeFileSync(payloadFileFallback, 'action=login&T_Login=&T_Senha=&Usuario=', 'utf8');
+        fs.appendFileSync(debugLog, 'Step 3: Posting empty login...\n');
         await execAsync(
-            `curl -s -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -c ${cookieFile} -X POST '${loginUrl}' --data-binary @${payloadFileFallback} -o /dev/null`,
-            { timeout: 20000 }
+            `curl -v -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -c ${cookieFile} -X POST '${loginUrl}' --data-binary @${payloadFileFallback} -o /dev/null`,
+            { timeout: 25000 }
         );
+        fs.appendFileSync(debugLog, 'Session initialized successfully.\n');
+    } catch (err: any) {
+        fs.appendFileSync(debugLog, `Init failed: ${err.message}\nStack: ${err.stack}\n`);
+        throw err;
     } finally {
         try { fs.unlinkSync(payloadFilePrimary); } catch { }
         try { fs.unlinkSync(payloadFileFallback); } catch { }
@@ -1169,19 +1180,31 @@ async function searchInpiViaCurl(params: {
         fs.writeFileSync(payloadFile, postBody, 'utf8');
         fastify.log.info(`INPI curl search: Titulo="${(params.keywords || '').substring(0, 100)}" Resumo="${(params.resumo || '').substring(0, 100)}"`);
 
-        const { stdout } = await execAsync(
-            `curl -s -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -X POST 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController' --data-binary @${payloadFile} | iconv -f ISO-8859-1 -t UTF-8`,
-            { timeout: 30000, maxBuffer: 5 * 1024 * 1024 }
+        const { stdout, stderr } = await execAsync(
+            `curl -v -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -X POST 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController' --data-binary @${payloadFile} | iconv -f ISO-8859-1 -t UTF-8`,
+            { timeout: 120000, maxBuffer: 50 * 1024 * 1024 }
         );
 
         try { fs.unlinkSync(cookieFile); } catch { }
         try { fs.unlinkSync(payloadFile); } catch { }
 
-        return parseInpiResults(stdout);
+        const results = parseInpiResults(stdout);
+        if (results.length === 0) {
+            const debugFile = `/tmp/inpi_debug_fail_${randomUUID()}.html`;
+            fs.writeFileSync(debugFile, stdout);
+            fastify.log.warn(`INPI search returned 0 results. Saved HTML to ${debugFile}`);
+            if (stderr) fastify.log.warn(`INPI curl stderr: ${stderr}`);
+        }
+        return results;
     } catch (error: any) {
         try { fs.unlinkSync(cookieFile); } catch { }
         try { fs.unlinkSync(payloadFile); } catch { }
-        fastify.log.warn(`INPI curl search failed: ${error.message}`);
+        
+        const errorLogFile = `/tmp/inpi_error_${randomUUID()}.txt`;
+        fs.writeFileSync(errorLogFile, `Error: ${error.message}\nStderr: ${error.stderr || ''}\nStack: ${error.stack}`);
+        
+        fastify.log.warn(`INPI curl search failed: ${error.message}. Log saved to ${errorLogFile}`);
+        if (error.stderr) fastify.log.warn(`INPI curl stderr (error): ${error.stderr}`);
         return [];
     }
 }
@@ -1610,10 +1633,67 @@ fastify.get('/patent/document/translation', async (request, reply) => {
             truncated: translation.originalLength > 18000
         };
     } catch (error: any) {
-        fastify.log.warn(`Patent document translation failed: ${error.message}`);
+        fastify.log.warn(`Patent document translation failed (PDF): ${error.message}`);
+        
+        // Fallback: Try to fetch full text from OPS if publicationNumber is available
+        if (publicationNumber) {
+            try {
+                const opsText = await fetchFullTextFromOps(publicationNumber);
+                if (opsText) {
+                    const translation = await translateDocumentTextToPortuguese(opsText);
+                    return {
+                        publicationNumber: publicationNumber,
+                        translatedText: translation.translatedText,
+                        originalLength: translation.originalLength,
+                        translated: translation.translated,
+                        truncated: translation.originalLength > 18000
+                    };
+                }
+            } catch (opsError: any) {
+                fastify.log.warn(`Patent document translation failed (OPS fallback): ${opsError.message}`);
+            }
+        }
+
         return reply.code(404).send({ error: 'Não foi possível traduzir o documento desta patente' });
     }
 });
+
+async function fetchFullTextFromOps(publicationNumber: string): Promise<string | null> {
+    if (!OPS_CONSUMER_KEY || !OPS_CONSUMER_SECRET) return null;
+    const cleanedPn = publicationNumber.replace(/\s+/g, '');
+    try {
+        const token = await getOpsToken();
+        const url = `https://ops.epo.org/3.2/rest-services/published-data/publication/epodoc/${cleanedPn}/fulltext`;
+        const response = await espacenetQueue.enqueue(() => axios.get(url, {
+            headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/xml' },
+            timeout: 30000
+        }));
+        return extractTextFromOpsXml(response.data);
+    } catch (error: any) {
+        fastify.log.warn(`OPS fulltext failed for ${publicationNumber}: ${error.message}`);
+        return null;
+    }
+}
+
+function extractTextFromOpsXml(xml: string): string {
+    const $ = cheerio.load(xml, { xmlMode: true });
+    let text = '';
+    
+    // Extract description
+    const description = $('description').text();
+    if (description) {
+        text += 'DESCRIÇÃO:\n\n' + description + '\n\n';
+    }
+
+    // Extract claims
+    const claims = $('claims').text();
+    if (claims) {
+        text += 'REIVINDICAÇÕES:\n\n' + claims + '\n\n';
+    }
+
+    return text.trim();
+}
+
 
 // ─── POST /search/quick ────────────────────────────────────────
 fastify.post('/search/quick', async (request, reply) => {
@@ -1832,6 +1912,9 @@ Responda um JSON com array "results" contendo EXATAMENTE ${batch.length} objetos
 // ─── Start ─────────────────────────────────────────────────────
 const start = async () => {
     try {
+        const startupLog = `/tmp/server_startup.log`;
+        fs.writeFileSync(startupLog, `Server starting at ${new Date().toISOString()} with PID ${process.pid}\n`);
+        
         await fastify.listen({ port: Number(process.env.PORT) || 3000, host: '0.0.0.0' });
     } catch (err) {
         fastify.log.error(err);
