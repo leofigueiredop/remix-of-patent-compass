@@ -1092,8 +1092,11 @@ function parseInpiResults(html: string): any[] {
 
     const totalMatch = html.match(/Foram encontrados\s*<b>(\d+)<\/b>/);
     const total = totalMatch ? parseInt(totalMatch[1]) : results.length;
-    fastify.log.info(`INPI: found ${results.length} results (total: ${total})`);
+    const perPage = results.length;
+    fastify.log.info(`INPI: found ${perPage} results on page (reported total: ${total})`);
 
+    (results as any).total = total;
+    (results as any).perPage = perPage;
     return results;
 }
 
@@ -1223,6 +1226,42 @@ async function searchInpiViaCurl(params: {
         try { fs.unlinkSync(payloadFile); } catch { }
 
         const results = parseInpiResults(stdout);
+        const reportedTotal: number | undefined = (results as any).total;
+        const perPage: number | undefined = (results as any).perPage;
+        const maxResults = 500;
+        const maxPages = 5;
+        const baseNextPageUrl = 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=nextPage';
+        const targetTotal = reportedTotal && reportedTotal > 0 ? Math.min(reportedTotal, maxResults) : maxResults;
+
+        if (reportedTotal && perPage && reportedTotal > perPage) {
+            const totalPages = Math.min(Math.ceil(reportedTotal / perPage), maxPages);
+            fastify.log.info(`INPI: fetching up to ${totalPages} pages (~${targetTotal} results)`);
+
+            for (let page = 2; page <= totalPages; page++) {
+                if (results.length >= targetTotal) break;
+                const pageUrl = `${baseNextPageUrl}&Page=${page}&Resumo=&Titulo=`;
+                try {
+                    const { stdout: pageHtml } = await execAsync(
+                        `curl -s -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} '${pageUrl}' | iconv -f ISO-8859-1 -t UTF-8`,
+                        { timeout: 120000, maxBuffer: 50 * 1024 * 1024 }
+                    );
+                    const pageResults = parseInpiResults(pageHtml);
+                    for (const item of pageResults) {
+                        if (results.length >= targetTotal) break;
+                        const already = results.some((r) =>
+                            r.publicationNumber === item.publicationNumber &&
+                            r.source === item.source
+                        );
+                        if (!already) {
+                            results.push(item);
+                        }
+                    }
+                } catch (pageErr: any) {
+                    fastify.log.warn(`INPI nextPage fetch failed for Page=${page}: ${pageErr.message}`);
+                    break;
+                }
+            }
+        }
         
         if (results.length === 0) {
             const debugFile = `/tmp/inpi_debug_fail_${randomUUID()}.html`;

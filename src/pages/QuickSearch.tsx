@@ -141,7 +141,7 @@ export default function QuickSearch() {
             console.warn("Failed to load detail:", err);
             setDetailErrors(prev => ({
                 ...prev,
-                [codPedido]: "Não foi possível carregar os detalhes do INPI para esta patente."
+                [codPedido]: "Detalhes do INPI indisponíveis — o registro pode estar protegido ou restrito."
             }));
         } finally {
             setLoadingDetails(prev => {
