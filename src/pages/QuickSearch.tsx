@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import AppLayout from "@/components/AppLayout";
+import PatentDocumentModal, { PatentDocumentData } from "@/components/PatentDocumentModal";
 import axios from "axios";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
@@ -58,17 +59,56 @@ export default function QuickSearch() {
     const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
     const [detailCache, setDetailCache] = useState<Record<string, PatentDetail>>({});
     const [loadingDetails, setLoadingDetails] = useState<Record<string, boolean>>({});
+    const [detailErrors, setDetailErrors] = useState<Record<string, string>>({});
     const [figureIndexByPatent, setFigureIndexByPatent] = useState<Record<string, number>>({});
     const [modalOpen, setModalOpen] = useState(false);
     const [modalFigures, setModalFigures] = useState<string[]>([]);
     const [modalIndex, setModalIndex] = useState(0);
+    const [patentModalOpen, setPatentModalOpen] = useState(false);
+    const [selectedPatent, setSelectedPatent] = useState<PatentDocumentData | null>(null);
 
     const hasInput = number || titular || inventor || keywords;
     const totalResults = inpiResults.length + espacenetResults.length;
 
     const getCodPedido = (patent: PatentResult): string | null => {
-        const codMatch = patent.url?.match(/CodPedido=(\d+)/);
-        return codMatch ? codMatch[1] : null;
+        if (!patent.url) return null;
+        if (URL.canParse(patent.url)) {
+            const parsed = new URL(patent.url);
+            const codByQuery = parsed.searchParams.get("CodPedido") || parsed.searchParams.get("codPedido");
+            if (codByQuery) return codByQuery;
+        }
+        const codMatch = patent.url.match(/[?&]CodPedido=([^&]+)/i);
+        return codMatch ? decodeURIComponent(codMatch[1]) : null;
+    };
+
+    const readText = (value: unknown): string => {
+        if (typeof value === "string") return value.trim();
+        if (Array.isArray(value)) {
+            return value
+                .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+                .map((item) => item.trim())
+                .join(" • ");
+        }
+        return "";
+    };
+
+    const normalizePatentDetail = (value: unknown): PatentDetail => {
+        const raw = (value && typeof value === "object") ? (value as Record<string, unknown>) : {};
+        const figuresRaw = raw.figures;
+        const figures = Array.isArray(figuresRaw)
+            ? figuresRaw.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+            : [];
+
+        return {
+            applicant: readText(raw.applicant) || undefined,
+            inventor: readText(raw.inventor) || undefined,
+            abstract: readText(raw.abstract) || undefined,
+            classification: readText(raw.classification) || undefined,
+            filingDate: readText(raw.filingDate) || undefined,
+            title: readText(raw.title) || undefined,
+            status: readText(raw.status) || undefined,
+            figures
+        };
     };
 
     const loadInpiDetail = async (codPedido: string) => {
@@ -76,12 +116,22 @@ export default function QuickSearch() {
         if (detailCache[codPedido]) return;
         if (loadingDetails[codPedido]) return;
 
+        setDetailErrors(prev => {
+            const next = { ...prev };
+            delete next[codPedido];
+            return next;
+        });
         setLoadingDetails(prev => ({ ...prev, [codPedido]: true }));
         try {
             const response = await axios.get(`${API_URL}/search/inpi/detail/${codPedido}`);
-            setDetailCache(prev => ({ ...prev, [codPedido]: response.data }));
+            const normalizedDetail = normalizePatentDetail(response.data);
+            setDetailCache(prev => ({ ...prev, [codPedido]: normalizedDetail }));
         } catch (err) {
             console.warn("Failed to load detail:", err);
+            setDetailErrors(prev => ({
+                ...prev,
+                [codPedido]: "Não foi possível carregar os detalhes do INPI para esta patente."
+            }));
         } finally {
             setLoadingDetails(prev => {
                 const next = { ...prev };
@@ -89,28 +139,6 @@ export default function QuickSearch() {
                 return next;
             });
         }
-    };
-
-    const preloadInpiDetails = async (patents: PatentResult[]) => {
-        const cods = [...new Set(
-            patents
-                .filter((patent) => patent.source === "INPI")
-                .map((patent) => getCodPedido(patent))
-                .filter((value): value is string => Boolean(value))
-        )];
-
-        if (!cods.length) return;
-
-        const concurrency = Math.min(2, cods.length);
-        let cursor = 0;
-        const workers = Array.from({ length: concurrency }, async () => {
-            while (cursor < cods.length) {
-                const current = cods[cursor];
-                cursor += 1;
-                await loadInpiDetail(current);
-            }
-        });
-        await Promise.all(workers);
     };
 
     const handleSearch = async (e: React.FormEvent) => {
@@ -121,6 +149,9 @@ export default function QuickSearch() {
         setError("");
         setSearched(true);
         setExpandedIdx(null);
+        setDetailCache({});
+        setLoadingDetails({});
+        setDetailErrors({});
         setFigureIndexByPatent({});
 
         try {
@@ -135,7 +166,6 @@ export default function QuickSearch() {
             setInpiResults(fetchedInpi);
             setEspacenetResults(fetchedEspacenet);
             setTab("inpi");
-            void preloadInpiDetails(fetchedInpi);
         } catch (err: unknown) {
             const message = axios.isAxiosError(err)
                 ? (err.response?.data?.error as string | undefined)
@@ -200,6 +230,22 @@ export default function QuickSearch() {
         setModalOpen(true);
     };
 
+    const openPatentModal = (patent: PatentResult, detail?: PatentDetail | null) => {
+        setSelectedPatent({
+            publicationNumber: patent.publicationNumber,
+            title: detail?.title || patent.title,
+            applicant: detail?.applicant || patent.applicant,
+            inventor: detail?.inventor || patent.inventor,
+            date: detail?.filingDate || patent.date,
+            abstract: detail?.abstract || patent.abstract,
+            classification: detail?.classification || patent.classification,
+            source: patent.source,
+            url: patent.url,
+            status: detail?.status
+        });
+        setPatentModalOpen(true);
+    };
+
     const clearAll = () => {
         setNumber("");
         setTitular("");
@@ -215,6 +261,8 @@ export default function QuickSearch() {
         setModalOpen(false);
         setModalFigures([]);
         setModalIndex(0);
+        setPatentModalOpen(false);
+        setSelectedPatent(null);
     };
 
     return (
@@ -346,6 +394,7 @@ export default function QuickSearch() {
                                                 const detail = getDetail(patent);
                                                 const codPedido = getCodPedido(patent);
                                                 const isLoadingThis = Boolean(codPedido && loadingDetails[codPedido]);
+                                                const detailError = codPedido ? detailErrors[codPedido] : "";
                                                 const applicantText = detail?.applicant || patent.applicant;
                                                 const inventorText = detail?.inventor || patent.inventor || "";
                                                 const abstractText = detail?.abstract || patent.abstract || "";
@@ -399,16 +448,17 @@ export default function QuickSearch() {
                                                                     )}
                                                                 </div>
                                                                 <div className="flex items-center gap-1 shrink-0">
-                                                                    <a
-                                                                        href={patent.url}
-                                                                        target="_blank"
-                                                                        rel="noopener noreferrer"
+                                                                    <button
+                                                                        type="button"
                                                                         className="p-2 rounded-lg hover:bg-muted transition-colors"
-                                                                        title="Abrir no site original"
-                                                                        onClick={(e) => e.stopPropagation()}
+                                                                        title="Abrir documento da patente"
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            openPatentModal(patent, detail);
+                                                                        }}
                                                                     >
                                                                         <ExternalLink className="w-4 h-4 text-muted-foreground" />
-                                                                    </a>
+                                                                    </button>
                                                                     <div className="p-2">
                                                                         {isExpanded
                                                                             ? <ChevronUp className="w-4 h-4 text-muted-foreground" />
@@ -426,6 +476,10 @@ export default function QuickSearch() {
                                                                         <Loader2 className="w-4 h-4 animate-spin" />
                                                                         Carregando detalhes do INPI...
                                                                     </div>
+                                                                ) : detailError ? (
+                                                                    <p className="text-sm text-destructive text-center py-2">
+                                                                        {detailError}
+                                                                    </p>
                                                                 ) : (
                                                                     <>
                                                                         {applicantText && (
@@ -577,15 +631,14 @@ export default function QuickSearch() {
                                                                     </p>
                                                                 )}
                                                             </div>
-                                                            <a
-                                                                href={patent.url}
-                                                                target="_blank"
-                                                                rel="noopener noreferrer"
+                                                            <button
+                                                                type="button"
                                                                 className="p-2 rounded-lg hover:bg-muted transition-colors shrink-0"
-                                                                title="Abrir no site original"
+                                                                title="Abrir documento da patente"
+                                                                onClick={() => openPatentModal(patent, null)}
                                                             >
                                                                 <ExternalLink className="w-4 h-4 text-muted-foreground" />
-                                                            </a>
+                                                            </button>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -641,6 +694,11 @@ export default function QuickSearch() {
                     )}
                 </DialogContent>
             </Dialog>
+            <PatentDocumentModal
+                open={patentModalOpen}
+                onOpenChange={setPatentModalOpen}
+                patent={selectedPatent}
+            />
         </AppLayout>
     );
 }

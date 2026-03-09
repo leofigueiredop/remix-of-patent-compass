@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import AppLayout from "@/components/AppLayout";
 import WizardSteps from "@/components/WizardSteps";
+import PatentDocumentModal, { PatentDocumentData } from "@/components/PatentDocumentModal";
 import { useResearch } from "@/contexts/ResearchContext";
 import { aiService } from "@/services/ai";
 
@@ -29,6 +30,8 @@ export default function SearchResults() {
   const [tab, setTab] = useState("espacenet");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [patentModalOpen, setPatentModalOpen] = useState(false);
+  const [selectedPatent, setSelectedPatent] = useState<PatentDocumentData | null>(null);
 
   const espacenetResults = (searchResults?.espacenet || []).map((p: any) => ({
     id: p.publicationNumber || p.number,
@@ -76,6 +79,20 @@ export default function SearchResults() {
         state: { results: allResults }
       });
     }
+  };
+
+  const openPatentModal = (patent: typeof patentList[number]) => {
+    setSelectedPatent({
+      publicationNumber: patent.number,
+      title: patent.title,
+      applicant: patent.applicant,
+      date: patent.date,
+      abstract: patent.abstract,
+      classification: patent.classification,
+      source: patent.source,
+      url: patent.url || "",
+    });
+    setPatentModalOpen(true);
   };
 
   return (
@@ -153,12 +170,15 @@ export default function SearchResults() {
                   )}
                 </div>
                 {patent.url && (
-                  <a href={patent.url} target="_blank" rel="noopener noreferrer">
-                    <Button variant="ghost" size="sm" className="shrink-0 gap-1.5 text-xs">
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      Abrir
-                    </Button>
-                  </a>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0 gap-1.5 text-xs"
+                    onClick={() => openPatentModal(patent)}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Abrir
+                  </Button>
                 )}
               </div>
             ))}
@@ -182,6 +202,11 @@ export default function SearchResults() {
           </Button>
         </div>
       </div>
+      <PatentDocumentModal
+        open={patentModalOpen}
+        onOpenChange={setPatentModalOpen}
+        patent={selectedPatent}
+      />
     </AppLayout>
   );
 }

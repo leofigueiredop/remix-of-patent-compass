@@ -6,6 +6,7 @@ import { Separator } from "@/components/ui/separator";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import AppLayout from "@/components/AppLayout";
 import WizardSteps from "@/components/WizardSteps";
+import PatentDocumentModal, { PatentDocumentData } from "@/components/PatentDocumentModal";
 import { useResearch } from "@/contexts/ResearchContext";
 import { toast } from "sonner";
 
@@ -26,6 +27,8 @@ interface ReportPatent {
   url?: string;
   number?: string;
   classification?: string;
+  source?: string;
+  inventor?: string;
 }
 
 export default function Report() {
@@ -36,6 +39,8 @@ export default function Report() {
   const patents: ReportPatent[] = location.state?.patents || [];
 
   const [isExporting, setIsExporting] = useState(false);
+  const [patentModalOpen, setPatentModalOpen] = useState(false);
+  const [selectedPatent, setSelectedPatent] = useState<PatentDocumentData | null>(null);
 
   // Derive invention title from briefing
   const inventionTitle = briefing?.solucaoProposta
@@ -78,6 +83,22 @@ export default function Report() {
   const highRiskPatents = patents.filter(p => p.riskLevel === "high");
   const mediumRiskPatents = patents.filter(p => p.riskLevel === "medium");
   const lowRiskPatents = patents.filter(p => p.riskLevel === "low");
+
+  const openPatentModal = (patent: ReportPatent) => {
+    const fallbackUrl = `https://worldwide.espacenet.com/patent/search?q=${encodeURIComponent(patent.publicationNumber || patent.number || "")}`;
+    setSelectedPatent({
+      publicationNumber: patent.publicationNumber || patent.number || "N/A",
+      title: patent.title,
+      applicant: patent.applicant,
+      inventor: patent.inventor,
+      date: patent.date,
+      abstract: patent.abstract,
+      classification: patent.classification,
+      source: patent.source,
+      url: patent.url || fallbackUrl,
+    });
+    setPatentModalOpen(true);
+  };
 
   return (
     <AppLayout>
@@ -241,8 +262,7 @@ export default function Report() {
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          const url = patent.url || `https://worldwide.espacenet.com/patent/search?q=${encodeURIComponent(patent.publicationNumber || patent.number || '')}`;
-                          window.open(url, '_blank');
+                          openPatentModal(patent);
                         }}
                         className="inline-flex items-center gap-1.5 text-[10px] text-blue-600 hover:bg-blue-100 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200 print:hidden transition-colors w-max cursor-pointer"
                         contentEditable={false}
@@ -365,6 +385,11 @@ export default function Report() {
           </div>
         </div>
       </div>
+      <PatentDocumentModal
+        open={patentModalOpen}
+        onOpenChange={setPatentModalOpen}
+        patent={selectedPatent}
+      />
     </AppLayout>
   );
 }
