@@ -75,7 +75,7 @@ export default function QuickSearch() {
         initial.forEach((patent) => {
             const codPedido = getCodPedido(patent);
             if (!codPedido) return;
-            void loadInpiDetail(codPedido);
+            void loadInpiDetail(codPedido, patent.publicationNumber);
         });
     };
 
@@ -120,7 +120,7 @@ export default function QuickSearch() {
         };
     };
 
-    const loadInpiDetail = async (codPedido: string) => {
+    const loadInpiDetail = async (codPedido: string, publicationNumber?: string) => {
         if (!codPedido) return;
         if (detailCache[codPedido]) return;
         if (loadingDetails[codPedido]) return;
@@ -132,7 +132,9 @@ export default function QuickSearch() {
         });
         setLoadingDetails(prev => ({ ...prev, [codPedido]: true }));
         try {
-            const response = await axios.get(`${API_URL}/search/inpi/detail/${codPedido}`);
+            const response = await axios.get(`${API_URL}/search/inpi/detail/${codPedido}`, {
+                params: publicationNumber ? { publicationNumber } : undefined
+            });
             const normalizedDetail = normalizePatentDetail(response.data);
             setDetailCache(prev => ({ ...prev, [codPedido]: normalizedDetail }));
         } catch (err) {
@@ -198,7 +200,7 @@ export default function QuickSearch() {
         if (patent.source !== "INPI") return;
         const codPedido = getCodPedido(patent);
         if (!codPedido) return;
-        await loadInpiDetail(codPedido);
+        await loadInpiDetail(codPedido, patent.publicationNumber);
     };
 
     const getDetail = (patent: PatentResult): PatentDetail | null => {

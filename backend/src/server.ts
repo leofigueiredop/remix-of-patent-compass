@@ -1096,6 +1096,25 @@ function parseInpiResults(html: string): any[] {
     return results;
 }
 
+async function initializeInpiAnonymousSession(cookieFile: string): Promise<void> {
+    const payloadFile = `/tmp/inpi_login_${randomUUID()}.txt`;
+    const loginUrl = 'https://busca.inpi.gov.br/pePI/servlet/LoginController';
+    try {
+        await execAsync(
+            `curl -s -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -c ${cookieFile} '${loginUrl}?action=login' -o /dev/null`,
+            { timeout: 15000 }
+        );
+
+        fs.writeFileSync(payloadFile, 'action=login&T_Login=&T_Senha=&Usuario=', 'utf8');
+        await execAsync(
+            `curl -s -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -c ${cookieFile} -X POST '${loginUrl}' --data-binary @${payloadFile} -o /dev/null`,
+            { timeout: 20000 }
+        );
+    } finally {
+        try { fs.unlinkSync(payloadFile); } catch { }
+    }
+}
+
 async function searchInpiViaCurl(params: {
     number?: string;
     titular?: string;
@@ -1107,10 +1126,7 @@ async function searchInpiViaCurl(params: {
     const payloadFile = `/tmp/inpi_payload_${randomUUID()}.txt`;
 
     try {
-        await execAsync(
-            `curl -s -c ${cookieFile} -L 'https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login' -o /dev/null`,
-            { timeout: 15000 }
-        );
+        await initializeInpiAnonymousSession(cookieFile);
 
         const fields: Record<string, string> = {
             Action: 'SearchAvancado',
@@ -1175,6 +1191,41 @@ async function scrapeInpiBuscaWeb(keywords: string[], _ipcCodes: string[], inpiQ
     return inpiQueue.enqueue(() => searchInpiViaCurl({ keywords: keywords.join(' '), resumo: resumoFromQuery }));
 }
 
+async function fetchEspacenetBiblioByPublicationNumber(publicationNumber: string): Promise<{
+    title?: string;
+    applicant?: string;
+    inventor?: string;
+    abstract?: string;
+    classification?: string;
+    date?: string;
+} | null> {
+    if (!OPS_CONSUMER_KEY || !OPS_CONSUMER_SECRET) return null;
+    const cleanedPn = publicationNumber.replace(/\s+/g, '');
+    if (!cleanedPn) return null;
+    try {
+        const token = await getOpsToken();
+        const url = `https://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=${encodeURIComponent(`pn=${cleanedPn}`)}`;
+        const response = await espacenetQueue.enqueue(() => axios.get(url, {
+            headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+            timeout: 30000
+        }));
+        const opsResults = parseOpsResponse(response.data);
+        const first = opsResults[0];
+        if (!first) return null;
+        return {
+            title: first.title,
+            applicant: first.applicant,
+            inventor: first.inventor,
+            abstract: first.abstract,
+            classification: first.classification,
+            date: first.date
+        };
+    } catch (error: any) {
+        fastify.log.warn(`Espacenet biblio fallback failed for PN=${publicationNumber}: ${error.message}`);
+        return null;
+    }
+}
+
 function extractInpiFigureUrls(html: string): string[] {
     const $ = cheerio.load(html);
     const baseUrl = 'https://busca.inpi.gov.br/pePI/';
@@ -1223,7 +1274,7 @@ function extractInpiFigureUrls(html: string): string[] {
     return Array.from(figures).slice(0, 20);
 }
 
-async function fetchInpiDetailByCod(codPedido: string): Promise<any> {
+async function fetchInpiDetailByCod(codPedido: string, publicationNumber?: string): Promise<any> {
     const cookieFile = `/tmp/inpi_detail_${randomUUID()}.txt`;
     const defaultUrl = `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${encodeURIComponent(codPedido)}`;
     const fetchHtml = async (targetUrl: string): Promise<string> => {
@@ -1270,7 +1321,7 @@ async function fetchInpiDetailByCod(codPedido: string): Promise<any> {
     };
 
     try {
-        await execAsync(`curl -s -c ${cookieFile} -L 'https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login' -o /dev/null`, { timeout: 15000 });
+        await initializeInpiAnonymousSession(cookieFile);
         let html = await fetchHtml(defaultUrl);
         if (!html.trim() || isLoginHtml(html)) {
             const discoveredUrl = await lookupDetailUrlByCod();
@@ -1279,7 +1330,26 @@ async function fetchInpiDetailByCod(codPedido: string): Promise<any> {
             }
         }
         if (!html.trim() || isLoginHtml(html)) {
+            await initializeInpiAnonymousSession(cookieFile);
+            html = await fetchHtml(defaultUrl);
+        }
+        if (!html.trim() || isLoginHtml(html)) {
             fastify.log.warn(`INPI detail fell back to login page for CodPedido=${codPedido}`);
+            const fallback = publicationNumber ? await fetchEspacenetBiblioByPublicationNumber(publicationNumber) : null;
+            if (fallback) {
+                return {
+                    codPedido,
+                    title: fallback.title,
+                    applicant: fallback.applicant,
+                    inventor: fallback.inventor,
+                    abstract: fallback.abstract,
+                    classification: fallback.classification,
+                    filingDate: fallback.date,
+                    source: 'INPI',
+                    url: defaultUrl,
+                    figures: []
+                };
+            }
             return {
                 codPedido,
                 source: 'INPI',
@@ -1290,6 +1360,21 @@ async function fetchInpiDetailByCod(codPedido: string): Promise<any> {
         const detail = extractDetailFromHtml(html);
         if (!detail.title && !detail.abstract && !detail.applicant && !detail.inventor && (!detail.figures || detail.figures.length === 0)) {
             fastify.log.warn(`INPI did not return usable detail fields for CodPedido=${codPedido}`);
+            const fallback = publicationNumber ? await fetchEspacenetBiblioByPublicationNumber(publicationNumber) : null;
+            if (fallback) {
+                return {
+                    codPedido,
+                    title: fallback.title,
+                    applicant: fallback.applicant,
+                    inventor: fallback.inventor,
+                    abstract: fallback.abstract,
+                    classification: fallback.classification,
+                    filingDate: fallback.date,
+                    source: 'INPI',
+                    url: defaultUrl,
+                    figures: []
+                };
+            }
             return {
                 codPedido,
                 source: 'INPI',
@@ -1420,9 +1505,10 @@ async function fetchPatentPdf(url: string, fallbackName: string): Promise<{ buff
 // ─── GET /search/inpi/detail/:codPedido ────────────────────────
 fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
     const { codPedido } = request.params as { codPedido: string };
+    const { publicationNumber } = request.query as { publicationNumber?: string };
     if (!codPedido) return reply.code(400).send({ error: 'CodPedido é obrigatório' });
     try {
-        const detail = await fetchInpiDetailByCod(codPedido);
+        const detail = await fetchInpiDetailByCod(codPedido, publicationNumber);
         return detail;
     } catch (error: any) {
         fastify.log.warn(`INPI detail scrape failed: ${error.message}`);
