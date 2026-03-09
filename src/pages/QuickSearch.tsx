@@ -43,10 +43,23 @@ interface QuickSearchResponse {
         espacenet?: number;
         all?: number;
     };
+    pagination?: {
+        inpi?: {
+            page?: number;
+            pageSize?: number;
+            total?: number;
+            totalPages?: number;
+            from?: number;
+            to?: number;
+            hasPrevious?: boolean;
+            hasNext?: boolean;
+        };
+    };
     results?: PatentResult[];
 }
 
 export default function QuickSearch() {
+    const INPI_PAGE_SIZE = 20;
     const [number, setNumber] = useState("");
     const [titular, setTitular] = useState("");
     const [inventor, setInventor] = useState("");
@@ -67,10 +80,21 @@ export default function QuickSearch() {
     const [modalIndex, setModalIndex] = useState(0);
     const [patentModalOpen, setPatentModalOpen] = useState(false);
     const [selectedPatent, setSelectedPatent] = useState<PatentDocumentData | null>(null);
+    const [totals, setTotals] = useState({ inpi: 0, espacenet: 0, all: 0 });
+    const [inpiPagination, setInpiPagination] = useState({
+        page: 1,
+        pageSize: INPI_PAGE_SIZE,
+        total: 0,
+        totalPages: 1,
+        from: 0,
+        to: 0,
+        hasPrevious: false,
+        hasNext: false
+    });
     const searchTokenRef = useRef(0);
 
     const hasInput = number || titular || inventor || keywords;
-    const totalResults = inpiResults.length + espacenetResults.length;
+    const totalResults = totals.all;
 
     const getCodPedido = (patent: PatentResult): string | null => {
         if (!patent.url) return null;
@@ -175,6 +199,41 @@ export default function QuickSearch() {
         void Promise.all(Array.from({ length: workers }, () => runWorker()));
     };
 
+    const applyQuickSearchResponse = (
+        responseData: QuickSearchResponse,
+        searchToken: number,
+        preserveEspacenet: boolean
+    ) => {
+        const fetchedInpi = responseData.inpi || [];
+        const fetchedEspacenet = responseData.espacenet || [];
+        const inpiTotal = responseData.totals?.inpi ?? fetchedInpi.length;
+        const espacenetTotal = preserveEspacenet ? totals.espacenet : (responseData.totals?.espacenet ?? fetchedEspacenet.length);
+        const allTotal = responseData.totals?.all ?? (inpiTotal + espacenetTotal);
+
+        setInpiResults(fetchedInpi);
+        if (!preserveEspacenet) {
+            setEspacenetResults(fetchedEspacenet);
+        }
+        setTotals({
+            inpi: inpiTotal,
+            espacenet: espacenetTotal,
+            all: allTotal
+        });
+
+        const inpiPage = responseData.pagination?.inpi;
+        setInpiPagination({
+            page: inpiPage?.page ?? 1,
+            pageSize: inpiPage?.pageSize ?? INPI_PAGE_SIZE,
+            total: inpiPage?.total ?? inpiTotal,
+            totalPages: inpiPage?.totalPages ?? Math.max(1, Math.ceil(inpiTotal / INPI_PAGE_SIZE)),
+            from: inpiPage?.from ?? (inpiTotal > 0 ? 1 : 0),
+            to: inpiPage?.to ?? fetchedInpi.length,
+            hasPrevious: inpiPage?.hasPrevious ?? false,
+            hasNext: inpiPage?.hasNext ?? false
+        });
+        preloadInpiDetailsInBackground(fetchedInpi, searchToken);
+    };
+
     const handleSearch = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!hasInput) return;
@@ -189,6 +248,17 @@ export default function QuickSearch() {
         setLoadingDetails({});
         setDetailErrors({});
         setFigureIndexByPatent({});
+        setTotals({ inpi: 0, espacenet: 0, all: 0 });
+        setInpiPagination({
+            page: 1,
+            pageSize: INPI_PAGE_SIZE,
+            total: 0,
+            totalPages: 1,
+            from: 0,
+            to: 0,
+            hasPrevious: false,
+            hasNext: false
+        });
 
         try {
             const response = await axios.post<QuickSearchResponse>(`${API_URL}/search/quick`, {
@@ -196,13 +266,12 @@ export default function QuickSearch() {
                 titular: titular || undefined,
                 inventor: inventor || undefined,
                 keywords: keywords || undefined,
+                page: 1,
+                pageSize: INPI_PAGE_SIZE,
+                includeEspacenet: true
             });
-            const fetchedInpi = response.data.inpi || [];
-            const fetchedEspacenet = response.data.espacenet || [];
-            setInpiResults(fetchedInpi);
-            setEspacenetResults(fetchedEspacenet);
+            applyQuickSearchResponse(response.data, currentSearchToken, false);
             setTab("inpi");
-            preloadInpiDetailsInBackground(fetchedInpi, currentSearchToken);
         } catch (err: unknown) {
             const message = axios.isAxiosError(err)
                 ? (err.response?.data?.error as string | undefined)
@@ -210,6 +279,45 @@ export default function QuickSearch() {
             setError(message || "Erro ao buscar patentes");
             setInpiResults([]);
             setEspacenetResults([]);
+            setTotals({ inpi: 0, espacenet: 0, all: 0 });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const changeInpiPage = async (nextPage: number) => {
+        if (!hasInput) return;
+        if (nextPage < 1) return;
+        if (nextPage === inpiPagination.page) return;
+        if (nextPage > inpiPagination.totalPages) return;
+
+        const currentSearchToken = Date.now();
+        searchTokenRef.current = currentSearchToken;
+        setLoading(true);
+        setError("");
+        setExpandedIdx(null);
+        setDetailCache({});
+        setLoadingDetails({});
+        setDetailErrors({});
+        setFigureIndexByPatent({});
+        setTab("inpi");
+
+        try {
+            const response = await axios.post<QuickSearchResponse>(`${API_URL}/search/quick`, {
+                number: number || undefined,
+                titular: titular || undefined,
+                inventor: inventor || undefined,
+                keywords: keywords || undefined,
+                page: nextPage,
+                pageSize: INPI_PAGE_SIZE,
+                includeEspacenet: false
+            });
+            applyQuickSearchResponse(response.data, currentSearchToken, true);
+        } catch (err: unknown) {
+            const message = axios.isAxiosError(err)
+                ? (err.response?.data?.error as string | undefined)
+                : undefined;
+            setError(message || "Erro ao mudar de página");
         } finally {
             setLoading(false);
         }
@@ -299,6 +407,17 @@ export default function QuickSearch() {
         setKeywords("");
         setInpiResults([]);
         setEspacenetResults([]);
+        setTotals({ inpi: 0, espacenet: 0, all: 0 });
+        setInpiPagination({
+            page: 1,
+            pageSize: INPI_PAGE_SIZE,
+            total: 0,
+            totalPages: 1,
+            from: 0,
+            to: 0,
+            hasPrevious: false,
+            hasNext: false
+        });
         setSearched(false);
         setError("");
         setExpandedIdx(null);
@@ -424,8 +543,8 @@ export default function QuickSearch() {
                         ) : (
                             <Tabs value={tab} onValueChange={(value) => setTab(value as "inpi" | "espacenet")} className="space-y-3">
                                 <TabsList>
-                                    <TabsTrigger value="inpi">INPI ({inpiResults.length})</TabsTrigger>
-                                    <TabsTrigger value="espacenet">Espacenet ({espacenetResults.length})</TabsTrigger>
+                                    <TabsTrigger value="inpi">INPI ({totals.inpi})</TabsTrigger>
+                                    <TabsTrigger value="espacenet">Espacenet ({totals.espacenet})</TabsTrigger>
                                 </TabsList>
 
                                 <TabsContent value="inpi" className="space-y-3 mt-0">
@@ -435,6 +554,40 @@ export default function QuickSearch() {
                                         </div>
                                     ) : (
                                         <div className="space-y-3">
+                                            <div className="bg-muted/40 border rounded-lg px-3 py-2 flex items-center justify-between gap-3">
+                                                <p className="text-sm text-muted-foreground">
+                                                    {inpiPagination.total > 0
+                                                        ? `${inpiPagination.total} registros encontrados, mostrando ${inpiPagination.from} a ${inpiPagination.to}`
+                                                        : "Nenhum registro encontrado"}
+                                                </p>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-xs text-muted-foreground">
+                                                        Página {inpiPagination.page} de {inpiPagination.totalPages}
+                                                    </span>
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        disabled={loading || !inpiPagination.hasPrevious}
+                                                        onClick={() => void changeInpiPage(inpiPagination.page - 1)}
+                                                        className="gap-1"
+                                                    >
+                                                        <ChevronLeft className="w-3.5 h-3.5" />
+                                                        Anterior
+                                                    </Button>
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        disabled={loading || !inpiPagination.hasNext}
+                                                        onClick={() => void changeInpiPage(inpiPagination.page + 1)}
+                                                        className="gap-1"
+                                                    >
+                                                        Próxima
+                                                        <ChevronRight className="w-3.5 h-3.5" />
+                                                    </Button>
+                                                </div>
+                                            </div>
                                             {inpiResults.map((patent, idx) => {
                                                 const isExpanded = expandedIdx === idx;
                                                 const detail = getDetail(patent);

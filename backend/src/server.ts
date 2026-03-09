@@ -1144,13 +1144,31 @@ function parseInpiResults(html: string): any[] {
         }
     });
 
-    const totalMatch = html.match(/Foram encontrados\s*<b>(\d+)<\/b>/);
-    const total = totalMatch ? parseInt(totalMatch[1]) : results.length;
+    const pageText = $.root().text().replace(/\u00a0/g, ' ').replace(/\s+/g, ' ');
+    const totalMatch = html.match(/Foram encontrados[\s\S]{0,120}?<b>\s*([\d.,]+)\s*<\/b>/i)
+        || pageText.match(/Foram encontrados\s*([\d.,]+)/i);
+    const totalRaw = totalMatch?.[1]?.replace(/[^\d]/g, '');
+    const currentPageMatch = html.match(/Mostrando\s+p[aá]gina[\s\S]{0,60}?<b>\s*(\d+)\s*<\/b>[\s\S]{0,40}?<b>\s*(\d+)\s*<\/b>/i)
+        || pageText.match(/Mostrando\s+p[aá]gina\s*(\d+)\s*de\s*(\d+)/i);
+    const currentPage = currentPageMatch ? parseInt(currentPageMatch[1], 10) : 1;
+    const totalPagesFromText = currentPageMatch ? parseInt(currentPageMatch[2], 10) : 1;
+    const linkedPageNumbers = Array.from(html.matchAll(/Action=nextPage&Page=(\d+)/gi))
+        .map((m) => parseInt(m[1], 10))
+        .filter((v) => Number.isFinite(v) && v > 0);
+    const maxLinkedPage = linkedPageNumbers.length > 0 ? Math.max(...linkedPageNumbers) : currentPage;
+    const totalPages = Math.max(totalPagesFromText, maxLinkedPage, currentPage);
     const perPage = results.length;
-    fastify.log.info(`INPI: found ${perPage} results on page (reported total: ${total})`);
+    const minimumTotalByPage = Math.max(0, (currentPage - 1) * Math.max(perPage, 1) + results.length);
+    const minimumTotalByLinks = totalPages > currentPage ? totalPages * Math.max(perPage, 1) : minimumTotalByPage;
+    const total = totalRaw
+        ? Math.max(parseInt(totalRaw, 10), minimumTotalByPage)
+        : Math.max(minimumTotalByPage, minimumTotalByLinks);
+    fastify.log.info(`INPI: found ${perPage} results on page ${currentPage}/${totalPages} (reported total: ${total})`);
 
     (results as any).total = total;
     (results as any).perPage = perPage;
+    (results as any).currentPage = currentPage;
+    (results as any).totalPages = totalPages;
     return results;
 }
 
@@ -1239,6 +1257,8 @@ async function searchInpiViaCurl(params: {
     inventor?: string;
     keywords?: string;
     resumo?: string;
+    page?: number;
+    pageSize?: number;
     maxPages?: number;
     enrichDetails?: boolean;
     enrichLimit?: number;
@@ -1249,6 +1269,10 @@ async function searchInpiViaCurl(params: {
     try {
         await initializeInpiAnonymousSession(cookieFile);
 
+        const requestedPage = typeof params.page === 'number' && params.page > 0 ? Math.floor(params.page) : 1;
+        const requestedPageSize = typeof params.pageSize === 'number' && params.pageSize > 0
+            ? Math.min(Math.max(Math.floor(params.pageSize), 10), 100)
+            : 100;
         const fields: Record<string, string> = {
             Action: 'SearchAvancado',
             NumPedido: params.number?.trim() || '',
@@ -1271,7 +1295,7 @@ async function searchInpiViaCurl(params: {
             NomeDepositante: params.titular?.trim() || '',
             CpfCnpjDepositante: '',
             NomeInventor: params.inventor?.trim() || '',
-            RegisterPerPage: '100',
+            RegisterPerPage: String(requestedPageSize),
             botao: ' pesquisar » ',
         };
 
@@ -1281,24 +1305,70 @@ async function searchInpiViaCurl(params: {
         fs.writeFileSync(payloadFile, postBody, 'utf8');
         fastify.log.info(`INPI curl search: Titulo="${(params.keywords || '').substring(0, 100)}" Resumo="${(params.resumo || '').substring(0, 100)}"`);
 
-        const { stdout, stderr } = await execAsync(
-            `curl -v -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -X POST 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController' --data-binary @${payloadFile} | iconv -f ISO-8859-1 -t UTF-8`,
-            { timeout: 120000, maxBuffer: 50 * 1024 * 1024 }
+        const { stdout, stderr } = await execInpiCurlWithRetry(
+            `curl -sS -L --http1.1 -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -X POST 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController' --data-binary @${payloadFile} | iconv -f ISO-8859-1 -t UTF-8`,
+            3,
+            35000,
+            50 * 1024 * 1024
         );
 
         // Don't delete cookies yet - needed for details
         try { fs.unlinkSync(payloadFile); } catch { }
 
-        const results = parseInpiResults(stdout);
-        const reportedTotal: number | undefined = (results as any).total;
-        const perPage: number | undefined = (results as any).perPage;
+        let firstPageResults = parseInpiResults(stdout);
+        const baseNextPageUrl = 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=nextPage';
+        if (firstPageResults.length === 0) {
+            try {
+                const { stdout: firstPageFallbackHtml } = await execInpiCurlWithRetry(
+                    `curl -s -L --http1.1 -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} '${baseNextPageUrl}&Page=1&Resumo=&Titulo=' | iconv -f ISO-8859-1 -t UTF-8`,
+                    2,
+                    25000,
+                    50 * 1024 * 1024
+                );
+                const fallbackResults = parseInpiResults(firstPageFallbackHtml);
+                if (fallbackResults.length > 0) {
+                    firstPageResults = fallbackResults;
+                }
+            } catch (fallbackErr: any) {
+                fastify.log.warn(`INPI page 1 fallback failed: ${fallbackErr.message}`);
+            }
+        }
+        const reportedTotal: number | undefined = (firstPageResults as any).total;
+        const perPageFromHtml: number | undefined = (firstPageResults as any).perPage;
+        const reportedTotalPages: number | undefined = (firstPageResults as any).totalPages;
         const maxResults = 500;
         const maxPages = typeof params.maxPages === 'number' && params.maxPages > 0 ? params.maxPages : 5;
-        const baseNextPageUrl = 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=nextPage';
         const targetTotal = reportedTotal && reportedTotal > 0 ? Math.min(reportedTotal, maxResults) : maxResults;
+        const perPageEstimate = perPageFromHtml && perPageFromHtml > 0 ? perPageFromHtml : requestedPageSize;
+        const estimatedTotalPages = reportedTotalPages && reportedTotalPages > 0
+            ? reportedTotalPages
+            : Math.max(1, Math.ceil(targetTotal / Math.max(perPageEstimate, 1)));
 
-        if (reportedTotal && perPage && reportedTotal > perPage) {
-            const totalPages = Math.min(Math.ceil(reportedTotal / perPage), maxPages);
+        let pageResults = firstPageResults;
+        if (requestedPage > 1) {
+            const targetPage = Math.min(requestedPage, estimatedTotalPages);
+            const pageUrl = `${baseNextPageUrl}&Page=${targetPage}&Resumo=&Titulo=`;
+            try {
+                const { stdout: pageHtml } = await execInpiCurlWithRetry(
+                    `curl -s -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} '${pageUrl}' | iconv -f ISO-8859-1 -t UTF-8`,
+                    3,
+                    25000,
+                    50 * 1024 * 1024
+                );
+                pageResults = parseInpiResults(pageHtml);
+            } catch (pageErr: any) {
+                fastify.log.warn(`INPI target page fetch failed for Page=${targetPage}: ${pageErr.message}`);
+            }
+        }
+
+        const pageMetaTotal = reportedTotal ?? (pageResults as any).total ?? pageResults.length;
+        const pageMetaPerPage = (pageResults as any).perPage ?? perPageEstimate;
+        const pageMetaCurrentPage = (pageResults as any).currentPage ?? Math.min(requestedPage, estimatedTotalPages);
+        const pageMetaTotalPages = reportedTotalPages ?? (pageResults as any).totalPages ?? estimatedTotalPages;
+
+        if (requestedPage === 1 && reportedTotal && perPageFromHtml && reportedTotal > perPageFromHtml) {
+            const results = pageResults;
+            const totalPages = Math.min(Math.ceil(reportedTotal / perPageFromHtml), maxPages);
             fastify.log.info(`INPI: fetching up to ${totalPages} pages (~${targetTotal} results)`);
 
             for (let page = 2; page <= totalPages; page++) {
@@ -1326,7 +1396,13 @@ async function searchInpiViaCurl(params: {
                 }
             }
         }
-        
+
+        const results = pageResults;
+        (results as any).total = pageMetaTotal;
+        (results as any).perPage = pageMetaPerPage;
+        (results as any).currentPage = pageMetaCurrentPage;
+        (results as any).totalPages = pageMetaTotalPages;
+
         if (results.length === 0) {
             const debugFile = `/tmp/inpi_debug_fail_${randomUUID()}.html`;
             fs.writeFileSync(debugFile, stdout);
@@ -1871,19 +1947,28 @@ function extractTextFromOpsXml(xml: string): string {
 
 // ─── POST /search/quick ────────────────────────────────────────
 fastify.post('/search/quick', async (request, reply) => {
-    const { number, titular, inventor, keywords } = request.body as {
+    const { number, titular, inventor, keywords, page, pageSize, includeEspacenet } = request.body as {
         number?: string;
         titular?: string;
         inventor?: string;
         keywords?: string;
+        page?: number;
+        pageSize?: number;
+        includeEspacenet?: boolean;
     };
 
     if (!number && !titular && !inventor && !keywords) {
         return reply.code(400).send({ error: 'Informe pelo menos um critério de busca' });
     }
 
+    const requestedPage = typeof page === 'number' && page > 0 ? Math.floor(page) : 1;
+    const requestedPageSize = typeof pageSize === 'number' && pageSize > 0
+        ? Math.min(Math.max(Math.floor(pageSize), 10), 100)
+        : 20;
+    const shouldFetchEspacenet = includeEspacenet !== false;
+
     const cachedResults = await searchQuickSearchCache({ number, titular, inventor, keywords });
-    let inpiResults: any[] = cachedResults.filter((item: any) => item.source === 'INPI');
+    let inpiResults: any[] = [];
     let espacenetResults: any[] = cachedResults.filter((item: any) => item.source === 'Espacenet');
 
     const fetchedInpiResults: any[] = [];
@@ -1895,6 +1980,9 @@ fastify.post('/search/quick', async (request, reply) => {
             titular,
             inventor,
             keywords,
+            resumo: keywords,
+            page: requestedPage,
+            pageSize: requestedPageSize,
             maxPages: 1,
             enrichDetails: false
         }));
@@ -1904,7 +1992,7 @@ fastify.post('/search/quick', async (request, reply) => {
         fastify.log.warn(`Quick search INPI failed: ${err.message}`);
     }
 
-    if (OPS_CONSUMER_KEY && OPS_CONSUMER_SECRET) {
+    if (shouldFetchEspacenet && OPS_CONSUMER_KEY && OPS_CONSUMER_SECRET) {
         try {
             const cqlParts: string[] = [];
             if (number) cqlParts.push(`pn=${number.trim()}`);
@@ -1932,19 +2020,64 @@ fastify.post('/search/quick', async (request, reply) => {
         }
     }
 
-    inpiResults = mergePatentLists(inpiResults, fetchedInpiResults);
-    espacenetResults = mergePatentLists(espacenetResults, fetchedEspacenetResults);
+    if (fetchedInpiResults.length > 0 || requestedPage > 1) {
+        inpiResults = fetchedInpiResults;
+    } else {
+        const cachedInpiResults = cachedResults.filter((item: any) => item.source === 'INPI');
+        inpiResults = mergePatentLists(cachedInpiResults, fetchedInpiResults);
+    }
+
+    if (shouldFetchEspacenet) {
+        espacenetResults = mergePatentLists(espacenetResults, fetchedEspacenetResults);
+    }
+
+    const inpiCurrentPage = Math.max(1, (fetchedInpiResults as any).currentPage ?? requestedPage);
+    const inpiPageSize = (fetchedInpiResults as any).perPage ?? requestedPageSize;
+    const inpiCurrentCount = inpiResults.length;
+    const inpiRawTotal = (fetchedInpiResults as any).total ?? inpiResults.length;
+    const inpiRawTotalPages = (fetchedInpiResults as any).totalPages
+        ?? Math.max(1, Math.ceil(inpiRawTotal / requestedPageSize));
+    const inpiMinTotalForPage = inpiCurrentCount > 0
+        ? ((inpiCurrentPage - 1) * requestedPageSize) + inpiCurrentCount
+        : 0;
+    const inpiMayHaveNextPage = inpiCurrentCount === requestedPageSize;
+    const inpiTotalPages = Math.max(
+        inpiRawTotalPages,
+        inpiCurrentPage,
+        inpiMayHaveNextPage ? inpiCurrentPage + 1 : inpiCurrentPage
+    );
+    const inpiTotal = Math.max(
+        inpiRawTotal,
+        inpiMinTotalForPage,
+        inpiMayHaveNextPage ? (inpiCurrentPage * requestedPageSize) + 1 : inpiMinTotalForPage
+    );
+    const inpiFrom = inpiTotal > 0 ? ((inpiCurrentPage - 1) * requestedPageSize) + 1 : 0;
+    const inpiTo = inpiTotal > 0 ? inpiFrom + Math.max(inpiCurrentCount, 1) - 1 : 0;
+    const espacenetTotal = espacenetResults.length;
+    const allTotal = inpiTotal + espacenetTotal;
 
     return {
         inpi: inpiResults,
         espacenet: espacenetResults,
         totals: {
-            inpi: inpiResults.length,
-            espacenet: espacenetResults.length,
-            all: inpiResults.length + espacenetResults.length
+            inpi: inpiTotal,
+            espacenet: espacenetTotal,
+            all: allTotal
+        },
+        pagination: {
+            inpi: {
+                page: inpiCurrentPage,
+                pageSize: requestedPageSize,
+                total: inpiTotal,
+                totalPages: inpiTotalPages,
+                from: inpiFrom,
+                to: inpiTo,
+                hasPrevious: inpiCurrentPage > 1,
+                hasNext: inpiMayHaveNextPage || inpiCurrentPage < inpiTotalPages
+            }
         },
         results: [...inpiResults, ...espacenetResults],
-        total: inpiResults.length + espacenetResults.length
+        total: allTotal
     };
 });
 
