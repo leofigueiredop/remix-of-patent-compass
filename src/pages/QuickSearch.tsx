@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Search, Loader2, ExternalLink, Hash, User, UserCheck, FileText, X, ChevronDown, ChevronUp, Building2, Lightbulb, ChevronLeft, ChevronRight, Expand } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,7 @@ interface PatentResult {
     source: string;
     url: string;
     figures?: string[];
+    status?: string;
 }
 
 interface PatentDetail {
@@ -66,18 +67,10 @@ export default function QuickSearch() {
     const [modalIndex, setModalIndex] = useState(0);
     const [patentModalOpen, setPatentModalOpen] = useState(false);
     const [selectedPatent, setSelectedPatent] = useState<PatentDocumentData | null>(null);
+    const searchTokenRef = useRef(0);
 
     const hasInput = number || titular || inventor || keywords;
     const totalResults = inpiResults.length + espacenetResults.length;
-
-    const prefetchInitialInpiDetails = (patents: PatentResult[]) => {
-        const initial = patents.filter((p) => p.source === "INPI").slice(0, 10);
-        initial.forEach((patent) => {
-            const codPedido = getCodPedido(patent);
-            if (!codPedido) return;
-            void loadInpiDetail(codPedido, patent.publicationNumber);
-        });
-    };
 
     const getCodPedido = (patent: PatentResult): string | null => {
         if (!patent.url) return null;
@@ -120,8 +113,9 @@ export default function QuickSearch() {
         };
     };
 
-    const loadInpiDetail = async (codPedido: string, publicationNumber?: string) => {
+    const loadInpiDetail = async (codPedido: string, publicationNumber?: string, expectedSearchToken?: number) => {
         if (!codPedido) return;
+        if (typeof expectedSearchToken === "number" && expectedSearchToken !== searchTokenRef.current) return;
         if (detailCache[codPedido]) return;
         if (loadingDetails[codPedido]) return;
 
@@ -135,26 +129,57 @@ export default function QuickSearch() {
             const response = await axios.get(`${API_URL}/search/inpi/detail/${codPedido}`, {
                 params: publicationNumber ? { publicationNumber } : undefined
             });
+            if (typeof expectedSearchToken === "number" && expectedSearchToken !== searchTokenRef.current) return;
             const normalizedDetail = normalizePatentDetail(response.data);
             setDetailCache(prev => ({ ...prev, [codPedido]: normalizedDetail }));
         } catch (err) {
+            if (typeof expectedSearchToken === "number" && expectedSearchToken !== searchTokenRef.current) return;
             console.warn("Failed to load detail:", err);
             setDetailErrors(prev => ({
                 ...prev,
                 [codPedido]: "Detalhes do INPI indisponíveis — o registro pode estar protegido ou restrito."
             }));
         } finally {
-            setLoadingDetails(prev => {
-                const next = { ...prev };
-                delete next[codPedido];
-                return next;
-            });
+            if (!(typeof expectedSearchToken === "number" && expectedSearchToken !== searchTokenRef.current)) {
+                setLoadingDetails(prev => {
+                    const next = { ...prev };
+                    delete next[codPedido];
+                    return next;
+                });
+            }
         }
+    };
+
+    const preloadInpiDetailsInBackground = (patents: PatentResult[], searchToken: number) => {
+        const initial = patents
+            .filter((p) => p.source === "INPI")
+            .slice(0, 12);
+        if (!initial.length) return;
+
+        const queue = [...initial];
+        const workers = 2;
+        const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+        const runWorker = async () => {
+            while (queue.length > 0) {
+                if (searchTokenRef.current !== searchToken) return;
+                const patent = queue.shift();
+                if (!patent) return;
+                const codPedido = getCodPedido(patent);
+                if (!codPedido) continue;
+                await loadInpiDetail(codPedido, patent.publicationNumber, searchToken);
+                await pause(120);
+            }
+        };
+
+        void Promise.all(Array.from({ length: workers }, () => runWorker()));
     };
 
     const handleSearch = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!hasInput) return;
+        const currentSearchToken = Date.now();
+        searchTokenRef.current = currentSearchToken;
 
         setLoading(true);
         setError("");
@@ -177,7 +202,7 @@ export default function QuickSearch() {
             setInpiResults(fetchedInpi);
             setEspacenetResults(fetchedEspacenet);
             setTab("inpi");
-            prefetchInitialInpiDetails(fetchedInpi);
+            preloadInpiDetailsInBackground(fetchedInpi, currentSearchToken);
         } catch (err: unknown) {
             const message = axios.isAxiosError(err)
                 ? (err.response?.data?.error as string | undefined)
@@ -200,7 +225,16 @@ export default function QuickSearch() {
         if (patent.source !== "INPI") return;
         const codPedido = getCodPedido(patent);
         if (!codPedido) return;
-        await loadInpiDetail(codPedido, patent.publicationNumber);
+        const hasInlineDetails = Boolean(
+            patent.applicant ||
+            patent.inventor ||
+            patent.abstract ||
+            patent.status ||
+            (patent.figures && patent.figures.length > 0)
+        );
+        if (!hasInlineDetails) {
+            await loadInpiDetail(codPedido, patent.publicationNumber, searchTokenRef.current);
+        }
     };
 
     const getDetail = (patent: PatentResult): PatentDetail | null => {
@@ -410,6 +444,10 @@ export default function QuickSearch() {
                                                 const applicantText = detail?.applicant || patent.applicant;
                                                 const inventorText = detail?.inventor || patent.inventor || "";
                                                 const abstractText = detail?.abstract || patent.abstract || "";
+                                                const statusText = detail?.status || patent.status || "";
+                                                const likelySigilo = !abstractText && !inventorText && (detail?.title || patent.title || "").toLowerCase().includes("sem título");
+                                                const isSigilo = /sigil|restrit|proteg/i.test(statusText) || likelySigilo;
+                                                const statusDisplay = statusText || (isSigilo ? "EM SIGILO" : "");
                                                 const figures = getPatentFigures(patent, detail);
                                                 const currentFigureIndex = getCurrentFigureIndex(patent, idx, figures.length);
                                                 const currentFigure = figures[currentFigureIndex];
@@ -418,7 +456,7 @@ export default function QuickSearch() {
                                                     <div key={idx} className="bg-card rounded-xl border hover:shadow-md transition-shadow overflow-hidden">
                                                         <div
                                                             className="p-5 cursor-pointer"
-                                                            onClick={() => toggleDetail(idx, patent)}
+                                                            onClick={() => openPatentModal(patent, detail)}
                                                         >
                                                             <div className="flex items-start justify-between gap-4">
                                                                 <div className="flex-1 min-w-0">
@@ -429,6 +467,11 @@ export default function QuickSearch() {
                                                                         <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
                                                                             INPI
                                                                         </span>
+                                                                        {isSigilo && (
+                                                                            <span className="text-[11px] font-black text-red-700 bg-red-100 border border-red-300 px-2 py-0.5 rounded">
+                                                                                EM SIGILO
+                                                                            </span>
+                                                                        )}
                                                                         {patent.date && (
                                                                             <span className="text-xs text-muted-foreground">
                                                                                 {patent.date}
@@ -463,19 +506,19 @@ export default function QuickSearch() {
                                                                     <button
                                                                         type="button"
                                                                         className="p-2 rounded-lg hover:bg-muted transition-colors"
-                                                                        title="Abrir documento da patente"
+                                                                        title="Abrir/fechar detalhes"
                                                                         onClick={(e) => {
                                                                             e.stopPropagation();
-                                                                            openPatentModal(patent, detail);
+                                                                            void toggleDetail(idx, patent);
                                                                         }}
                                                                     >
-                                                                        <ExternalLink className="w-4 h-4 text-muted-foreground" />
-                                                                    </button>
-                                                                    <div className="p-2">
                                                                         {isExpanded
                                                                             ? <ChevronUp className="w-4 h-4 text-muted-foreground" />
                                                                             : <ChevronDown className="w-4 h-4 text-muted-foreground" />
                                                                         }
+                                                                    </button>
+                                                                    <div className="p-2">
+                                                                        <ExternalLink className="w-4 h-4 text-muted-foreground" />
                                                                     </div>
                                                                 </div>
                                                             </div>
@@ -524,10 +567,10 @@ export default function QuickSearch() {
                                                                                 <p className="text-sm font-mono">{detail?.classification || patent.classification}</p>
                                                                             </div>
                                                                         )}
-                                                                        {detail?.status && (
+                                                                        {statusDisplay && (
                                                                             <div>
                                                                                 <p className="text-xs font-medium text-muted-foreground mb-1">Situação</p>
-                                                                                <p className="text-sm">{detail.status}</p>
+                                                                                <p className={isSigilo ? "text-sm font-bold text-red-600" : "text-sm"}>{statusDisplay}</p>
                                                                             </div>
                                                                         )}
                                                                         {figures.length > 0 && currentFigure && (

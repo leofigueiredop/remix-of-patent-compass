@@ -58,12 +58,6 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
 
     const loadPdf = async () => {
       if (!open || !patent?.url) return;
-      if (patent.source === "INPI") {
-        setLoadingPdf(false);
-        setPdfUrl(null);
-        setPdfError("O INPI não disponibiliza PDF direto neste link. Use \"Fonte original\" para abrir o documento oficial.");
-        return;
-      }
       setLoadingPdf(true);
       setPdfError("");
       if (pdfUrl) {

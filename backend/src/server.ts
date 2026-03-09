@@ -78,6 +78,34 @@ class AsyncQueue {
 const espacenetQueue = new AsyncQueue(800); // 800ms between calls
 const inpiQueue = new AsyncQueue(1500); // 1.5s between calls
 
+function isRetryableInpiNetworkError(message: string): boolean {
+    const normalized = (message || '').toLowerCase();
+    return normalized.includes('failed to connect')
+        || normalized.includes('connection refused')
+        || normalized.includes('timed out')
+        || normalized.includes('empty reply')
+        || normalized.includes('connection reset');
+}
+
+async function execInpiCurlWithRetry(command: string, attempts = 3, timeout = 30000, maxBuffer?: number): Promise<{ stdout: string; stderr: string; }> {
+    let lastError: any;
+    for (let i = 1; i <= attempts; i++) {
+        try {
+            return await execAsync(command, maxBuffer ? { timeout, maxBuffer } : { timeout });
+        } catch (error: any) {
+            lastError = error;
+            const message = error?.message || '';
+            if (!isRetryableInpiNetworkError(message) || i === attempts) {
+                throw error;
+            }
+            const backoffMs = 400 * i;
+            fastify.log.warn(`INPI network error (attempt ${i}/${attempts}), retrying in ${backoffMs}ms: ${message}`);
+            await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        }
+    }
+    throw lastError;
+}
+
 // Inicializa SDK do Gemini somente se configurado
 const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
@@ -1136,23 +1164,26 @@ async function initializeInpiAnonymousSession(cookieFile: string): Promise<void>
 
     try {
         fs.appendFileSync(debugLog, 'Step 1: Accessing login page...\n');
-        await execAsync(
+        await execInpiCurlWithRetry(
             `curl -v -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -c ${cookieFile} '${loginUrl}?action=login' -o /dev/null`,
-            { timeout: 20000 }
+            3,
+            20000
         );
 
         fs.writeFileSync(payloadFilePrimary, 'submission=continuar', 'utf8');
         fs.appendFileSync(debugLog, 'Step 2: Posting submission=continuar...\n');
-        await execAsync(
+        await execInpiCurlWithRetry(
             `curl -v -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -c ${cookieFile} -X POST '${loginUrl}' --data-binary @${payloadFilePrimary} -o /dev/null`,
-            { timeout: 25000 }
+            3,
+            25000
         );
 
         fs.writeFileSync(payloadFileFallback, 'action=login&T_Login=&T_Senha=&Usuario=', 'utf8');
         fs.appendFileSync(debugLog, 'Step 3: Posting empty login...\n');
-        await execAsync(
+        await execInpiCurlWithRetry(
             `curl -v -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -c ${cookieFile} -X POST '${loginUrl}' --data-binary @${payloadFileFallback} -o /dev/null`,
-            { timeout: 25000 }
+            3,
+            25000
         );
         fs.appendFileSync(debugLog, 'Session initialized successfully.\n');
     } catch (err: any) {
@@ -1167,9 +1198,11 @@ async function initializeInpiAnonymousSession(cookieFile: string): Promise<void>
 async function fetchPatentDetailViaCurl(cookieFile: string, detailUrl: string): Promise<Partial<any>> {
     try {
         // fastify.log.info(`Fetching detail: ${detailUrl}`);
-        const { stdout } = await execAsync(
+        const { stdout } = await execInpiCurlWithRetry(
             `curl -s -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} '${detailUrl}' | iconv -f ISO-8859-1 -t UTF-8`,
-            { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }
+            3,
+            12000,
+            10 * 1024 * 1024
         );
         const $ = cheerio.load(stdout);
         
@@ -1183,6 +1216,7 @@ async function fetchPatentDetailViaCurl(cookieFile: string, detailUrl: string): 
         const inventor = extract('Nome do Inventor:');
         const title = extract('Título:');
         const abstract = extract('Resumo:');
+        const status = extract('Despacho:') || extract('Situação:');
 
         // fastify.log.info(`Extracted for ${detailUrl}: applicant="${applicant}" inventor="${inventor}"`);
 
@@ -1190,7 +1224,8 @@ async function fetchPatentDetailViaCurl(cookieFile: string, detailUrl: string): 
             applicant,
             inventor,
             title,
-            abstract
+            abstract,
+            status
         };
     } catch (error: any) {
         console.error(`Error fetching detail for ${detailUrl}:`, error.message);
@@ -1206,6 +1241,7 @@ async function searchInpiViaCurl(params: {
     resumo?: string;
     maxPages?: number;
     enrichDetails?: boolean;
+    enrichLimit?: number;
 }): Promise<any[]> {
     const cookieFile = `/tmp/inpi_${randomUUID()}.txt`;
     const payloadFile = `/tmp/inpi_payload_${randomUUID()}.txt`;
@@ -1297,17 +1333,22 @@ async function searchInpiViaCurl(params: {
             fastify.log.warn(`INPI search returned 0 results. Saved HTML to ${debugFile}`);
             if (stderr) fastify.log.warn(`INPI curl stderr: ${stderr}`);
         } else if (params.enrichDetails !== false) {
-            fastify.log.info(`Enriching ${results.length} INPI results with details...`);
+            const enrichLimit = typeof params.enrichLimit === 'number' && params.enrichLimit > 0
+                ? Math.min(params.enrichLimit, results.length)
+                : results.length;
+            const targetResults = results.slice(0, enrichLimit);
+            fastify.log.info(`Enriching ${targetResults.length} of ${results.length} INPI results with details...`);
             const batchSize = 10;
-            for (let i = 0; i < results.length; i += batchSize) {
-                const batch = results.slice(i, i + batchSize);
-                fastify.log.info(`Processing batch ${i / batchSize + 1} of ${Math.ceil(results.length / batchSize)}`);
+            for (let i = 0; i < targetResults.length; i += batchSize) {
+                const batch = targetResults.slice(i, i + batchSize);
+                fastify.log.info(`Processing batch ${i / batchSize + 1} of ${Math.ceil(targetResults.length / batchSize)}`);
                 await Promise.all(batch.map(async (result) => {
                     if (!result.url) return;
                     try {
                         const details = await fetchPatentDetailViaCurl(cookieFile, result.url);
                         if (details.applicant) result.applicant = details.applicant;
                         if (details.inventor) result.inventor = details.inventor;
+                        if (details.status) result.status = details.status;
                         if (details.title && (result.title === '(Sem título)' || !result.title)) {
                             result.title = details.title;
                         }
@@ -1437,9 +1478,11 @@ async function fetchInpiDetailByCod(codPedido: string, publicationNumber?: strin
     const defaultUrl = `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${encodeURIComponent(codPedido)}`;
     const fetchHtml = async (targetUrl: string): Promise<string> => {
         const encodedUrl = targetUrl.replace(/'/g, `%27`);
-        const { stdout } = await inpiQueue.enqueue(() => execAsync(
+        const { stdout } = await inpiQueue.enqueue(() => execInpiCurlWithRetry(
             `curl -s -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -c ${cookieFile} '${encodedUrl}' | iconv -f ISO-8859-1 -t UTF-8`,
-            { timeout: 30000, maxBuffer: 5 * 1024 * 1024 }
+            3,
+            30000,
+            5 * 1024 * 1024
         ));
         return stdout;
     };
@@ -1705,7 +1748,13 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
         return detail;
     } catch (error: any) {
         fastify.log.warn(`INPI detail scrape failed: ${error.message}`);
-        return reply.code(500).send({ error: 'Falha ao buscar detalhe da patente', details: error.message });
+        return {
+            codPedido,
+            source: 'INPI',
+            status: 'EM SIGILO',
+            url: `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${encodeURIComponent(codPedido)}`,
+            figures: []
+        };
     }
 });
 
