@@ -70,6 +70,15 @@ export default function QuickSearch() {
     const hasInput = number || titular || inventor || keywords;
     const totalResults = inpiResults.length + espacenetResults.length;
 
+    const prefetchInitialInpiDetails = (patents: PatentResult[]) => {
+        const initial = patents.filter((p) => p.source === "INPI").slice(0, 10);
+        initial.forEach((patent) => {
+            const codPedido = getCodPedido(patent);
+            if (!codPedido) return;
+            void loadInpiDetail(codPedido, patent.url);
+        });
+    };
+
     const getCodPedido = (patent: PatentResult): string | null => {
         if (!patent.url) return null;
         if (URL.canParse(patent.url)) {
@@ -111,7 +120,7 @@ export default function QuickSearch() {
         };
     };
 
-    const loadInpiDetail = async (codPedido: string) => {
+    const loadInpiDetail = async (codPedido: string, detailUrl?: string) => {
         if (!codPedido) return;
         if (detailCache[codPedido]) return;
         if (loadingDetails[codPedido]) return;
@@ -123,7 +132,9 @@ export default function QuickSearch() {
         });
         setLoadingDetails(prev => ({ ...prev, [codPedido]: true }));
         try {
-            const response = await axios.get(`${API_URL}/search/inpi/detail/${codPedido}`);
+            const response = await axios.get(`${API_URL}/search/inpi/detail/${codPedido}`, {
+                params: detailUrl ? { detailUrl } : undefined
+            });
             const normalizedDetail = normalizePatentDetail(response.data);
             setDetailCache(prev => ({ ...prev, [codPedido]: normalizedDetail }));
         } catch (err) {
@@ -166,6 +177,7 @@ export default function QuickSearch() {
             setInpiResults(fetchedInpi);
             setEspacenetResults(fetchedEspacenet);
             setTab("inpi");
+            prefetchInitialInpiDetails(fetchedInpi);
         } catch (err: unknown) {
             const message = axios.isAxiosError(err)
                 ? (err.response?.data?.error as string | undefined)
@@ -188,7 +200,7 @@ export default function QuickSearch() {
         if (patent.source !== "INPI") return;
         const codPedido = getCodPedido(patent);
         if (!codPedido) return;
-        await loadInpiDetail(codPedido);
+        await loadInpiDetail(codPedido, patent.url);
     };
 
     const getDetail = (patent: PatentResult): PatentDetail | null => {

@@ -1034,6 +1034,7 @@ fastify.post('/search/inpi', async (request, reply) => {
 function parseInpiResults(html: string): any[] {
     const $ = cheerio.load(html);
     const results: any[] = [];
+    const baseUrl = 'https://busca.inpi.gov.br';
 
     $('table tr').each((_, row) => {
         const link = $(row).find('a[href*="PatenteServletController"]').first();
@@ -1049,6 +1050,11 @@ function parseInpiResults(html: string): any[] {
         const onclick = link.attr('onclick') || '';
         const codMatch = (href.match(/[?&]CodPedido=(\d+)/i) || onclick.match(/[?&]CodPedido=(\d+)/i));
         const codPedido = codMatch ? codMatch[1] : '';
+        const detailUrl = href
+            ? new URL(href, baseUrl).toString()
+            : (codPedido
+                ? `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${codPedido}`
+                : `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${encodeURIComponent(number)}`);
 
         const cellTexts = cells.toArray()
             .map((c) => $(c).text().replace(/\s+/g, ' ').trim())
@@ -1078,9 +1084,7 @@ function parseInpiResults(html: string): any[] {
                 abstract: '',
                 classification,
                 source: 'INPI',
-                url: codPedido
-                    ? `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${codPedido}`
-                    : `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${encodeURIComponent(number)}`
+                url: detailUrl
             });
         }
     });
@@ -1219,17 +1223,24 @@ function extractInpiFigureUrls(html: string): string[] {
     return Array.from(figures).slice(0, 20);
 }
 
-async function fetchInpiDetailByCod(codPedido: string): Promise<any> {
+async function fetchInpiDetailByCod(codPedido: string, preferredUrl?: string): Promise<any> {
     const cookieFile = `/tmp/inpi_detail_${randomUUID()}.txt`;
-    try {
-        await execAsync(`curl -s -c ${cookieFile} -L 'https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login' -o /dev/null`, { timeout: 15000 });
+    const cleanedPreferredUrl = normalizeStringField(preferredUrl)?.replace(/^`+|`+$/g, '').trim();
+    const defaultUrl = `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${encodeURIComponent(codPedido)}`;
+    const fetchHtml = async (targetUrl: string): Promise<string> => {
+        const encodedUrl = targetUrl.replace(/'/g, `%27`);
         const { stdout } = await inpiQueue.enqueue(() => execAsync(
-            `curl -s -b ${cookieFile} 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${codPedido}' | iconv -f ISO-8859-1 -t UTF-8`,
+            `curl -s -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -c ${cookieFile} '${encodedUrl}' | iconv -f ISO-8859-1 -t UTF-8`,
             { timeout: 30000, maxBuffer: 5 * 1024 * 1024 }
         ));
-        const html = stdout;
-        try { execSync(`rm -f ${cookieFile}`); } catch { }
-
+        return stdout;
+    };
+    const isLoginHtml = (html: string): boolean => {
+        const normalized = normalizeText(html);
+        return normalized.includes('pepi - pesquisa em propriedade industrial')
+            && normalized.includes('para realizar a pesquisa anonimamente');
+    };
+    const extractDetailFromHtml = (html: string): Record<string, any> => {
         const $ = cheerio.load(html);
         const detail: Record<string, any> = {};
         $('table tr').each((_, row) => {
@@ -1247,20 +1258,45 @@ async function fetchInpiDetailByCod(codPedido: string): Promise<any> {
                 if (label.includes('despacho') || label.includes('situa')) detail.status = value;
             }
         });
-
         const resumoDiv = $('div.resumo, #resumo, .abstract').text().trim();
         if (resumoDiv && !detail.abstract) detail.abstract = resumoDiv;
         detail.figures = extractInpiFigureUrls(html);
+        return detail;
+    };
+
+    const lookupDetailUrlByCod = async (): Promise<string | null> => {
+        const list = await searchInpiViaCurl({ keywords: codPedido, resumo: codPedido });
+        const match = list.find((item: any) => typeof item?.url === 'string' && item.url.includes(`CodPedido=${codPedido}`));
+        return match?.url || null;
+    };
+
+    try {
+        await execAsync(`curl -s -c ${cookieFile} -L 'https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login' -o /dev/null`, { timeout: 15000 });
+        let html = await fetchHtml(cleanedPreferredUrl || defaultUrl);
+        if (!html.trim() || isLoginHtml(html)) {
+            const discoveredUrl = await lookupDetailUrlByCod();
+            if (discoveredUrl) {
+                html = await fetchHtml(discoveredUrl);
+            }
+        }
+        if (!html.trim() || isLoginHtml(html)) {
+            throw new Error('INPI retornou página de login para o detalhe');
+        }
+        const detail = extractDetailFromHtml(html);
+        if (!detail.title && !detail.abstract && !detail.applicant && !detail.inventor && (!detail.figures || detail.figures.length === 0)) {
+            throw new Error('INPI não retornou campos de detalhe para este CodPedido');
+        }
 
         return {
             codPedido,
             ...detail,
             source: 'INPI',
-            url: `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${codPedido}`
+            url: defaultUrl
         };
     } catch (error: any) {
-        try { execSync(`rm -f ${cookieFile}`); } catch { }
         throw error;
+    } finally {
+        try { execSync(`rm -f ${cookieFile}`); } catch { }
     }
 }
 
@@ -1373,9 +1409,10 @@ async function fetchPatentPdf(url: string, fallbackName: string): Promise<{ buff
 // ─── GET /search/inpi/detail/:codPedido ────────────────────────
 fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
     const { codPedido } = request.params as { codPedido: string };
+    const { detailUrl } = request.query as { detailUrl?: string };
     if (!codPedido) return reply.code(400).send({ error: 'CodPedido é obrigatório' });
     try {
-        const detail = await fetchInpiDetailByCod(codPedido);
+        const detail = await fetchInpiDetailByCod(codPedido, detailUrl);
         return detail;
     } catch (error: any) {
         fastify.log.warn(`INPI detail scrape failed: ${error.message}`);
