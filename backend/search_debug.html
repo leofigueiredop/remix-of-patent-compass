@@ -1,0 +1,3269 @@
+ 
+
+
+
+
+
+
+<html>
+    <head> 
+        <title>INPI</title>
+        <meta content="text/html; charset=ISO-8859-1" http-equiv=Content-Type>
+        <link href="/pePI/jsp/css/inpi.css" rel=stylesheet type=text/css>
+		<script type="text/javascript" src="../jsp/funcoes/meusPedidos.js"></script>
+		<script type="text/javascript" src="../jsp/funcoes/jquery-1.6.2.min.js"></script>
+        <script type="text/javascript" src="../jsp/funcoes/mark.js" charset="UTF-8"></script>
+        <script type="text/javascript" src="../jsp/funcoes/marcacao.js" charset="UTF-8"></script>
+        
+		<script>
+		$(document).ready(function () {
+			marcaTitulo();
+		});
+		
+		function marcaTitulo(){
+			
+			var context = document.getElementById("tituloContext");
+			
+			var titulo = $("input[name='Titulo']").val();
+			var resumo = $("input[name='Resumo']").val();
+
+			marca.texto(titulo, tituloContext);
+			marca.texto(resumo, tituloContext);
+		
+		}
+			
+		</script>
+    </head>
+    <body bgcolor="#ffffff" text="#000000" leftmargin="0" topmargin="0">
+    
+	<input type="hidden" id="Resumo" name="Resumo" value="">
+	<input type="hidden" id="Titulo" name="Titulo" value="">
+	
+    <div class="context">
+    <form name="PatentePesquisa" method="POST" action="../servlet/PatenteServletController">
+    <div id="mainContainer">
+
+<div id="principal">
+<br/>
+<div id="barra-brasil" style="background:#7F7F7F; height: 20px; padding:0 0 0 10px;display:block;">
+	<ul id="menu-barra-temp" style="list-style:none;">
+	<li style="display:inline; float:left;padding-right:10px; margin-right:10px; borderright:1px solid #EDEDED">
+		<a href="http://brasil.gov.br" style="font-family:sans,sans-serif; text- Portal Padrão Barra de Identidade Visual do Governo Federal na Internet - APLICAÇÃO right:1px solid #EDEDED">
+		<a href="http://brasil.gov.br" style="font-family:sans,sans-serif; text- decoration:none; color:white;">Portal do Governo Brasileiro</a>
+		</li>
+		<li>
+			<a style="font-family:sans,sans-serif; text-decoration:none; color:white;" 
+			href="http://epwg.governoeletronico.gov.br/barra/atualize.html">Atualize sua Barra de Governo
+			</a>
+		</li>
+	</ul>
+</div>
+<div id="logo">
+	<a id="portal-logo" href="http://www.inpi.gov.br" title="O portal do Brasil">
+		<span id="portal-title-1">Instituto Nacional da</span>
+		<span id="portal-title" class="corto">Propriedade Industrial</span>
+		<span id="portal-description">Ministério da Economia</span>
+	</a>
+</div>
+<script src="/pePI/jsp/funcoes/barra.js" type="text/javascript"></script>
+
+
+	
+    <table width="780px" align="center" border="0" cellpadding="0" cellspacing="0">
+        <tr>
+            <td align="center" colspan="5">
+            <font class="titulo">Consulta à Base de Dados do INPI</font>
+            </td>
+        </tr>
+        <tr>
+            <td align="right" colspan="5">
+                <font class="normal">
+                   [ <a href="../jsp/Base_pesquisa.jsp" class="titulo">Início</a> |
+                   <a href="../jsp/Ajuda.jsp" class="normal">Ajuda?</a> ]
+                </font>
+            </td>
+        </tr>
+        <tr>
+            <td align="left" colspan="5">
+                <font class="normal">
+                » Consultar por: 
+                    <a href="/pePI/jsp/patentes/PatenteSearchBasico.jsp" class="titulo">Base Patentes</a> | 
+                    <a href="/pePI/jsp/Logout.jsp" class=titulo>Finalizar Sessão</a>
+                </font>
+            </td>
+        <tr>
+        <tr>
+		    <td colspan="5">
+   		    <hr class="hr">
+        	</td>
+        </tr>
+        <tr valign="middle">
+            <td align="right" colspan="5">
+				
+				&nbsp;
+            </td>
+        </tr>
+        <tr>
+            <td colspan="5" align="left">
+                <font class="normal">
+                    <b>RESULTADO DA PESQUISA</b> 
+                    (09/03/2026 às 13:48:18)<br>
+                    <b>Pesquisa por:</b>
+                </font>
+            </td>
+        </tr>
+        <tr>
+            <td colspan="5" align="left">
+	            <div id="tituloEResumoContextGlobal" class="context">
+                    <div id="tituloEResumoContext" class="context">
+	                   <font class="normal">
+	                   Depositante: 'PETROBRAS' \
+	                   </font>
+                    </div>
+	                <font class="normal">
+	                    
+	                    Foram encontrados <b>2547</b> processos que satisfazem  à pesquisa. Mostrando página <b>1</b> de <b>26</b>.<br>
+	                </font>
+	            </div> 
+            </td>
+        </tr>
+	    
+	            <tr>
+	            
+		            <td align="center" width="120" bgcolor="#B5D6AD"><font class="normal"><b>Pedido</b></font></td>
+		            <td align="center" width="60" bgcolor="#B5D6AD"><font class="normal"><b>Depósito</b></font></td>
+		            <td align="center" width="370" bgcolor="#B5D6AD"><font class="normal"><b>Título</b></font></td>
+		            <td align="center" width="80" bgcolor="#B5D6AD"><font class="normal"><b>IPC</b></font></td>
+	            </tr>
+            <tbody id="tituloContext" class="Context">
+	            
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1794247&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2026 004183 1
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                23/02/2026
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1794264&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2026 004199 8
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                23/02/2026
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1794138&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2026 004086 0
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                20/02/2026
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1793955&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2026 003906 3
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                19/02/2026
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1793845&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2026 003802 4
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                18/02/2026
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1793109&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2026 003104 6
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                09/02/2026
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1792115&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2026 002160 1
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                29/01/2026
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1792132&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2026 002176 8
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                29/01/2026
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1791907&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2026 001960 7
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                27/01/2026
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1790943&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2026 001052 9
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                16/01/2026
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1789741&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 029468 0
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                30/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1789489&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 029214 9
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                29/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1789486&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 029210 6
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                29/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1789488&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 029212 2
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                29/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1789482&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 029204 1
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                29/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1789617&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 029349 8
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                29/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1789464&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 029192 4
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                28/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1789440&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 029172 0
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                27/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1789442&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 029174 6
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                27/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1789441&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 029173 8
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                27/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1789301&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 029036 7
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                26/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1789310&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 029047 2
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                26/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1789092&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 028834 6
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                23/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1789098&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 028839 7
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                23/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1789068&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 028812 5
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                22/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1789053&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 028797 8
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                22/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1789069&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 028813 3
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                22/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1789032&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 028776 5
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                22/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1789065&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 028810 9
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                22/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1789040&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 028782 0
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                22/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1788914&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 028654 8
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                22/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1788922&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 028661 0
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                22/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1788912&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 028650 5
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                22/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1788906&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 028646 7
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                22/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1788757&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 028503 7
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                19/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1788769&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 028514 2
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                19/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1788634&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 028382 4
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                18/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1788470&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 028216 0
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                17/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1788461&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 028202 0
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                17/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1788220&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 027975 4
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                16/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1788217&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 027971 1
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                16/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1788310&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 028065 5
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                16/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1788185&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 027943 6
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                15/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1787642&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 027417 5
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                10/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1787520&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 027301 2
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                09/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1787528&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 027308 0
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                09/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1787276&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 027067 6
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                06/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1787284&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 027075 7
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                06/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1787277&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 027068 4
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                06/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1787278&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 027069 2
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                06/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1787279&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 027070 6
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                06/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1787288&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 027079 0
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                06/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1787282&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 027073 0
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                06/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1787200&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 026993 7
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                05/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1787052&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 026848 5
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                04/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1787067&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 026865 5
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                04/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1786963&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 026762 4
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                04/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1787081&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 026877 9
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                04/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1786684&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 026495 1
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                01/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1786696&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 026507 9
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                01/12/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1786232&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 026061 1
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                27/11/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1786321&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 026146 4
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                27/11/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1786229&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 026056 5
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                27/11/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1785977&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 025811 0
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                25/11/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1785822&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 20 2025 025660 1
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                24/11/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1785385&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 025248 1
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                18/11/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1785391&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 025252 0
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                18/11/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1785417&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 025280 5
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                18/11/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1785031&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 024909 0
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                13/11/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1784680&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 20 2025 024563 4
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                11/11/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1784322&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 024209 5
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                06/11/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1784299&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 024183 8
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                06/11/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1784026&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 023912 4
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                03/11/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1783592&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 023479 3
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                29/10/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1783485&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 023372 0
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                28/10/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1783017&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 022902 1
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                22/10/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1783096&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 022984 6
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                22/10/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1782603&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 022491 7
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                16/10/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1782577&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 20 2025 022462 9
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                16/10/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1782473&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 022358 9
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                15/10/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1782374&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 022259 0
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                14/10/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1782312&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 022202 7
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                13/10/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1782140&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 022027 0
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                10/10/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1782043&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 021926 3
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                09/10/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1781915&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 20 2025 021800 9
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                08/10/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1781923&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 021808 9
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                08/10/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1781944&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 021829 1
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                08/10/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1781829&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 021714 7
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                07/10/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1781720&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 021605 1
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                06/10/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1781651&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 021537 3
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                05/10/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1781589&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 021471 7
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                03/10/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1781323&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 021211 0
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                01/10/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1781223&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 021108 4
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                30/09/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1781064&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 020946 2
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                29/09/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1780720&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 020607 2
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                25/09/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1780451&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 020335 9
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                23/09/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1780355&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 020242 5
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                22/09/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1780361&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 020247 6
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                22/09/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=#E0E0E0>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1780006&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 10 2025 019895 9
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                18/09/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+        	<tr bgColor=white>
+	            
+	            <td align="center">
+	                <font class="normal">
+	                    
+	                    
+	                    <a href='/pePI/servlet/PatenteServletController?Action=detail&CodPedido=1779874&SearchParameter=petrobras                                   &Resumo=&Titulo=' class='visitado'>
+	                        BR 20 2025 019758 3
+	                    </a>
+	              	               
+	                </font>
+	            </td>
+	            <td align="center">
+					<font class="normal">
+	                16/09/2025
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="normal">
+	                    <b>
+	                        
+	                    </b>
+	                </font>
+	            </td>
+	            <td align="left">
+	                <font class="alerta">
+                        -
+	                </font>
+	            </td>
+	        </tr>
+		    
+	    </tbody>
+        <tr>
+            <td colspan="4" align="left">
+                <font class="normal">
+                &nbsp;<br>Páginas de Resultados:<br>
+                <b>1</b> |<a href="/pePI/servlet/PatenteServletController?Action=nextPage&Page=2&Resumo=&Titulo=" class="normal">2</a> |<a href="/pePI/servlet/PatenteServletController?Action=nextPage&Page=3&Resumo=&Titulo=" class="normal">3</a> |<a href="/pePI/servlet/PatenteServletController?Action=nextPage&Page=4&Resumo=&Titulo=" class="normal">4</a> |<a href="/pePI/servlet/PatenteServletController?Action=nextPage&Page=5&Resumo=&Titulo=" class="normal">5</a> |<a href="/pePI/servlet/PatenteServletController?Action=nextPage&Page=6&Resumo=&Titulo=" class="normal">6</a> |<a href="/pePI/servlet/PatenteServletController?Action=nextPage&Page=7&Resumo=&Titulo=" class="normal">7</a> |<a href="/pePI/servlet/PatenteServletController?Action=nextPage&Page=8&Resumo=&Titulo=" class="normal">8</a> |<a href="/pePI/servlet/PatenteServletController?Action=nextPage&Page=9&Resumo=&Titulo=" class="normal">9</a> |<a href="/pePI/servlet/PatenteServletController?Action=nextPage&Page=10&Resumo=&Titulo=" class="normal">10</a> |<a href="/pePI/servlet/PatenteServletController?Action=nextPage&Page=26&Resumo=&Titulo=" class="normal">...26</a>-<a href="/pePI/servlet/PatenteServletController?Action=nextPage&Page=2&Resumo=&Titulo=" class="normal">Próxima»</a>
+                </font>
+                <input type= "hidden" name="Page" value="1">
+   				<input type= "hidden" name="NumPedido" value="">
+               	<input type= "hidden" name="Action" value="MeusPedidos">
+            </td>
+        </tr>
+    </table>
+</form>
+</div>
+</body>
+
+	<br/>
+      
+	<div id="bottom_principal"></div>
+	<div id="footer">
+		<div id="texto_footer">
+			<p>Rua Mayrink Veiga, 9 - Centro - RJ - CEP: 20090-910</p>
+		</div>
+		<div id="logo_ouvidoria">
+			<a href="http://faleconosco.inpi.gov.br/" target="blank"><img src="/pePI/jsp/imagens/faleconosco.png" border="0" alt="Fale Conosco" onmouseout="this.src='/pePI/jsp/imagens/faleconosco.png';"
+				title="Fale Conosco" onmouseover="this.src='/pePI/jsp/imagens/faleconosco.png';" /> </a>
+		</div>
+	</div>
+</html>

@@ -598,9 +598,8 @@ export default function QuickSearch() {
                                                 const inventorText = detail?.inventor || patent.inventor || "";
                                                 const abstractText = detail?.abstract || patent.abstract || "";
                                                 const statusText = detail?.status || patent.status || "";
-                                                const likelySigilo = !abstractText && !inventorText && (detail?.title || patent.title || "").toLowerCase().includes("sem título");
-                                                const isSigilo = /sigil|restrit|proteg/i.test(statusText) || likelySigilo;
-                                                const statusDisplay = statusText || (isSigilo ? "EM SIGILO" : "");
+                                                const isSigilo = /sigil|restrit|proteg/i.test(statusText);
+                                                const statusDisplay = statusText;
                                                 const figures = getPatentFigures(patent, detail);
                                                 const currentFigureIndex = getCurrentFigureIndex(patent, idx, figures.length);
                                                 const currentFigure = figures[currentFigureIndex];

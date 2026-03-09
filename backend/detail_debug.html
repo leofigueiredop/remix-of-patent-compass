@@ -1,0 +1,842 @@
+
+
+
+
+
+
+
+
+
+
+
+	
+
+<html>
+<head>
+<title>INPI</title>
+<meta content="text/html; charset=ISO-8859-1" http-equiv=Content-Type>
+<link href="../jsp/css/inpi.css?1" rel=stylesheet type=text/css>
+<link href="../jsp/css/captcha.css" rel=stylesheet type=text/css>
+<link href="../jsp/css/accordions.css" rel=stylesheet type=text/css>
+<link href="../jsp/css/patenteDetalhe.css" rel=stylesheet type=text/css>
+<link href="../jsp/css/modalAnuidade.css" rel=stylesheet type=text/css>
+
+<script type="text/javascript" src="../jsp/funcoes/geral.js"></script>
+<script type="text/javascript" src="../jsp/funcoes/jquery-1.6.2.min.js"></script>
+<script type="text/javascript" src="../jsp/funcoes/captcha.js"></script>
+<script type="text/javascript" src="../jsp/funcoes/upload-documento.js"></script>
+<script type="text/javascript" src="../jsp/funcoes/meusPedidos.js"></script>
+<!-- <script type="text/javascript" src="../jsp/funcoes/jquery.bxslider.min.js"></script> -->
+<!-- <script type="text/javascript" src="../jsp/funcoes/patenteDetalhe.js"></script> -->
+<script type="text/javascript" src="../jsp/funcoes/mark.js" charset="UTF-8"></script>
+<script type="text/javascript" src="../jsp/funcoes/marcacao.js" charset="UTF-8"></script>
+
+
+	<script>
+	
+	$(document).ready(function () {
+		
+		var resumoContext = document.getElementById("resumoContext");
+		var tituloContext = document.getElementById("tituloContext");
+		var titulo = $("input[name='titulo']").val();
+		var resumo = $("input[name='resumo']").val();
+		
+		marca.texto(titulo, tituloContext);
+		
+		marca.texto(resumo, tituloContext);
+		marca.texto(resumo, resumoContext);
+	});
+	
+	</script>
+	
+	
+	<!-- RECAPTCHA -->
+	<script src="//www.google.com/recaptcha/api.js"></script>
+	
+</head>
+<body bgColor="#ffffff" leftMargin=0 text="#000000" topMargin=0>
+
+	<div id="janelaModalCaptchaDownload" class="janelaModal">
+		<div class="tituloModal">Digite o texto da imagem abaixo</div>
+		
+		<!-- RECAPTCHA -->
+		<div class="g-recaptcha" data-sitekey="6LfhwSAaAAAAANyx2xt8Ikk-YkQ3PGeAVhCfF3i2"></div>
+		
+		<fieldset></fieldset>
+		
+		<input type="hidden" id="NumeroID"> 
+		<input type="hidden" id="hastImagem">
+	</div>
+	
+	<input type="hidden" id="resumo" name="resumo" value="">
+	<input type="hidden" id="titulo" name="titulo" value="">
+	
+	<div id="janelaModalUploadImagem" class="janelaModal-md">
+		<div class="tituloModal">Enviar imagem</div>
+		<fieldset>
+			<div id="mensagemLogAcesso"	style="padding: 20px; color: #6F6F6F; text-align: justify; font: 10px Arial, Helvetica, sans-serif">
+				<form action="/pePI/UploadController" method="post" enctype="multipart/form-data">
+					<input type="file" class="upload-documento" name="arquivo" /> 
+					<input type="hidden" id="numeroProcesso" name="numeroProcesso" /> 
+					<input type="hidden" id="numeroProtocolo" name="numeroProtocolo" /> 
+					<input type="hidden" id="codPedido" name="codPedido" value="1794247"> 
+					<input type="submit" value="Enviar" />
+				</form>
+
+				<br /> 
+				<font class="normal"> Ao clicar em "Enviar" declaro, sob as penas da lei, ser o titular ou o representante legal 
+				do	pedido para o qual foi solicitada a imagem enviada e que a mesma é cópia fiel da petição originalmente apresentada ao INPI </font>
+			</div>
+		</fieldset>
+	</div>
+	
+		<form name="PatentePesquisa" method="post" action="/pePI/servlet/PatenteServletController">
+		
+	        <input type= "hidden" name="Action" value="cadastroProcesso">
+	        <input type= "hidden" name="NumPedido" value="102026004183">
+		
+			<div id="overlay"></div>
+	
+			<div id="mainContainer">
+
+<div id="principal">
+<br/>
+<div id="barra-brasil" style="background:#7F7F7F; height: 20px; padding:0 0 0 10px;display:block;">
+	<ul id="menu-barra-temp" style="list-style:none;">
+	<li style="display:inline; float:left;padding-right:10px; margin-right:10px; borderright:1px solid #EDEDED">
+		<a href="http://brasil.gov.br" style="font-family:sans,sans-serif; text- Portal Padrão Barra de Identidade Visual do Governo Federal na Internet - APLICAÇÃO right:1px solid #EDEDED">
+		<a href="http://brasil.gov.br" style="font-family:sans,sans-serif; text- decoration:none; color:white;">Portal do Governo Brasileiro</a>
+		</li>
+		<li>
+			<a style="font-family:sans,sans-serif; text-decoration:none; color:white;" 
+			href="http://epwg.governoeletronico.gov.br/barra/atualize.html">Atualize sua Barra de Governo
+			</a>
+		</li>
+	</ul>
+</div>
+<div id="logo">
+	<a id="portal-logo" href="http://www.inpi.gov.br" title="O portal do Brasil">
+		<span id="portal-title-1">Instituto Nacional da</span>
+		<span id="portal-title" class="corto">Propriedade Industrial</span>
+		<span id="portal-description">Ministério da Economia</span>
+	</a>
+</div>
+<script src="/pePI/jsp/funcoes/barra.js" type="text/javascript"></script>
+
+
+	
+			<table width="780px">
+				<tr>
+					<td align="center" colSpan=8><font class="titulo">Consulta à Base de Dados do INPI</font></td>
+				</tr>
+				<tr align="right">
+					<td colSpan=8>
+						<font class=normal>
+							<div align="right">
+								[ <a href="../jsp/Base_pesquisa.jsp" class="titulo">Início</a> |
+								<a href="../jsp/Ajuda.jsp" class="normal">Ajuda?</a> ]
+							</div>
+						</font>
+					</td>
+				</tr>
+				<tr>
+					<td align="left">
+						<font class=normal> » Consultar por: 
+							<a href="../jsp/patentes/PatenteSearchBasico.jsp" class="titulo">Base Patentes</a> | 
+							<a href="../jsp/Logout.jsp" class="titulo">Finalizar Sessão</a>
+						</font>
+					</td>
+					<td align="right">
+						<font class=normal> 
+						1/2547
+		 					
+		 						 <a href="../servlet/PatenteServletController?Action=NextRegister&CodPedido=1794247&Resumo=&Titulo="class="titulo">Próximo</a> 
+		 					 
+						</font>
+					</td>
+				</tr>
+				<tr>
+					<td colSpan=8>
+						<hr class="hr">
+					</td>
+				</tr>
+			</table>
+			<table width="780px" border="0">
+				
+				<tr>
+					<td align="center" colSpan=6>
+						<font class="normal">
+						 
+		 							<b>Depósito de pedido nacional de Patente</b>
+		 						 
+						</font>
+					</td>
+				</tr>
+				<tr>
+					<td align="right" width=160>
+						<font class="alerta"> 
+							(21)
+						</font>
+						<font class="normal">Nº do Pedido:</font>&nbsp; 
+						
+					</td>
+					<td align="left">
+						<font class="marcador"> 
+						BR 10 2026 004183 1 
+						</font>
+						
+					</td>
+	
+					<td align="right" rowspan="3">
+						
+							
+							
+						
+					</td>
+	
+				</tr>
+				<tr>
+					<td align="right">
+						<font class="alerta">(22)</font>&nbsp;
+						<font class="normal">Data do Depósito:</font>
+					</td>
+					<td align="left">
+						<font class="normal">&nbsp;
+							23/02/2026
+						</font>
+					</td>
+					<td align="left"></td>
+				</tr>
+				<tr>
+					<td align="right">
+						<font class="alerta">(43)</font>&nbsp;
+						<font class="normal">Data da Publicação:</font>
+					</td>
+					<td align="left">
+						<font class="normal">&nbsp; 
+							-		
+						</font>
+					</td>
+					<td align="left"></td>
+				</tr>
+				<tr>
+					<td align="right">
+						<font class="alerta">(47)</font>&nbsp;
+						<font class="normal">Data da Concessão:</font>
+					</td>
+					<td align="left">
+						<font class="normal">&nbsp; 
+							-
+						</font>
+					</td>
+					<td valign="middle" align="right" rowspan="8">
+						
+					</td>
+				</tr>
+				
+				<tr>
+					<td align="right">
+						
+							<font class="alerta">(71)</font>&nbsp;
+							<font class="normal">Nome do Depositante:</font> 
+						
+					</td>
+					<td align="left">
+						<font class="normal">&nbsp; 
+							PETRÓLEO BRASILEIRO S.A. - PETROBRAS (BR/RJ)
+						</font>
+					</td>
+					<td align="left"></td>
+				</tr>
+				
+				<tr>
+					<td align="right">
+						<font class="alerta">(74)</font>&nbsp;
+						<font class="normal"> Nome do Procurador:</font>
+					</td>
+					<td align="left">
+						<font class="normal">&nbsp; 
+						CLARKE, MODET PROPRIEDADE INTELECTUAL LTDA.
+						</font>
+					</td>
+					<td align="left"></td>
+				</tr>
+				
+				
+			</table>
+			<input type="hidden" name="CodPedido" value="">
+			<input type="hidden" name="NumPedido" value="">
+			<input type="hidden" name="Action" value="">
+			<div class="accordions">
+				<div class="accordion-item">
+					<input type="checkbox" name="accordion" checked="checked" id="accordion-2" />
+					<label for="accordion-2">
+						<font class="titulo">
+							Anuidades
+							
+						</font> 
+						<font class=normal>
+						 
+							<a class=normal href="javascript:void(0)" onmouseout="hideMe('helpAnuidade')" onmouseover="showMe('helpAnuidade')" onClick="DisableHide()">
+								<img src="../jsp/imagens/help.gif" width="13" height="15" border="0" name="class">
+							</a>
+							
+						</font>
+						<div id='helpAnuidade' style="BACKGROUND-COLOR: #ffffff; BORDER-BOTTOM: #000000 1px; BORDER-LEFT: #000000 1px; BORDER-RIGHT: #000000 1px; BORDER-TOP: #000000 1px; HEIGHT: 20px; POSITION: absolute; VISIBILITY: hidden; WIDTH: 300px; Z-INDEX: 10; layer-background-color: #FFFFFF">
+							<table border=1 borderColor="#006363" borderColorLight="#b5d6ad" cellPadding=5 cellSpacing=0 width="100%">
+								<tbody>
+									<tr>
+										<td align="center" bgColor="#b5d6ad">
+											<table width="100%" border="0" cellspacing="0" cellpadding="0">
+												<tr>
+													<td><font class=normal>Leia-me</font></td>
+													<td width="30">
+														<a href="javascript:EnableHide('helpAnuidade');">
+															<img src="../jsp/imagens/bt_layer.gif" width="26" height="16" border="0" name="class">
+														</a>
+													</td>
+												</tr>
+											</table>
+										</td>
+									</tr>
+									
+										<tr>
+											<td align=left bgColor="#ffffff">
+												<font class=normal>Erro na obtenção das anuidades.</font>
+											</td>
+										</tr>
+									
+								</tbody>
+							</table>
+						</div>
+					</label>
+					<div class="accordion-content">
+						<table width="100%">
+							<thead>
+								<tr bgcolor="#b5d6ad" width="100%">
+									
+									<th align="center" width="50">
+										
+									</th>
+									<th align="center" width="50">
+										
+									</th>
+									<th align="center" width="50">
+										
+									</th>
+									<th align="center" width="50">
+										
+									</th>	
+								</tr>
+							</thead>
+							<tbody>
+								<tr bgcolor="#b5d6ad">
+									<td align="left" width="80"><font class=normal></font></td>
+									
+								</tr>
+									
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+			<div id="modal" class="modal">
+			  <div class="modal-content" style="overflow-x:auto;">
+			    <span class="close">&times;</span>
+			  	 <p>
+				    <span id="textoModalAnuidade"></span>
+				</p>
+			  </div>
+			</div>
+				<div class="textoAnuidades" id='vigenciaAnuidade'  style="BACKGROUND-COLOR: #ffffff; BORDER-BOTTOM: #000000 1px; BORDER-LEFT: #000000 1px; BORDER-RIGHT: #000000 1px; BORDER-TOP: #000000 1px; HEIGHT: 20px; POSITION: absolute; VISIBILITY: hidden; WIDTH: 300px; Z-INDEX: 10; layer-background-color: #FFFFFF">
+                    <table border=1 borderColor="#006363"  cellPadding=5 cellSpacing=0 width="100%">
+                        <tbody>
+                            <tr>
+                                <td align="center" bgColor="#b5d6ad">
+                                    <table width="100%" border="0" cellspacing="0" cellpadding="0">
+                                        <tr>
+                                            <td><font class=normal><span>Todas as anuidades vinculadas ao processo</span></font></td>
+                                            <td class="imagemFechar" width="30">
+                                                <a href="javascript:EnableHide('vigenciaAnuidade}');"><img src="../jsp/imagens/bt_layer.gif" width="26" height="16" border="0" name="class"></a>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+                            <tr>
+	                            <td>
+	                            	<font class=normal><span>Data Início: </span></font>
+	                            	<br/>
+	                            	<font class=normal><span>Data Fim: </span></font>
+	                        	</td>
+                        	</tr>
+                        </tbody>
+                    </table>
+                </div>
+				
+			<div class="accordions">
+				<div class="accordion-item">
+					<input type="checkbox" name="accordion" checked='checked' id="accordion-1" />
+					<label for="accordion-1">
+						<font class="titulo">Petições</font>
+						<font class=normal>
+							<a class=normal href="javascript:void(0)" onmouseout="hideMe('helppeticoes')" onmouseover="showMe('helppeticoes')" onClick="DisableHide()">
+								<img src="../jsp/imagens/help.gif" width="13" height="15" border="0" name="class">
+							</a>
+						</font>
+						<div id='helppeticoes' style="BACKGROUND-COLOR: #ffffff; BORDER-BOTTOM: #000000 1px; BORDER-LEFT: #000000 1px; BORDER-RIGHT: #000000 1px; BORDER-TOP: #000000 1px; HEIGHT: 20px; POSITION: absolute; VISIBILITY: hidden; WIDTH: 300px; Z-INDEX: 10; layer-background-color: #FFFFFF">
+							<table border=1 borderColor="#006363" borderColorLight="#b5d6ad" cellPadding=5 cellSpacing=0 width="100%">
+								<tbody>
+									<tr>
+										<td align="center" bgColor="#b5d6ad">
+											<table width="100%" border="0" cellspacing="0" cellpadding="0">
+												<tr>
+													<td><font class=normal>Leia-me</font></td>
+													<td width="30">
+														<a href="javascript:EnableHide('helppeticoes');"> 
+															<img src="../jsp/imagens/bt_layer.gif" width="26" height="16" border="0" name="class">
+														</a>
+													</td>
+												</tr>
+											</table>
+										</td>
+									</tr>
+									<tr>
+										<td align=left bgColor="#ffffff">
+											<font class=normal>
+												Só serão identificados nesta consulta os documentos (petições) apresentados por meio do sistema de Guia de Recolhimento da União - GRU - em vigor desde 2006. Documentos
+												anteriores a esta data podem não estar relacionados.
+											</font></td>
+									</tr>
+								</tbody>
+							</table>
+						</div>
+						 						
+					</label>
+					<div class="accordion-content">
+						<table width="780px">
+							<thead>
+								<tr bgcolor="#b5d6ad">
+									<th width="40"><font class=normal>Serviço</font></th>
+									<th width="10"><font class=normal>Pgo</font></th>
+									<th width="50"><font class=normal>Protocolo</font></th>
+									<th width="62"><font class=normal>Data</font></th>
+									<th width="30" colspan="3"><font class=normal>Imagens</font></th>
+									<th width="246"><font class=normal>Cliente</font></th>
+									<th width="10"><font class=normal>Delivery</font></th>
+									<th width="10"><font class=normal>Data</font></th>
+								</tr>
+							</thead>
+							<tbody>
+							<tr>
+								<td colspan="10" align="left">
+									<label for="accordion-1">
+										<font class="titulo">Serviços</font>
+									</label>
+								</td>
+							</tr>
+							
+								<tr bgColor=#E0E0E0 class=normal>
+									<td align="center" width=30>
+										<font class=normal>
+											<a class=normal href="javascript:void(0)" onmouseout="hideMe('200')" onmouseover="showMe('200')" onClick="DisableHide()"> 200
+											</a>
+										</font>
+										<DIV id='200' style="BACKGROUND-COLOR: #ffffff; BORDER-BOTTOM: #000000 1px; BORDER-LEFT: #000000 1px; BORDER-RIGHT: #000000 1px; BORDER-TOP: #000000 1px; HEIGHT: 20px; POSITION: absolute; VISIBILITY: hidden; WIDTH: 300px; Z-INDEX: 10; layer-background-color: #FFFFFF">
+											<table border=1 borderColor="#006363" borderColorLight="#b5d6ad" cellPadding=5 cellSpacing=0 width="100%">
+												<tbody>
+													<tr>
+														<td align="center" bgColor="#b5d6ad">
+															<table width="100%" border="0" cellspacing="0"
+																cellpadding="0">
+																<tr>
+																	<td><font class=normal>Descrição do Serviço</font></td>
+																	<td width="30">
+																		<a href="javascript:EnableHide('200');">
+																			<img src="../jsp/imagens/bt_layer.gif" width="26" height="16" border="0" name="class">
+																		</a>
+																	</td>
+																</tr>
+															</table>
+														</td>
+													</tr>
+													<tr>
+														<td align=left bgColor="#ffffff">
+															<font class=normal><b>200</b> Pedido nacional de invenção; Pedido nacional de modelo de utilidade; Pedido nacional de certificado de adição de invenção; e Entrada na fase nacional do PCT</font>
+														</td>
+													</tr>
+												</tbody>
+											</table>
+										</DIV>
+									</td>
+									<td align="center" width=10>
+										<font class=normal> 
+										 
+										<font class=normal> 
+											<a class=normal href="javascript:void(0)" onmouseout="hideMe('pgto0')" onmouseover="showMe('pgto0')" onClick="DisableHide()">
+												<img src='../jsp/imagens/registro_em_exame.gif' width='17' height='13' border='0' alt='Pagamento Conciliado'>
+											</a>
+										</font>
+										<div id='pgto0' style="BACKGROUND-COLOR: #ffffff; BORDER-BOTTOM: #000000 1px; BORDER-LEFT: #000000 1px; BORDER-RIGHT: #000000 1px; BORDER-TOP: #000000 1px; HEIGHT: 20px; POSITION: absolute; VISIBILITY: hidden; WIDTH: 300px; Z-INDEX: 10; layer-background-color: #FFFFFF">
+											<table border=1 borderColor="#006363" borderColorLight="#b5d6ad" cellPadding=5 cellSpacing=0 width="100%">
+												<tbody>
+													<tr>
+														<td align="center" bgColor="#b5d6ad">
+															<table width="100%" border="0" cellspacing="0" cellpadding="0">
+																<tr>
+																	<td><font class=normal>Informações do Banco:</font></td>
+																	<td width="30">
+																		<a href="javascript:EnableHide('pgto0');">
+																			<img src="../jsp/imagens/bt_layer.gif" width="26" height="16" border="0" name="class">
+																		</a>
+																	</td>
+																</tr>
+															</table>
+														</td>
+													</tr>
+													<tr>
+														<td align=left bgColor="#ffffff">
+															<font class=normal>
+															 
+																001        - Banco do Brasil S.A.<br>
+																
+																 Data: 20/02/2026
+																 <br> 
+																 Valor: R$260.0 
+															 
+															<br>
+															</font>
+														</td>
+													</tr>	
+												</tbody>
+											</table>
+										</div>
+										
+										</font>
+									</td>
+									<td align="center" width=50>
+										<font class=normal>870260016530</font>
+									</td>
+									<td align="center" width=62>
+										<font class=normal> 
+										23/02/2026
+										</font>
+									</td>
+									<td align="center" width=10>
+										<font class=normal> 
+										 
+		 								-
+		 								
+		
+										</font>
+									</td>
+									<td align="center" width=10>
+										<font class=normal> 
+										 
+											 
+	 												- 
+	 											
+										</font>
+									</td>
+									
+									<td align="center" width=10>
+										<font class=normal> 
+										
+										 
+		 								-
+		 								
+										
+										</font>
+									</td>
+									<td align="center" width=246><font class=normal>PETRÓLEO BRASILEIRO S.A. - PETROBRAS</font></td>
+									<td align="center" width=10>
+										<font class=normal> 
+										
+										</font>
+									</td>
+									<td align="center" width=10>
+										<font class="normal">&nbsp;
+											-
+										</font>
+									</td>
+								</tr>
+											
+							<tr>
+								<td colspan="10" align="left">
+									<label for="accordion-1">
+										<font class="titulo">Anuidade</font>
+									</label>
+								</td>
+							</tr>
+							
+							<tr>
+								<td colspan="10" align="left">
+									<label for="accordion-1">
+										<font class="titulo">Outros</font>
+									</label>
+								</td>
+							</tr>
+																
+						</table>
+					</div>
+				</div>
+			</div>
+						
+			<div class="accordions">
+				<div class="accordion-item">
+					<input type="checkbox" name="accordion" checked="checked" id="accordion-3" />
+						<label for="accordion-3">
+							<font class="titulo">Publicações</font> 
+							<font class=normal> 
+								<a class=normal href="javascript:void(0)" onmouseout="hideMe('helpdespacho')" onmouseover="showMe('helpdespacho')" onClick="DisableHide()">
+									<img src="../jsp/imagens/help.gif" width="13" height="15" border="0" name="class">
+								</a>
+							</font>
+						<div id='helpdespacho' style="BACKGROUND-COLOR: #ffffff; BORDER-BOTTOM: #000000 1px; BORDER-LEFT: #000000 1px; BORDER-RIGHT: #000000 1px; BORDER-TOP: #000000 1px; HEIGHT: 20px; POSITION: absolute; VISIBILITY: hidden; WIDTH: 600px; Z-INDEX: 10; layer-background-color: #FFFFFF">
+							<table border=1 borderColor="#006363" borderColorLight="#b5d6ad" cellPadding=5 cellSpacing=0 width="100%">
+								<tbody>
+									<tr>
+										<td align="center" bgColor="#b5d6ad">
+											<table width="100%" border="0" cellspacing="0" cellpadding="0">
+												<tr>
+													<td><font class=normal>Leia-me</font></td>
+													<td width="30">
+														<a href="javascript:EnableHide('helpdespacho');">
+															<img src="../jsp/imagens/bt_layer.gif" width="26" height="16" border="0" name="class">
+														</a>
+													</td>
+												</tr>
+											</table>
+										</td>
+									</tr>
+									<tr>
+										<td align=left bgColor="#ffffff">
+										<font class=normal>PRAZOS: O direito de praticar qualquer ato perante o INPI se extingue ao final do prazo estabelecido pela LPI para
+												realização do mesmo, a não ser que o interessado comprove que o não realizou por justa causa. Reputa-se justa causa o
+												evento imprevisto, alheio à vontade da parte, e que a impediu de praticar o ato. Os prazos previstos na LPI em relação às
+												patentes são contados em dias, meses e anos. Os prazos expressos em dias contam-se de modo contínuo; os expressos em
+												meses devem ser contados de data a data, ou seja, expiram no dia de número igual ao do dia do início da contagem, ou no
+												dia imediatamente subseqüente, caso falte esta correspondência. No cômputo dos prazos, exclui-se o dia do
+												começo e inclui-se o do vencimento. Se este cair em dia sem expediente, o prazo será prorrogado até o primeiro dia útil
+												após o vencimento. Os prazos somente começam a correr a partir do primeiro dia útil após a intimação, que será feita
+												mediante publicação na RPI, ressalvados: - os que expressamente independerem de notificação ou publicação por
+												força do disposto na LPI; - as decisões administrativas, quando feita notificação por via postal ou por ciência dada
+												ao interessado no processo; e - os pareceres e despachos internos que não necessitem ser do conhecimento das partes
+												(art. 226 da LPI). Não havendo expressa estipulação na LPI, o prazo para a prática de um ato será de 60 (sessenta) dias 
+											</font>
+										</td>
+									</tr>
+								</tbody>
+							</table>
+						</div>
+					</label>
+					<div class="accordion-content">
+	
+						<table width="100%">
+							<thead>
+								<tr bgcolor="#b5d6ad" width="100%">
+									<th width="10"><font class=normal>RPI</font></th>
+									<th width="50"><font class=normal>Data RPI</font></th>
+									<th width="60"><font class=normal>Despacho</font></th>
+									<th colspan="2" width="20"><font class=normal >Img</font></th>
+									<th width="10"><font class=normal>Complemento do Despacho</font></th>
+							<tbody>
+								
+								<tr bgColor=white class=normal>
+									<td width="28" align="center">
+										<font class="normal">2878</font>
+									</td>
+									<td width="55" align="center">
+										<font class="normal"><b>
+										 03/03/2026
+										</b></font>
+									</td>
+									<td width="74" align="center">
+										<font class="normal">
+											<a class=normal href="javascript:void(0)" onmouseout="hideMe('despacho1')" onmouseover="showMe('despacho1','hidden')" onClick="DisableHide()"> 2.10
+											</a>
+										</font>
+										<div id="despacho1" style="BACKGROUND-COLOR: #ffffff; BORDER-BOTTOM: #000000 1px; BORDER-LEFT: #000000 1px; BORDER-RIGHT: #000000 1px; BORDER-TOP: #000000 1px; HEIGHT: 20px; POSITION: absolute; VISIBILITY: hidden; WIDTH: 300px; Z-INDEX: 10; layer-background-color: #FFFFFF">
+											<table width="100%" border="1" cellspacing="0" cellpadding="5" bordercolor="#006363" bordercolorlight="#B5D6AD">
+												<tbody>
+													<tr>
+														<td align="center" bgcolor="#B5D6AD">
+															<table width="100%" border="0" cellspacing="0"
+																cellpadding="0">
+																<tr>
+																	<td><font class="normal">Descrição Despacho</font>
+																	</td>
+																	<td width="30">
+																		<a href="javascript:EnableHide('despacho1');"> 
+																			<img src="../jsp/imagens/bt_layer.gif" width="26" height="16" border="0" name="class">
+																		</a>
+																	</td>
+																</tr>
+															</table>
+														</td>
+													</tr>
+													<tr>
+														<td align="left" bgcolor="#ffffff">
+															<font class="normal"> 
+															<b>2.10</b>
+															Notificação de recebimento do pedido de patente ou certificado de adição<br><br>O INPI confirma o recebimento de pedido de Patente de Invenção, Modelo de Utilidade ou Certificado de Adição de Invenção. Não é necessário responder a este despacho. O INPI fará, em seguida, o exame formal preliminar para verificar se o depositante atendeu às condições estabelecidas no Art. 19 da Lei 9.279/1996 e nas normas em vigor no Instituto. Se o depósito foi efetuado por procurador, este deverá apresentar a procuração no prazo de até 60 (sessenta) dias, a contar da data do depósito. Isso deve ser feito mesmo sem o INPI emitir notificação ou exigência, conforme o Art. 216 da Lei 9.279/1996. O pedido será arquivado definitivamente caso a procuração não seja apresentada no prazo previsto. As solicitações de entrada em fase nacional no Brasil via Tratado de Cooperação em Matéria de Patentes (PCT, na sigla em inglês) são notificadas pelo despacho 1.1. Atenção! O depositante deverá acompanhar o andamento do pedido na RPI e na Busca de Processos no Portal do INPI. Também deve estar atento a eventuais exigências e/ou necessidades do rito processual. Para tirar dúvidas, consulte os Guias Rápidos de Patentes ou escreva para o Fale Conosco no Portal do INPI.
+															</font>
+														</td>
+													</tr>
+												</tbody>
+											</table>
+										</div>
+									</td>
+									<td align="center" width="10">
+										<font class=normal>
+										
+										 - 
+										
+									</font>
+								</td>
+								<td align="center" width="10">
+										<font class=normal>								
+										
+		 									 - 
+		 														
+										
+										</font>
+								</td>
+								
+								<td width="530" align="left">
+									<font class=normal>
+									Número de Protocolo '870260016530' em 23/02/2026 13:59 (WB)
+									</font>
+								</td>
+							</tr>
+							
+						</table>
+					</div>
+				</div>
+			</div>
+			<table width="780px">
+				<tr>
+					<td align="center" colSpan=6>
+						<font class=normal> &nbsp;<BR>Dados atualizados até <b> 
+						03/03/2026
+						</b> - Nº da Revista: <b> 
+						
+							2878 
+						
+						</b>
+						</font>
+					</td>
+				</tr>
+			</table>
+	
+			<!-- Teste -->
+	
+			<div class="textoCenter">
+				<a class=normal href="javascript:void(0)" onmouseout="hideMe('PatentDocument')" onmouseover="showMe('PatentDocument','hidden')" onClick="DisableHide()"> Documentos Publicados</a> 
+				<div id="PatentDocument" style="BACKGROUND-COLOR: #ffffff; BORDER-BOTTOM: #000000 1px; BORDER-LEFT: #000000 1px; BORDER-RIGHT: #000000 1px; BORDER-TOP: #000000 1px; HEIGHT: 20px; POSITION: absolute; VISIBILITY: hidden; WIDTH: 300px; Z-INDEX: 10; layer-background-color: #FFFFFF">
+					<table width="100%" border="1" cellspacing="0" cellpadding="6">
+						<tbody>
+							<tr>
+								<td align="center" bgcolor="#B5D6AD">
+									<table width="100%" border="0" cellspacing="0" cellpadding="0">
+										<tr>
+											<td><font class="normal"><b>Aviso Importante:</b></font></td>
+											<td width="30">
+												<a	href="javascript:EnableHide('PatentDocument');">
+													<img src="../jsp/imagens/bt_layer.gif" width="26" height="16" border="0" name="class">
+												</a>
+											</td>
+										</tr>
+									</table>
+								</td>
+							</tr>
+							<tr>
+								<td align="left" bgcolor="#ffffff"><font class="normal">
+										<b>Nota sobre o acervo das Publicações digitalizadas</b> Este
+										sistema tem como objetivo prover o acesso a informações e
+										documentos públicos de processos de patentes. No momento, o
+										sistema está em período de operação assistida. A
+										disponibilização das imagens, em parte ou em sua totalidade,
+										depende da digitalização dos documentos e da situação dos
+										mesmos, por exemplo, se em exame ou finalizados. Isto significa
+										que podem haver partes adicionais integrantes de um processo
+										ainda não disponibilizados através do sistema. O INPI informa
+										também que o procedimento adotado pelo Instituto é a
+										digitalização de toda a documentação pública referente aos
+										processos e, na medida em que os documentos adicionais venham a
+										ser anexados, os mesmos serão disponibilizados no sistema
+										e-Patentes/Vista após a devida digitalização. <br> <br>
+										<b>OBS: Clique na imagem acima para abrir o documento.</b>
+								</font></td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+	
+			</div>
+	
+			<div class="scroll-pane ui-widget ui-widget-header ui-corner-all">
+				<div class="scroll-content" style="width:0px">
+					
+				</div>
+			</div>
+	
+		</form>
+	
+		
+		<!-- RECAPTCHA -->
+		<div id="conteudoCaptcha" style="display: none">
+		
+			<form id="captchaForm" method="POST">
+			
+				<div id="captchaConteiner">
+					<input type="submit" id="captchaButton" class="button branco" value="Download" />
+					<div id="msgErroCaptcha" class="errorMsgCaptcha" style="display: none"></div>
+				</div>
+				
+				<div id="loader" style="display: none">
+					<img src="../jsp/imagens/loading.gif" style="margin-top: 75px; width: 180px" />
+				</div>
+				<input type="hidden" value="200" id="codDiretoria" /> 
+				<input type="hidden" value="1794247" id="CodPedido" />
+				
+			</form>
+			
+		</div>
+		
+		
+		<div id="conteudoCaptchaSisbiolist" style="display: none">
+			<form id="captchaFormSisbiolist">
+			
+				<div id="captchaConteiner">
+					<input type="submit" id="captchaButton" class="button branco" value="Download" />
+					<div id="msgErroCaptcha" class="errorMsgCaptcha" style="display: none"></div>
+				</div>
+				
+				<div id="loader" style="display: none">
+					<img src="../jsp/imagens/loading.gif" style="margin-top: 75px; width: 180px" />
+				</div>
+				
+				<input type="hidden" value="200" id="codDiretoria" /> 
+				<input type="hidden" value="1794247" id="codPedido" />
+				
+			</form>
+		</div>
+	
+	<!-- RECAPTCHA -->
+	<script type="text/javascript" src="../jsp/funcoes/modalAnuidade.js" charset="UTF-8"></script>
+</body>
+
+	<br/>
+      
+	<div id="bottom_principal"></div>
+	<div id="footer">
+		<div id="texto_footer">
+			<p>Rua Mayrink Veiga, 9 - Centro - RJ - CEP: 20090-910</p>
+		</div>
+		<div id="logo_ouvidoria">
+			<a href="http://faleconosco.inpi.gov.br/" target="blank"><img src="/pePI/jsp/imagens/faleconosco.png" border="0" alt="Fale Conosco" onmouseout="this.src='/pePI/jsp/imagens/faleconosco.png';"
+				title="Fale Conosco" onmouseover="this.src='/pePI/jsp/imagens/faleconosco.png';" /> </a>
+		</div>
+	</div>
+</HTML>

@@ -1317,7 +1317,13 @@ async function searchInpiViaCurl(params: {
 
         let firstPageResults = parseInpiResults(stdout);
         const baseNextPageUrl = 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=nextPage';
-        if (firstPageResults.length === 0) {
+        const firstPageReportedTotal = (firstPageResults as any).total as number | undefined;
+        const firstPageLooksIncomplete = requestedPage === 1
+            && firstPageResults.length > 0
+            && firstPageResults.length < requestedPageSize
+            && typeof firstPageReportedTotal === 'number'
+            && firstPageReportedTotal > firstPageResults.length;
+        if (firstPageResults.length === 0 || firstPageLooksIncomplete) {
             try {
                 const { stdout: firstPageFallbackHtml } = await execInpiCurlWithRetry(
                     `curl -s -L --http1.1 -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} '${baseNextPageUrl}&Page=1&Resumo=&Titulo=' | iconv -f ISO-8859-1 -t UTF-8`,
@@ -1827,9 +1833,9 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
         return {
             codPedido,
             source: 'INPI',
-            status: 'EM SIGILO',
             url: `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${encodeURIComponent(codPedido)}`,
-            figures: []
+            figures: [],
+            detailUnavailable: true
         };
     }
 });

@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.5;
+            color: #333;
+            max-width: 850px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: #1a237e !important;
+            color: white !important;
+            padding: 25px;
+            border-radius: 8px 8px 0 0;
+            text-align: center;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+
+        .container {
+            border: 1px solid #e0e0e0;
+            padding: 30px;
+            border-radius: 0 0 8px 8px;
+            background: #fff;
+        }
+
+        h2 {
+            color: #1a237e;
+            border-bottom: 2px solid #1a237e;
+            padding-bottom: 8px;
+            margin-top: 40px;
+            page-break-after: avoid;
+        }
+
+        .feature-card {
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 6px solid #3949ab;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            page-break-inside: avoid;
+            /* Impede que o card seja cortado no meio entre páginas */
+            break-inside: avoid;
+        }
+
+        .feature-title {
+            font-weight: bold;
+            color: #283593;
+            font-size: 1.2em;
+            display: block;
+            margin-bottom: 10px;
+        }
+
+        .benefit {
+            color: #2e7d32;
+            font-weight: bold;
+            font-size: 0.95em;
+            margin-top: 10px;
+            display: block;
+        }
+
+        .footer {
+            margin-top: 50px;
+            font-size: 0.85em;
+            color: #757575;
+            text-align: center;
+            border-top: 1px solid #eee;
+            padding-top: 25px;
+            page-break-inside: avoid;
+        }
+
+        ul {
+            padding-left: 25px;
+            margin-bottom: 0;
+        }
+
+        li {
+            margin-bottom: 10px;
+        }
+
+        @media print {
+            body {
+                margin: 0;
+                padding: 0;
+                max-width: 100%;
+            }
+
+            .container {
+                border: none;
+                padding: 0;
+            }
+
+            .header {
+                border-radius: 0;
+            }
+
+            h2 {
+                margin-top: 30px;
+            }
+
+            .feature-card {
+                border: 1px solid #eee;
+                border-left: 6px solid #3949ab;
+                box-shadow: none;
+                margin-bottom: 25px;
+            }
+
+            @page {
+                size: A4;
+                margin: 2cm;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="header">
+        <h1>Relatório Semanal de Evolução</h1>
+        <p>Projeto: <strong>PatentCompass</strong> | Período: Março/2026</p>
+    </div>
+
+    <div class="container">
+        <p>Prezado(a),</p>
+        <p>Apresentamos o resumo das implementações e otimizações realizadas na plataforma esta semana, focadas no
+            aumento da precisão da busca e estabilidade da integração com os bancos de dados do INPI e Espacenet.</p>
+
+        <h2>1. Refino da Estratégia de Busca Bilíngue</h2>
+        <div class="feature-card">
+            <span class="feature-title">Segregação Linguística de Keywords</span>
+            A arquitetura de dados foi reestruturada para separar estritamente os termos em <strong>Português
+                (PT)</strong> e <strong>Inglês (EN)</strong>.
+            <ul>
+                <li><strong>Módulo INPI:</strong> Utiliza exclusivamente o dicionário de termos em português, evitando
+                    "poluição" com termos estrangeiros que o robô do INPI muitas vezes não processa corretamente.</li>
+                <li><strong>Módulo Espacenet (EPO):</strong> Consultas realizadas exclusivamente em inglês para
+                    maximizar o <em>recall</em> em bases internacionais.</li>
+            </ul>
+            <span class="benefit">✔️ Benefício: Redução de ruído e aumento da relevância dos resultados
+                retornados.</span>
+        </div>
+
+        <h2>2. Otimização da Integração com o INPI</h2>
+        <div class="feature-card">
+            <span class="feature-title">Integração via Busca Avançada</span>
+            Refatoramos o mecanismo de coleta de dados para operar simulando o formulário de <strong>Busca Avançada do
+                portal web do INPI</strong>.
+            <ul>
+                <li><strong>Proteção de Sintaxe Booleana:</strong> Implementamos o enclausuramento automático de termos
+                    compostos (ex: "máquina de cortar") entre aspas. Isso assegura que o buscador do INPI interprete o
+                    conceito como uma unidade técnica e não como palavras soltas.</li>
+                <li><strong>Mapeamento de Campos:</strong> A busca agora preenche de forma estruturada os campos de
+                    Título e Resumo, garantindo maior cobertura na varredura do estado da arte nacional.</li>
+            </ul>
+            <span class="benefit">✔️ Benefício: Pesquisas mais robustas que não falham com termos técnicos complexos ou
+                operadores booleanos.</span>
+        </div>
+
+        <h2>3. Resiliência e Desempenho do Sistema</h2>
+        <div class="feature-card">
+            <span class="feature-title">Gestão de Filas de Processamento (AsyncQueue)</span>
+            Implementamos um sistema de controle de tráfego para as requisições enviadas aos servidores governamentais.
+            <ul>
+                <li><strong>Throttling Preventivo:</strong> O sistema agora enfileira as requisições com intervalos de
+                    segurança (800ms a 1.5s).</li>
+                <li><strong>Prevenção de Bloqueios:</strong> Esta medida impede que o IP do servidor seja sinalizado
+                    como tráfego suspeito pelos firewalls do INPI ou EPO, garantindo que o serviço esteja sempre
+                    disponível.</li>
+            </ul>
+            <span class="benefit">✔️ Benefício: Estabilidade total durante pesquisas extensas; o sistema não "trava"
+                mais ao processar grandes volumes de dados.</span>
+        </div>
+
+        <h2>4. Evolução da Interface de Curadoria</h2>
+        <div class="feature-card">
+            <span class="feature-title">Painel de Refino de Palavras-Chave</span>
+            A interface foi atualizada para exibir containers independentes para as camadas de termos em português e
+            inglês.
+            <span class="benefit">✔️ Benefício: Permite ao analista de patentes ajustar e validar manualmente a
+                estratégia sugerida pela IA de forma intuitiva antes da execução final da busca.</span>
+        </div>
+
+        <div class="footer">
+            <p>Este relatório foi gerado automaticamente pela engenharia do projeto <strong>PatentCompass</strong>.</p>
+            <p>© 2026 PatentCompass - Inteligência Avançada em Propriedade Intelectual.</p>
+        </div>
+    </div>
+
+</body>
+
+</html>
