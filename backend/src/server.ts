@@ -15,6 +15,7 @@ import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
 import { randomUUID } from 'crypto';
 import { PrismaClient } from '@prisma/client';
+import pdfParse from 'pdf-parse';
 
 const execAsync = promisify(exec);
 
@@ -1097,7 +1098,8 @@ function parseInpiResults(html: string): any[] {
 }
 
 async function initializeInpiAnonymousSession(cookieFile: string): Promise<void> {
-    const payloadFile = `/tmp/inpi_login_${randomUUID()}.txt`;
+    const payloadFilePrimary = `/tmp/inpi_login_primary_${randomUUID()}.txt`;
+    const payloadFileFallback = `/tmp/inpi_login_fallback_${randomUUID()}.txt`;
     const loginUrl = 'https://busca.inpi.gov.br/pePI/servlet/LoginController';
     try {
         await execAsync(
@@ -1105,13 +1107,20 @@ async function initializeInpiAnonymousSession(cookieFile: string): Promise<void>
             { timeout: 15000 }
         );
 
-        fs.writeFileSync(payloadFile, 'action=login&T_Login=&T_Senha=&Usuario=', 'utf8');
+        fs.writeFileSync(payloadFilePrimary, 'submission=continuar', 'utf8');
         await execAsync(
-            `curl -s -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -c ${cookieFile} -X POST '${loginUrl}' --data-binary @${payloadFile} -o /dev/null`,
+            `curl -s -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -c ${cookieFile} -X POST '${loginUrl}' --data-binary @${payloadFilePrimary} -o /dev/null`,
+            { timeout: 20000 }
+        );
+
+        fs.writeFileSync(payloadFileFallback, 'action=login&T_Login=&T_Senha=&Usuario=', 'utf8');
+        await execAsync(
+            `curl -s -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -c ${cookieFile} -X POST '${loginUrl}' --data-binary @${payloadFileFallback} -o /dev/null`,
             { timeout: 20000 }
         );
     } finally {
-        try { fs.unlinkSync(payloadFile); } catch { }
+        try { fs.unlinkSync(payloadFilePrimary); } catch { }
+        try { fs.unlinkSync(payloadFileFallback); } catch { }
     }
 }
 
@@ -1210,7 +1219,8 @@ async function fetchEspacenetBiblioByPublicationNumber(publicationNumber: string
             timeout: 30000
         }));
         const opsResults = parseOpsResponse(response.data);
-        const first = opsResults[0];
+        const translated = await translatePatentsToPortuguese(opsResults);
+        const first = translated[0];
         if (!first) return null;
         return {
             title: first.title,
@@ -1502,6 +1512,41 @@ async function fetchPatentPdf(url: string, fallbackName: string): Promise<{ buff
     throw new Error('PDF não encontrado para o documento solicitado');
 }
 
+function normalizeDocumentText(text: string): string {
+    return text
+        .replace(/\r/g, '\n')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+async function translateDocumentTextToPortuguese(text: string): Promise<{ translatedText: string; originalLength: number; translated: boolean }> {
+    const normalized = normalizeDocumentText(text);
+    if (!normalized) {
+        return { translatedText: '', originalLength: 0, translated: false };
+    }
+    const maxChars = 18000;
+    const excerpt = normalized.substring(0, maxChars);
+    if (isLikelyPortuguese(excerpt)) {
+        return { translatedText: excerpt, originalLength: normalized.length, translated: false };
+    }
+    const prompt = `Traduza para Português Brasileiro (PT-BR) o texto técnico de patente abaixo, preservando termos técnicos e numeração.
+
+Texto:
+${excerpt}
+
+Retorne somente o texto traduzido, sem explicações.`;
+    try {
+        const translated = (await generateWithGemini(prompt, false)).trim();
+        if (translated) {
+            return { translatedText: translated, originalLength: normalized.length, translated: true };
+        }
+        return { translatedText: excerpt, originalLength: normalized.length, translated: false };
+    } catch {
+        return { translatedText: excerpt, originalLength: normalized.length, translated: false };
+    }
+}
+
 // ─── GET /search/inpi/detail/:codPedido ────────────────────────
 fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
     const { codPedido } = request.params as { codPedido: string };
@@ -1535,6 +1580,38 @@ fastify.get('/patent/document', async (request, reply) => {
     } catch (error: any) {
         fastify.log.warn(`Patent document fetch failed: ${error.message}`);
         return reply.code(404).send({ error: 'Não foi possível localizar PDF para esta patente' });
+    }
+});
+
+fastify.get('/patent/document/translation', async (request, reply) => {
+    const { url, publicationNumber } = request.query as {
+        url?: string;
+        publicationNumber?: string;
+    };
+
+    if (!url) {
+        return reply.code(400).send({ error: 'Parâmetro url é obrigatório' });
+    }
+
+    const fallbackName = `${(publicationNumber || 'patente').replace(/[^\w.-]/g, '_')}.pdf`;
+    try {
+        const { buffer } = await fetchPatentPdf(url, fallbackName);
+        const parsed = await pdfParse(buffer);
+        const text = normalizeDocumentText(parsed.text || '');
+        if (!text) {
+            return reply.code(404).send({ error: 'Não foi possível extrair texto do PDF da patente' });
+        }
+        const translation = await translateDocumentTextToPortuguese(text);
+        return {
+            publicationNumber: publicationNumber || '',
+            translatedText: translation.translatedText,
+            originalLength: translation.originalLength,
+            translated: translation.translated,
+            truncated: translation.originalLength > 18000
+        };
+    } catch (error: any) {
+        fastify.log.warn(`Patent document translation failed: ${error.message}`);
+        return reply.code(404).send({ error: 'Não foi possível traduzir o documento desta patente' });
     }
 });
 

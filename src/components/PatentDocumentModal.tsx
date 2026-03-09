@@ -29,6 +29,9 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
   const [loadingPdf, setLoadingPdf] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfError, setPdfError] = useState("");
+  const [loadingTranslation, setLoadingTranslation] = useState(false);
+  const [translatedText, setTranslatedText] = useState("");
+  const [translationError, setTranslationError] = useState("");
 
   useEffect(() => {
     return () => {
@@ -39,10 +42,28 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
   }, [pdfUrl]);
 
   useEffect(() => {
+    if (!open) {
+      setTranslatedText("");
+      setTranslationError("");
+      setLoadingTranslation(false);
+      return;
+    }
+    setTranslatedText("");
+    setTranslationError("");
+    setLoadingTranslation(false);
+  }, [open, patent?.publicationNumber]);
+
+  useEffect(() => {
     let active = true;
 
     const loadPdf = async () => {
       if (!open || !patent?.url) return;
+      if (patent.source === "INPI") {
+        setLoadingPdf(false);
+        setPdfUrl(null);
+        setPdfError("O INPI não disponibiliza PDF direto neste link. Use \"Fonte original\" para abrir o documento oficial.");
+        return;
+      }
       setLoadingPdf(true);
       setPdfError("");
       if (pdfUrl) {
@@ -101,6 +122,30 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
     anchor.click();
   };
 
+  const handleTranslateDocument = async () => {
+    if (!patent?.url || patent.source === "INPI") return;
+    setLoadingTranslation(true);
+    setTranslationError("");
+    try {
+      const response = await axios.get(`${API_URL}/patent/document/translation`, {
+        params: {
+          url: patent.url,
+          publicationNumber: patent.publicationNumber
+        },
+        timeout: 60000
+      });
+      const text = typeof response.data?.translatedText === "string" ? response.data.translatedText : "";
+      setTranslatedText(text.trim());
+      if (!text.trim()) {
+        setTranslationError("Não foi possível gerar tradução para este documento.");
+      }
+    } catch {
+      setTranslationError("Não foi possível traduzir automaticamente este documento.");
+    } finally {
+      setLoadingTranslation(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-7xl w-[96vw] h-[92vh] p-4 flex flex-col gap-3">
@@ -142,6 +187,19 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
                   <ExternalLink className="w-3.5 h-3.5" />
                   Fonte original
                 </Button>
+                {patent.source !== "INPI" && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={handleTranslateDocument}
+                    disabled={loadingTranslation}
+                  >
+                    {loadingTranslation ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                    {loadingTranslation ? "Traduzindo..." : "Traduzir conteúdo"}
+                  </Button>
+                )}
               </div>
             </div>
 
@@ -160,6 +218,21 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
                 </div>
               )}
             </div>
+            {(translatedText || translationError || loadingTranslation) && (
+              <div className="rounded-lg border bg-background p-3">
+                <p className="text-xs text-muted-foreground mb-2">Tradução automática do conteúdo do documento</p>
+                {loadingTranslation ? (
+                  <div className="text-sm text-muted-foreground flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Processando tradução...
+                  </div>
+                ) : translatedText ? (
+                  <div className="max-h-48 overflow-auto text-sm whitespace-pre-wrap leading-relaxed">{translatedText}</div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">{translationError}</div>
+                )}
+              </div>
+            )}
           </>
         )}
       </DialogContent>
