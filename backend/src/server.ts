@@ -1204,6 +1204,8 @@ async function searchInpiViaCurl(params: {
     inventor?: string;
     keywords?: string;
     resumo?: string;
+    maxPages?: number;
+    enrichDetails?: boolean;
 }): Promise<any[]> {
     const cookieFile = `/tmp/inpi_${randomUUID()}.txt`;
     const payloadFile = `/tmp/inpi_payload_${randomUUID()}.txt`;
@@ -1255,7 +1257,7 @@ async function searchInpiViaCurl(params: {
         const reportedTotal: number | undefined = (results as any).total;
         const perPage: number | undefined = (results as any).perPage;
         const maxResults = 500;
-        const maxPages = 5;
+        const maxPages = typeof params.maxPages === 'number' && params.maxPages > 0 ? params.maxPages : 5;
         const baseNextPageUrl = 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=nextPage';
         const targetTotal = reportedTotal && reportedTotal > 0 ? Math.min(reportedTotal, maxResults) : maxResults;
 
@@ -1294,29 +1296,24 @@ async function searchInpiViaCurl(params: {
             fs.writeFileSync(debugFile, stdout);
             fastify.log.warn(`INPI search returned 0 results. Saved HTML to ${debugFile}`);
             if (stderr) fastify.log.warn(`INPI curl stderr: ${stderr}`);
-        } else {
-            // Enrich results with details
-            fastify.log.info(`Enriching ${results.length} results with details...`);
-            
-            // Process in batches of 10
+        } else if (params.enrichDetails !== false) {
+            fastify.log.info(`Enriching ${results.length} INPI results with details...`);
             const batchSize = 10;
             for (let i = 0; i < results.length; i += batchSize) {
                 const batch = results.slice(i, i + batchSize);
-                fastify.log.info(`Processing batch ${i/batchSize + 1} of ${Math.ceil(results.length/batchSize)}`);
+                fastify.log.info(`Processing batch ${i / batchSize + 1} of ${Math.ceil(results.length / batchSize)}`);
                 await Promise.all(batch.map(async (result) => {
-                    if (result.url) {
-                        try {
-                            const details = await fetchPatentDetailViaCurl(cookieFile, result.url);
-                            if (details.applicant) result.applicant = details.applicant;
-                            if (details.inventor) result.inventor = details.inventor;
-                            // Only overwrite title/abstract if they are empty or placeholder
-                            if (details.title && (result.title === '(Sem título)' || !result.title)) {
-                                result.title = details.title;
-                            }
-                            if (details.abstract && !result.abstract) result.abstract = details.abstract;
-                        } catch (detailErr: any) {
-                            fastify.log.error(`Failed to enrich detail for ${result.url}: ${detailErr.message}`);
+                    if (!result.url) return;
+                    try {
+                        const details = await fetchPatentDetailViaCurl(cookieFile, result.url);
+                        if (details.applicant) result.applicant = details.applicant;
+                        if (details.inventor) result.inventor = details.inventor;
+                        if (details.title && (result.title === '(Sem título)' || !result.title)) {
+                            result.title = details.title;
                         }
+                        if (details.abstract && !result.abstract) result.abstract = details.abstract;
+                    } catch (detailErr: any) {
+                        fastify.log.error(`Failed to enrich detail for ${result.url}: ${detailErr.message}`);
                     }
                 }));
             }
@@ -1844,7 +1841,14 @@ fastify.post('/search/quick', async (request, reply) => {
     const fetchedEspacenetResults: any[] = [];
 
     try {
-        const inpi = await inpiQueue.enqueue(() => searchInpiViaCurl({ number, titular, inventor, keywords }));
+        const inpi = await inpiQueue.enqueue(() => searchInpiViaCurl({
+            number,
+            titular,
+            inventor,
+            keywords,
+            maxPages: 1,
+            enrichDetails: false
+        }));
         fetchedInpiResults.push(...inpi);
         enqueueSearchResultsPersistence(inpi);
     } catch (err: any) {
