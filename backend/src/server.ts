@@ -1280,11 +1280,23 @@ async function fetchInpiDetailByCod(codPedido: string, preferredUrl?: string): P
             }
         }
         if (!html.trim() || isLoginHtml(html)) {
-            throw new Error('INPI retornou página de login para o detalhe');
+            fastify.log.warn(`INPI detail fell back to login page for CodPedido=${codPedido}`);
+            return {
+                codPedido,
+                source: 'INPI',
+                url: cleanedPreferredUrl || defaultUrl,
+                figures: []
+            };
         }
         const detail = extractDetailFromHtml(html);
         if (!detail.title && !detail.abstract && !detail.applicant && !detail.inventor && (!detail.figures || detail.figures.length === 0)) {
-            throw new Error('INPI não retornou campos de detalhe para este CodPedido');
+            fastify.log.warn(`INPI did not return usable detail fields for CodPedido=${codPedido}`);
+            return {
+                codPedido,
+                source: 'INPI',
+                url: cleanedPreferredUrl || defaultUrl,
+                figures: []
+            };
         }
 
         return {
