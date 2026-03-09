@@ -84,6 +84,234 @@ const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 let opsAccessToken: string | null = null;
 let opsTokenExpiration = 0;
 
+type CachedPatentRecord = {
+    source: string;
+    publicationNumber: string;
+    title: string;
+    applicant: string;
+    inventor: string;
+    date: string;
+    abstract: string;
+    classification: string;
+    url: string;
+    status: string;
+    figures: string[];
+    updatedAt: string;
+    lastSeenAt: string;
+};
+
+const dbWriteQueue = new AsyncQueue(120);
+const prismaAny = prisma as any;
+
+function normalizeText(value?: string): string {
+    return (value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function normalizeStringField(value: any): string {
+    return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeFiguresField(value: any): string[] {
+    if (!Array.isArray(value)) return [];
+    return value
+        .filter((item) => typeof item === 'string' && item.trim().length > 0)
+        .map((item) => item.trim())
+        .slice(0, 30);
+}
+
+function getCachedPatentKey(source: string, publicationNumber: string): string {
+    return `${normalizeText(source)}::${normalizeText(publicationNumber)}`;
+}
+
+function pickBestField(current: string, incoming: string): string {
+    if (!incoming) return current;
+    if (!current) return incoming;
+    return incoming.length > current.length ? incoming : current;
+}
+
+function normalizePatentRecord(record: any): CachedPatentRecord | null {
+    const source = normalizeStringField(record?.source);
+    const publicationNumber = normalizeStringField(record?.publicationNumber);
+    if (!source || !publicationNumber) return null;
+    const nowIso = new Date().toISOString();
+    return {
+        source,
+        publicationNumber,
+        title: normalizeStringField(record?.title),
+        applicant: normalizeStringField(record?.applicant),
+        inventor: normalizeStringField(record?.inventor),
+        date: normalizeStringField(record?.date),
+        abstract: normalizeStringField(record?.abstract),
+        classification: normalizeStringField(record?.classification),
+        url: normalizeStringField(record?.url),
+        status: normalizeStringField(record?.status),
+        figures: normalizeFiguresField(record?.figures),
+        updatedAt: normalizeStringField(record?.updatedAt) || nowIso,
+        lastSeenAt: normalizeStringField(record?.lastSeenAt) || nowIso
+    };
+}
+
+function mergePatentRecord(existing: CachedPatentRecord, incoming: CachedPatentRecord): CachedPatentRecord {
+    const nowIso = new Date().toISOString();
+    return {
+        source: incoming.source || existing.source,
+        publicationNumber: incoming.publicationNumber || existing.publicationNumber,
+        title: pickBestField(existing.title, incoming.title),
+        applicant: pickBestField(existing.applicant, incoming.applicant),
+        inventor: pickBestField(existing.inventor, incoming.inventor),
+        date: pickBestField(existing.date, incoming.date),
+        abstract: pickBestField(existing.abstract, incoming.abstract),
+        classification: pickBestField(existing.classification, incoming.classification),
+        url: pickBestField(existing.url, incoming.url),
+        status: pickBestField(existing.status, incoming.status),
+        figures: incoming.figures.length > 0 ? incoming.figures : existing.figures,
+        updatedAt: nowIso,
+        lastSeenAt: nowIso
+    };
+}
+
+function mapRecordToApiPatent(record: CachedPatentRecord): any {
+    return {
+        publicationNumber: record.publicationNumber,
+        title: record.title,
+        applicant: record.applicant,
+        inventor: record.inventor,
+        date: record.date,
+        abstract: record.abstract,
+        classification: record.classification,
+        source: record.source,
+        url: record.url,
+        status: record.status,
+        figures: record.figures
+    };
+}
+
+function mapDbCacheRowToPatent(row: any): any {
+    return mapRecordToApiPatent({
+        source: normalizeStringField(row?.source),
+        publicationNumber: normalizeStringField(row?.publication_number),
+        title: normalizeStringField(row?.title),
+        applicant: normalizeStringField(row?.applicant),
+        inventor: normalizeStringField(row?.inventor),
+        date: normalizeStringField(row?.patent_date),
+        abstract: normalizeStringField(row?.abstract),
+        classification: normalizeStringField(row?.classification),
+        url: normalizeStringField(row?.url),
+        status: normalizeStringField(row?.status),
+        figures: normalizeFiguresField(row?.figures),
+        updatedAt: row?.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString(),
+        lastSeenAt: row?.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString()
+    });
+}
+
+function enqueueSearchResultsPersistence(records: any[]) {
+    if (!records.length) return;
+    for (const record of records) {
+        const normalized = normalizePatentRecord(record);
+        if (!normalized) continue;
+        dbWriteQueue.enqueue(async () => {
+            await prismaAny.searchResultCache.upsert({
+                where: {
+                    source_publication_number: {
+                        source: normalized.source,
+                        publication_number: normalized.publicationNumber
+                    }
+                },
+                update: {
+                    title: normalized.title || null,
+                    applicant: normalized.applicant || null,
+                    inventor: normalized.inventor || null,
+                    patent_date: normalized.date || null,
+                    abstract: normalized.abstract || null,
+                    classification: normalized.classification || null,
+                    url: normalized.url || null,
+                    status: normalized.status || null,
+                    figures: normalized.figures
+                },
+                create: {
+                    source: normalized.source,
+                    publication_number: normalized.publicationNumber,
+                    title: normalized.title || null,
+                    applicant: normalized.applicant || null,
+                    inventor: normalized.inventor || null,
+                    patent_date: normalized.date || null,
+                    abstract: normalized.abstract || null,
+                    classification: normalized.classification || null,
+                    url: normalized.url || null,
+                    status: normalized.status || null,
+                    figures: normalized.figures
+                }
+            });
+        }).catch((error: any) => {
+            fastify.log.warn(`Falha ao persistir resultado de busca no banco: ${error.message}`);
+        });
+    }
+}
+
+async function searchQuickSearchCache(filters: {
+    number?: string;
+    titular?: string;
+    inventor?: string;
+    keywords?: string;
+}): Promise<any[]> {
+    const normalizedNumber = normalizeStringField(filters.number);
+    const normalizedTitular = normalizeStringField(filters.titular);
+    const normalizedInventor = normalizeStringField(filters.inventor);
+    const keywordTokens = normalizeText(filters.keywords)
+        .split(' ')
+        .filter((token) => token.length >= 3);
+
+    const andClauses: any[] = [];
+    if (normalizedNumber) andClauses.push({ publication_number: { contains: normalizedNumber, mode: 'insensitive' } });
+    if (normalizedTitular) andClauses.push({ applicant: { contains: normalizedTitular, mode: 'insensitive' } });
+    if (normalizedInventor) andClauses.push({ inventor: { contains: normalizedInventor, mode: 'insensitive' } });
+    for (const token of keywordTokens) {
+        andClauses.push({
+            OR: [
+                { title: { contains: token, mode: 'insensitive' } },
+                { abstract: { contains: token, mode: 'insensitive' } },
+                { classification: { contains: token, mode: 'insensitive' } },
+                { applicant: { contains: token, mode: 'insensitive' } },
+                { inventor: { contains: token, mode: 'insensitive' } },
+                { publication_number: { contains: token, mode: 'insensitive' } }
+            ]
+        });
+    }
+
+    try {
+        const rows = await prismaAny.searchResultCache.findMany({
+            where: andClauses.length ? { AND: andClauses } : undefined,
+            orderBy: { updated_at: 'desc' },
+            take: 200
+        });
+        return rows.map(mapDbCacheRowToPatent);
+    } catch (error: any) {
+        fastify.log.warn(`Falha ao buscar cache de patentes no banco: ${error.message}`);
+        return [];
+    }
+}
+
+function mergePatentLists(base: any[], incoming: any[]): any[] {
+    const merged = new Map<string, CachedPatentRecord>();
+    const applyRecord = (record: any) => {
+        const normalized = normalizePatentRecord(record);
+        if (!normalized) return;
+        const key = getCachedPatentKey(normalized.source, normalized.publicationNumber);
+        const existing = merged.get(key);
+        merged.set(key, existing ? mergePatentRecord(existing, normalized) : normalized);
+    };
+
+    base.forEach(applyRecord);
+    incoming.forEach(applyRecord);
+
+    return Array.from(merged.values()).map(mapRecordToApiPatent);
+}
+
 async function getOpsToken(): Promise<string> {
     if (opsAccessToken && Date.now() < opsTokenExpiration) {
         return opsAccessToken;
@@ -793,6 +1021,7 @@ fastify.post('/search/inpi', async (request, reply) => {
 
     try {
         const results = await scrapeInpiBuscaWeb(keywords, ipc_codes);
+        enqueueSearchResultsPersistence(results);
         return { results, total: results.length };
     } catch (error: any) {
         request.log.error(error);
@@ -990,29 +1219,19 @@ function extractInpiFigureUrls(html: string): string[] {
     return Array.from(figures).slice(0, 20);
 }
 
-// ─── GET /search/inpi/detail/:codPedido ────────────────────────
-fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
-    const { codPedido } = request.params as { codPedido: string };
-    if (!codPedido) return reply.code(400).send({ error: 'CodPedido é obrigatório' });
-
+async function fetchInpiDetailByCod(codPedido: string): Promise<any> {
     const cookieFile = `/tmp/inpi_detail_${randomUUID()}.txt`;
     try {
-        // Login anônimo
         await execAsync(`curl -s -c ${cookieFile} -L 'https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login' -o /dev/null`, { timeout: 15000 });
-
-        // Buscar página de detalhe
         const { stdout } = await inpiQueue.enqueue(() => execAsync(
             `curl -s -b ${cookieFile} 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${codPedido}' | iconv -f ISO-8859-1 -t UTF-8`,
             { timeout: 30000, maxBuffer: 5 * 1024 * 1024 }
         ));
         const html = stdout;
-
         try { execSync(`rm -f ${cookieFile}`); } catch { }
 
         const $ = cheerio.load(html);
         const detail: Record<string, any> = {};
-
-        // INPI detail page has <td> with labels followed by <td> with values
         $('table tr').each((_, row) => {
             const cells = $(row).find('td');
             if (cells.length >= 2) {
@@ -1029,7 +1248,6 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
             }
         });
 
-        // Also try to extract abstract from specific div if exists
         const resumoDiv = $('div.resumo, #resumo, .abstract').text().trim();
         if (resumoDiv && !detail.abstract) detail.abstract = resumoDiv;
         detail.figures = extractInpiFigureUrls(html);
@@ -1042,8 +1260,148 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
         };
     } catch (error: any) {
         try { execSync(`rm -f ${cookieFile}`); } catch { }
+        throw error;
+    }
+}
+
+const ALLOWED_PATENT_DOCUMENT_HOSTS = [
+    'busca.inpi.gov.br',
+    'worldwide.espacenet.com',
+    'ops.epo.org',
+    'register.epo.org'
+];
+
+function isAllowedPatentDocumentUrl(value: string): boolean {
+    try {
+        const parsed = new URL(value);
+        if (!['http:', 'https:'].includes(parsed.protocol)) return false;
+        return ALLOWED_PATENT_DOCUMENT_HOSTS.some((host) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`));
+    } catch {
+        return false;
+    }
+}
+
+function extractPdfCandidatesFromHtml(html: string, baseUrl: string): string[] {
+    const $ = cheerio.load(html);
+    const candidates = new Set<string>();
+
+    const addCandidate = (rawValue?: string) => {
+        if (!rawValue) return;
+        try {
+            const normalized = new URL(rawValue.trim(), baseUrl).toString();
+            if (!isAllowedPatentDocumentUrl(normalized)) return;
+            const lower = normalized.toLowerCase();
+            if (!lower.includes('.pdf') && !lower.includes('pdf')) return;
+            candidates.add(normalized);
+        } catch {
+            return;
+        }
+    };
+
+    $('a[href], iframe[src], embed[src], object[data]').each((_, el) => {
+        addCandidate($(el).attr('href'));
+        addCandidate($(el).attr('src'));
+        addCandidate($(el).attr('data'));
+    });
+
+    return Array.from(candidates).slice(0, 20);
+}
+
+function getFilenameFromHeaders(contentDisposition: string | undefined, fallback: string): string {
+    if (!contentDisposition) return fallback;
+    const utfMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utfMatch?.[1]) return decodeURIComponent(utfMatch[1]);
+    const standardMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
+    if (standardMatch?.[1]) return standardMatch[1];
+    return fallback;
+}
+
+async function fetchPatentPdf(url: string, fallbackName: string): Promise<{ buffer: Buffer; filename: string }> {
+    if (!isAllowedPatentDocumentUrl(url)) {
+        throw new Error('URL de documento não permitida');
+    }
+
+    const initialResponse = await axios.get(url, {
+        responseType: 'arraybuffer',
+        timeout: 30000,
+        maxRedirects: 5,
+        headers: {
+            'User-Agent': 'Mozilla/5.0',
+            'Accept': 'application/pdf,text/html;q=0.9,*/*;q=0.8'
+        },
+        validateStatus: (status) => status >= 200 && status < 400
+    });
+
+    const initialContentType = String(initialResponse.headers['content-type'] || '').toLowerCase();
+    const initialContentDisposition = initialResponse.headers['content-disposition'] as string | undefined;
+    if (initialContentType.includes('application/pdf')) {
+        return {
+            buffer: Buffer.from(initialResponse.data),
+            filename: getFilenameFromHeaders(initialContentDisposition, fallbackName)
+        };
+    }
+
+    const finalUrl = (initialResponse.request?.res?.responseUrl as string | undefined) || url;
+    const html = Buffer.isBuffer(initialResponse.data)
+        ? initialResponse.data.toString('utf8')
+        : String(initialResponse.data || '');
+
+    const candidates = extractPdfCandidatesFromHtml(html, finalUrl);
+    for (const candidate of candidates) {
+        const pdfResponse = await axios.get(candidate, {
+            responseType: 'arraybuffer',
+            timeout: 30000,
+            maxRedirects: 5,
+            headers: {
+                'User-Agent': 'Mozilla/5.0',
+                'Accept': 'application/pdf,*/*;q=0.8'
+            },
+            validateStatus: (status) => status >= 200 && status < 400
+        });
+        const contentType = String(pdfResponse.headers['content-type'] || '').toLowerCase();
+        const contentDisposition = pdfResponse.headers['content-disposition'] as string | undefined;
+        if (!contentType.includes('application/pdf')) continue;
+        return {
+            buffer: Buffer.from(pdfResponse.data),
+            filename: getFilenameFromHeaders(contentDisposition, fallbackName)
+        };
+    }
+
+    throw new Error('PDF não encontrado para o documento solicitado');
+}
+
+// ─── GET /search/inpi/detail/:codPedido ────────────────────────
+fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
+    const { codPedido } = request.params as { codPedido: string };
+    if (!codPedido) return reply.code(400).send({ error: 'CodPedido é obrigatório' });
+    try {
+        const detail = await fetchInpiDetailByCod(codPedido);
+        return detail;
+    } catch (error: any) {
         fastify.log.warn(`INPI detail scrape failed: ${error.message}`);
         return reply.code(500).send({ error: 'Falha ao buscar detalhe da patente', details: error.message });
+    }
+});
+
+fastify.get('/patent/document', async (request, reply) => {
+    const { url, publicationNumber } = request.query as {
+        url?: string;
+        publicationNumber?: string;
+    };
+
+    if (!url) {
+        return reply.code(400).send({ error: 'Parâmetro url é obrigatório' });
+    }
+
+    const fallbackName = `${(publicationNumber || 'patente').replace(/[^\w.-]/g, '_')}.pdf`;
+    try {
+        const { buffer, filename } = await fetchPatentPdf(url, fallbackName);
+        reply.header('Content-Type', 'application/pdf');
+        reply.header('Content-Disposition', `inline; filename="${filename}"`);
+        return reply.send(buffer);
+    } catch (error: any) {
+        fastify.log.warn(`Patent document fetch failed: ${error.message}`);
+        return reply.code(404).send({ error: 'Não foi possível localizar PDF para esta patente' });
     }
 });
 
@@ -1060,18 +1418,21 @@ fastify.post('/search/quick', async (request, reply) => {
         return reply.code(400).send({ error: 'Informe pelo menos um critério de busca' });
     }
 
-    const inpiResults: any[] = [];
-    const espacenetResults: any[] = [];
+    const cachedResults = await searchQuickSearchCache({ number, titular, inventor, keywords });
+    let inpiResults: any[] = cachedResults.filter((item: any) => item.source === 'INPI');
+    let espacenetResults: any[] = cachedResults.filter((item: any) => item.source === 'Espacenet');
 
-    // 1. Search INPI via advanced search (POST with session)
+    const fetchedInpiResults: any[] = [];
+    const fetchedEspacenetResults: any[] = [];
+
     try {
         const inpi = await inpiQueue.enqueue(() => searchInpiViaCurl({ number, titular, inventor, keywords }));
-        inpiResults.push(...inpi);
+        fetchedInpiResults.push(...inpi);
+        enqueueSearchResultsPersistence(inpi);
     } catch (err: any) {
         fastify.log.warn(`Quick search INPI failed: ${err.message}`);
     }
 
-    // 2. Search Espacenet if OPS keys are configured
     if (OPS_CONSUMER_KEY && OPS_CONSUMER_SECRET) {
         try {
             const cqlParts: string[] = [];
@@ -1091,13 +1452,17 @@ fastify.post('/search/quick', async (request, reply) => {
 
             const opsResults = parseOpsResponse(response.data);
             const translatedOps = await translatePatentsToPortuguese(opsResults);
-            espacenetResults.push(...translatedOps);
+            fetchedEspacenetResults.push(...translatedOps);
+            enqueueSearchResultsPersistence(translatedOps);
         } catch (err: any) {
             if (err.response?.status !== 404) {
                 fastify.log.warn(`Quick search Espacenet failed: ${err.message}`);
             }
         }
     }
+
+    inpiResults = mergePatentLists(inpiResults, fetchedInpiResults);
+    espacenetResults = mergePatentLists(espacenetResults, fetchedEspacenetResults);
 
     return {
         inpi: inpiResults,
@@ -1152,11 +1517,13 @@ fastify.post('/search', async (request, reply) => {
 
     if (espacenetResult.status === 'fulfilled') {
         results.espacenet = espacenetResult.value;
+        enqueueSearchResultsPersistence(results.espacenet);
     } else {
         fastify.log.error(`Espacenet search FAILED: ${espacenetResult.reason?.message || espacenetResult.reason}`);
     }
     if (inpiResult.status === 'fulfilled') {
         results.inpi = inpiResult.value;
+        enqueueSearchResultsPersistence(results.inpi);
     } else {
         fastify.log.error(`INPI search FAILED: ${inpiResult.reason?.message || inpiResult.reason}`);
     }

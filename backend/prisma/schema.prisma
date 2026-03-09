@@ -67,3 +67,23 @@ model CollisionAlert {
   is_read     Boolean  @default(false)
   created_at  DateTime @default(now())
 }
+
+model SearchResultCache {
+  id                 String   @id @default(uuid())
+  source             String
+  publication_number String
+  title              String?
+  applicant          String?
+  inventor           String?
+  patent_date        String?
+  abstract           String?
+  classification     String?
+  url                String?
+  status             String?
+  figures            Json?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  @@unique([source, publication_number])
+  @@index([publication_number])
+}
