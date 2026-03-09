@@ -1223,9 +1223,8 @@ function extractInpiFigureUrls(html: string): string[] {
     return Array.from(figures).slice(0, 20);
 }
 
-async function fetchInpiDetailByCod(codPedido: string, preferredUrl?: string): Promise<any> {
+async function fetchInpiDetailByCod(codPedido: string): Promise<any> {
     const cookieFile = `/tmp/inpi_detail_${randomUUID()}.txt`;
-    const cleanedPreferredUrl = normalizeStringField(preferredUrl)?.replace(/^`+|`+$/g, '').trim();
     const defaultUrl = `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${encodeURIComponent(codPedido)}`;
     const fetchHtml = async (targetUrl: string): Promise<string> => {
         const encodedUrl = targetUrl.replace(/'/g, `%27`);
@@ -1272,10 +1271,10 @@ async function fetchInpiDetailByCod(codPedido: string, preferredUrl?: string): P
 
     try {
         await execAsync(`curl -s -c ${cookieFile} -L 'https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login' -o /dev/null`, { timeout: 15000 });
-        let html = await fetchHtml(cleanedPreferredUrl || defaultUrl);
+        let html = await fetchHtml(defaultUrl);
         if (!html.trim() || isLoginHtml(html)) {
             const discoveredUrl = await lookupDetailUrlByCod();
-            if (discoveredUrl) {
+            if (discoveredUrl && discoveredUrl !== defaultUrl) {
                 html = await fetchHtml(discoveredUrl);
             }
         }
@@ -1284,7 +1283,7 @@ async function fetchInpiDetailByCod(codPedido: string, preferredUrl?: string): P
             return {
                 codPedido,
                 source: 'INPI',
-                url: cleanedPreferredUrl || defaultUrl,
+                url: defaultUrl,
                 figures: []
             };
         }
@@ -1294,7 +1293,7 @@ async function fetchInpiDetailByCod(codPedido: string, preferredUrl?: string): P
             return {
                 codPedido,
                 source: 'INPI',
-                url: cleanedPreferredUrl || defaultUrl,
+                url: defaultUrl,
                 figures: []
             };
         }
@@ -1421,10 +1420,9 @@ async function fetchPatentPdf(url: string, fallbackName: string): Promise<{ buff
 // ─── GET /search/inpi/detail/:codPedido ────────────────────────
 fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
     const { codPedido } = request.params as { codPedido: string };
-    const { detailUrl } = request.query as { detailUrl?: string };
     if (!codPedido) return reply.code(400).send({ error: 'CodPedido é obrigatório' });
     try {
-        const detail = await fetchInpiDetailByCod(codPedido, detailUrl);
+        const detail = await fetchInpiDetailByCod(codPedido);
         return detail;
     } catch (error: any) {
         fastify.log.warn(`INPI detail scrape failed: ${error.message}`);
