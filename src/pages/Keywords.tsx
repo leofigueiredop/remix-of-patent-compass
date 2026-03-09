@@ -73,13 +73,29 @@ function buildSearchLevelsFromBlocks(blocks: StrategyBlock[], classifications: s
   // INPI: only OR is reliable. AND+parentheses causes timeouts.
   // So we just OR together the best Portuguese terms from the selected blocks.
   const buildInpi = (bks: StrategyBlock[], maxTerms = 8): string => {
-    const allTerms = bks.flatMap(block =>
+    const ptTerms = bks.flatMap(block =>
       block.groups.flatMap(g => (g.terms_pt || [])).filter((t: string) => t && t.trim() !== '')
     );
-    // Prefer shorter terms for recall
-    const sorted = [...allTerms].sort((a, b) => a.length - b.length);
+    const enTerms = bks.flatMap(block =>
+      block.groups.flatMap(g => (g.terms_en || [])).filter((t: string) => t && t.trim() !== '')
+    );
+    const all: string[] = [];
+    const seen = new Set<string>();
+    const pushUnique = (term: string) => {
+      const key = term.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      all.push(term);
+    };
+    ptTerms.forEach(pushUnique);
+    enTerms.forEach(pushUnique);
+    if (all.length === 0) return '';
+    const sorted = [...all].sort((a, b) => {
+      const aSingle = a.includes(' ') ? 1 : 0;
+      const bSingle = b.includes(' ') ? 1 : 0;
+      return aSingle - bSingle || a.length - b.length;
+    });
     const limited = sorted.slice(0, maxTerms);
-    if (limited.length === 0) return '';
     return limited.map(t => t.includes(' ') ? `"${t}"` : t).join(' OR ');
   };
 
@@ -345,12 +361,28 @@ export default function Keywords() {
   // INPI Titulo field only supports OR reliably. AND+parentheses causes timeouts.
   // So we flatten all terms from all blocks into a single OR query.
   const getInpiQuery = (): string => {
-    const allTerms = blocks.flatMap(block =>
+    const ptTerms = blocks.flatMap(block =>
       block.groups.flatMap(g => (g.terms_pt || [])).filter(t => t && t.trim() !== "")
     );
-    if (allTerms.length === 0) return "";
-    // Prefer shorter terms first, limit to ~15 for reliability
-    const sorted = [...allTerms].sort((a, b) => a.length - b.length);
+    const enTerms = blocks.flatMap(block =>
+      block.groups.flatMap(g => (g.terms_en || [])).filter(t => t && t.trim() !== "")
+    );
+    const all: string[] = [];
+    const seen = new Set<string>();
+    const pushUnique = (term: string) => {
+      const key = term.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      all.push(term);
+    };
+    ptTerms.forEach(pushUnique);
+    enTerms.forEach(pushUnique);
+    if (all.length === 0) return "";
+    const sorted = [...all].sort((a, b) => {
+      const aSingle = a.includes(' ') ? 1 : 0;
+      const bSingle = b.includes(' ') ? 1 : 0;
+      return aSingle - bSingle || a.length - b.length;
+    });
     const limited = sorted.slice(0, 15);
     return limited.map(t => t.includes(' ') ? `"${t}"` : t).join(" OR ");
   };

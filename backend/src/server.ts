@@ -612,7 +612,26 @@ function formatBriefingForPrompt(briefing: any): string {
     return parts.join('\n\n');
 }
 
-// Post-process and validate strategy output from LLM
+function normalizeStrategyTerms(raw: any): string[] {
+    const seen = new Set<string>();
+    const terms: string[] = [];
+    if (!Array.isArray(raw)) return terms;
+    for (const item of raw) {
+        if (typeof item !== 'string') continue;
+        let t = item.trim();
+        if (!t) continue;
+        t = t.replace(/^[\"'“”«»]+|[\"'“”«»]+$/g, '').replace(/\s+/g, ' ');
+        const upper = t.toUpperCase();
+        if (upper === 'AND' || upper === 'OR' || upper === 'NOT' || upper === 'E' || upper === 'OU' || upper === 'NÃO' || upper === 'NAO') continue;
+        if (t.length < 3 || t.length > 60) continue;
+        const key = t.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        terms.push(t);
+    }
+    return terms;
+}
+
 function validateAndFixStrategy(parsed: any): any {
     // Ensure required fields exist
     if (!parsed.techBlocks) parsed.techBlocks = [];
@@ -621,15 +640,22 @@ function validateAndFixStrategy(parsed: any): any {
     if (!parsed.ipc_codes) parsed.ipc_codes = [];
 
     // Fix blocks: ensure each has id, connector, and groups
-    parsed.blocks = parsed.blocks.map((b: any, i: number) => ({
-        id: b.id || `b${i + 1}`,
-        connector: b.connector || 'AND',
-        groups: (b.groups || []).map((g: any, j: number) => ({
-            id: g.id || `g${i + 1}-${j + 1}`,
-            terms_pt: (g.terms_pt || g.termsPt || g.terms_PT || g.terms || []).filter((t: any) => typeof t === 'string' && t.trim() !== ''),
-            terms_en: (g.terms_en || g.termsEn || g.terms_EN || []).filter((t: any) => typeof t === 'string' && t.trim() !== '')
-        })).filter((g: any) => g.terms_pt.length > 0 || g.terms_en.length > 0)
-    })).filter((b: any) => b.groups.length > 0);
+    parsed.blocks = parsed.blocks.map((b: any, i: number) => {
+        const groups = (b.groups || []).map((g: any, j: number) => {
+            const termsPt = normalizeStrategyTerms(g.terms_pt || g.termsPt || g.terms_PT || g.terms || []);
+            const termsEn = normalizeStrategyTerms(g.terms_en || g.termsEn || g.terms_EN || []);
+            return {
+                id: g.id || `g${i + 1}-${j + 1}`,
+                terms_pt: termsPt,
+                terms_en: termsEn
+            };
+        }).filter((g: any) => g.terms_pt.length > 0 || g.terms_en.length > 0);
+        return {
+            id: b.id || `b${i + 1}`,
+            connector: b.connector || 'AND',
+            groups
+        };
+    }).filter((b: any) => b.groups.length > 0);
 
     // Fix searchLevels: validate CQL syntax and enforce character limits
     parsed.searchLevels = parsed.searchLevels.map((lvl: any) => {
