@@ -1135,6 +1135,40 @@ async function initializeInpiAnonymousSession(cookieFile: string): Promise<void>
     }
 }
 
+async function fetchPatentDetailViaCurl(cookieFile: string, detailUrl: string): Promise<Partial<any>> {
+    try {
+        // fastify.log.info(`Fetching detail: ${detailUrl}`);
+        const { stdout } = await execAsync(
+            `curl -s -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} '${detailUrl}' | iconv -f ISO-8859-1 -t UTF-8`,
+            { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }
+        );
+        const $ = cheerio.load(stdout);
+        
+        const extract = (label: string) => {
+            // Find td containing the label, then get the next td's text
+            // Note: The label might be in a font tag inside the td
+            return $('td').filter((_, el) => $(el).text().includes(label)).first().next().text().replace(/\s+/g, ' ').trim();
+        };
+
+        const applicant = extract('Nome do Depositante:');
+        const inventor = extract('Nome do Inventor:');
+        const title = extract('Título:');
+        const abstract = extract('Resumo:');
+
+        // fastify.log.info(`Extracted for ${detailUrl}: applicant="${applicant}" inventor="${inventor}"`);
+
+        return {
+            applicant,
+            inventor,
+            title,
+            abstract
+        };
+    } catch (error: any) {
+        console.error(`Error fetching detail for ${detailUrl}:`, error.message);
+        return {};
+    }
+}
+
 async function searchInpiViaCurl(params: {
     number?: string;
     titular?: string;
@@ -1185,16 +1219,45 @@ async function searchInpiViaCurl(params: {
             { timeout: 120000, maxBuffer: 50 * 1024 * 1024 }
         );
 
-        try { fs.unlinkSync(cookieFile); } catch { }
+        // Don't delete cookies yet - needed for details
         try { fs.unlinkSync(payloadFile); } catch { }
 
         const results = parseInpiResults(stdout);
+        
         if (results.length === 0) {
             const debugFile = `/tmp/inpi_debug_fail_${randomUUID()}.html`;
             fs.writeFileSync(debugFile, stdout);
             fastify.log.warn(`INPI search returned 0 results. Saved HTML to ${debugFile}`);
             if (stderr) fastify.log.warn(`INPI curl stderr: ${stderr}`);
+        } else {
+            // Enrich results with details
+            fastify.log.info(`Enriching ${results.length} results with details...`);
+            
+            // Process in batches of 10
+            const batchSize = 10;
+            for (let i = 0; i < results.length; i += batchSize) {
+                const batch = results.slice(i, i + batchSize);
+                fastify.log.info(`Processing batch ${i/batchSize + 1} of ${Math.ceil(results.length/batchSize)}`);
+                await Promise.all(batch.map(async (result) => {
+                    if (result.url) {
+                        try {
+                            const details = await fetchPatentDetailViaCurl(cookieFile, result.url);
+                            if (details.applicant) result.applicant = details.applicant;
+                            if (details.inventor) result.inventor = details.inventor;
+                            // Only overwrite title/abstract if they are empty or placeholder
+                            if (details.title && (result.title === '(Sem título)' || !result.title)) {
+                                result.title = details.title;
+                            }
+                            if (details.abstract && !result.abstract) result.abstract = details.abstract;
+                        } catch (detailErr: any) {
+                            fastify.log.error(`Failed to enrich detail for ${result.url}: ${detailErr.message}`);
+                        }
+                    }
+                }));
+            }
         }
+
+        try { fs.unlinkSync(cookieFile); } catch { }
         return results;
     } catch (error: any) {
         try { fs.unlinkSync(cookieFile); } catch { }
