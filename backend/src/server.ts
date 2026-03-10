@@ -572,7 +572,13 @@ ${text.substring(0, 15000)}`;
 
     try {
         const raw = await generateWithGemini(prompt, true);
-        const parsed = JSON.parse(raw);
+        let parsed;
+        try {
+            parsed = JSON.parse(raw);
+        } catch (e) {
+            const match = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+            parsed = JSON.parse(match ? match[1] : raw);
+        }
         return parsed;
     } catch (error: any) {
         request.log.error(error);
@@ -1037,7 +1043,13 @@ Se o texto já estiver em português, retorne-o sem alteração. Se o resumo est
 
         try {
             const raw = await generateWithGemini(prompt, true);
-            const parsed = JSON.parse(raw);
+            let parsed;
+            try {
+                parsed = JSON.parse(raw);
+            } catch (e) {
+                const match = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+                parsed = JSON.parse(match ? match[1] : raw);
+            }
             const translations = Array.isArray(parsed) ? parsed : (parsed.translations || parsed.results || []);
 
             translations.forEach((t: any, idx: number) => {
@@ -1177,7 +1189,7 @@ async function initializeInpiAnonymousSession(cookieFile: string): Promise<void>
     const payloadFileFallback = `/tmp/inpi_login_fallback_${randomUUID()}.txt`;
     const loginUrl = 'https://busca.inpi.gov.br/pePI/servlet/LoginController';
     const debugLog = `/tmp/inpi_init_${randomUUID()}.log`;
-    
+
     fs.writeFileSync(debugLog, `Init session start for ${cookieFile}\n`);
 
     try {
@@ -1223,7 +1235,7 @@ async function fetchPatentDetailViaCurl(cookieFile: string, detailUrl: string): 
             10 * 1024 * 1024
         );
         const $ = cheerio.load(stdout);
-        
+
         const extract = (label: string) => {
             // Find td containing the label, then get the next td's text
             // Note: The label might be in a font tag inside the td
@@ -1377,29 +1389,39 @@ async function searchInpiViaCurl(params: {
             const totalPages = Math.min(Math.ceil(reportedTotal / perPageFromHtml), maxPages);
             fastify.log.info(`INPI: fetching up to ${totalPages} pages (~${targetTotal} results)`);
 
-            for (let page = 2; page <= totalPages; page++) {
+            const pagesToFetch = Array.from({ length: totalPages - 1 }, (_, i) => i + 2);
+            const batchSize = 3;
+
+            for (let i = 0; i < pagesToFetch.length; i += batchSize) {
                 if (results.length >= targetTotal) break;
-                const pageUrl = `${baseNextPageUrl}&Page=${page}&Resumo=&Titulo=`;
-                try {
-                    const { stdout: pageHtml } = await execAsync(
-                        `curl -s -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} '${pageUrl}' | iconv -f ISO-8859-1 -t UTF-8`,
-                        { timeout: 120000, maxBuffer: 50 * 1024 * 1024 }
-                    );
-                    const pageResults = parseInpiResults(pageHtml);
-                    for (const item of pageResults) {
-                        if (results.length >= targetTotal) break;
-                        const already = results.some((r) =>
-                            r.publicationNumber === item.publicationNumber &&
-                            r.source === item.source
+                const batch = pagesToFetch.slice(i, i + batchSize);
+                fastify.log.info(`Fetching INPI pages batch: ${batch.join(', ')}`);
+
+                await Promise.all(batch.map(async (page) => {
+                    if (results.length >= targetTotal) return;
+                    const pageUrl = `${baseNextPageUrl}&Page=${page}&Resumo=&Titulo=`;
+                    try {
+                        const { stdout: pageHtml } = await execInpiCurlWithRetry(
+                            `curl -s -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} '${pageUrl}' | iconv -f ISO-8859-1 -t UTF-8`,
+                            2, // max retries
+                            25000,
+                            50 * 1024 * 1024
                         );
-                        if (!already) {
-                            results.push(item);
+                        const pageTempResults = parseInpiResults(pageHtml);
+                        for (const item of pageTempResults) {
+                            if (results.length >= targetTotal) break;
+                            const already = results.some((r: any) =>
+                                r.publicationNumber === item.publicationNumber &&
+                                r.source === item.source
+                            );
+                            if (!already) {
+                                results.push(item);
+                            }
                         }
+                    } catch (pageErr: any) {
+                        fastify.log.warn(`INPI nextPage fetch failed for Page=${page}: ${pageErr.message}`);
                     }
-                } catch (pageErr: any) {
-                    fastify.log.warn(`INPI nextPage fetch failed for Page=${page}: ${pageErr.message}`);
-                    break;
-                }
+                }));
             }
         }
 
@@ -1417,10 +1439,10 @@ async function searchInpiViaCurl(params: {
         } else if (params.enrichDetails !== false) {
             const enrichLimit = typeof params.enrichLimit === 'number' && params.enrichLimit > 0
                 ? Math.min(params.enrichLimit, results.length)
-                : results.length;
+                : Math.min(results.length, 50); // Hard limit to 50 if not specified to avoid timeouts
             const targetResults = results.slice(0, enrichLimit);
             fastify.log.info(`Enriching ${targetResults.length} of ${results.length} INPI results with details...`);
-            const batchSize = 10;
+            const batchSize = 5; // Reduced from 10 to 5 to protect INPI session limits
             for (let i = 0; i < targetResults.length; i += batchSize) {
                 const batch = targetResults.slice(i, i + batchSize);
                 fastify.log.info(`Processing batch ${i / batchSize + 1} of ${Math.ceil(targetResults.length / batchSize)}`);
@@ -1447,10 +1469,10 @@ async function searchInpiViaCurl(params: {
     } catch (error: any) {
         try { fs.unlinkSync(cookieFile); } catch { }
         try { fs.unlinkSync(payloadFile); } catch { }
-        
+
         const errorLogFile = `/tmp/inpi_error_${randomUUID()}.txt`;
         fs.writeFileSync(errorLogFile, `Error: ${error.message}\nStderr: ${error.stderr || ''}\nStack: ${error.stack}`);
-        
+
         fastify.log.warn(`INPI curl search failed: ${error.message}. Log saved to ${errorLogFile}`);
         if (error.stderr) fastify.log.warn(`INPI curl stderr (error): ${error.stderr}`);
         return [];
@@ -1890,7 +1912,7 @@ fastify.get('/patent/document/translation', async (request, reply) => {
         };
     } catch (error: any) {
         fastify.log.warn(`Patent document translation failed (PDF): ${error.message}`);
-        
+
         // Fallback: Try to fetch full text from OPS if publicationNumber is available
         if (publicationNumber) {
             try {
@@ -1934,7 +1956,7 @@ async function fetchFullTextFromOps(publicationNumber: string): Promise<string |
 function extractTextFromOpsXml(xml: string): string {
     const $ = cheerio.load(xml, { xmlMode: true });
     let text = '';
-    
+
     // Extract description
     const description = $('description').text();
     if (description) {
@@ -2189,7 +2211,13 @@ Responda um JSON com array "results" contendo EXATAMENTE ${batch.length} objetos
 
             try {
                 const raw = await generateWithGemini(prompt, true);
-                const parsed = JSON.parse(raw);
+                let parsed;
+                try {
+                    parsed = JSON.parse(raw);
+                } catch (e) {
+                    const match = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+                    parsed = JSON.parse(match ? match[1] : raw);
+                }
                 const results = parsed.results || parsed.patents || [];
 
                 batch.forEach((patent: any, idx: number) => {
@@ -2234,7 +2262,7 @@ const start = async () => {
     try {
         const startupLog = `/tmp/server_startup.log`;
         fs.writeFileSync(startupLog, `Server starting at ${new Date().toISOString()} with PID ${process.pid}\n`);
-        
+
         await fastify.listen({ port: Number(process.env.PORT) || 3000, host: '0.0.0.0' });
     } catch (err) {
         fastify.log.error(err);

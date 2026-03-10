@@ -357,34 +357,43 @@ export default function Keywords() {
     return `${query}${classQuery}`;
   };
 
-  // Build INPI boolean string from blocks
-  // INPI Titulo field only supports OR reliably. AND+parentheses causes timeouts.
-  // So we flatten all terms from all blocks into a single OR query.
   const getInpiQuery = (): string => {
-    const ptTerms = blocks.flatMap(block =>
-      block.groups.flatMap(g => (g.terms_pt || [])).filter(t => t && t.trim() !== "")
-    );
-    const enTerms = blocks.flatMap(block =>
-      block.groups.flatMap(g => (g.terms_en || [])).filter(t => t && t.trim() !== "")
-    );
-    const all: string[] = [];
-    const seen = new Set<string>();
-    const pushUnique = (term: string) => {
-      const key = term.toLowerCase();
-      if (seen.has(key)) return;
-      seen.add(key);
-      all.push(term);
-    };
-    ptTerms.forEach(pushUnique);
-    enTerms.forEach(pushUnique);
-    if (all.length === 0) return "";
-    const sorted = [...all].sort((a, b) => {
-      const aSingle = a.includes(' ') ? 1 : 0;
-      const bSingle = b.includes(' ') ? 1 : 0;
-      return aSingle - bSingle || a.length - b.length;
-    });
-    const limited = sorted.slice(0, 15);
-    return limited.map(t => t.includes(' ') ? `"${t}"` : t).join(" OR ");
+    const blockQueries = blocks.map(block => {
+      const groupQueries = block.groups
+        .map(g => {
+          const terms = (g.terms_pt || []).filter(t => t && t.trim() !== "");
+          if (terms.length === 0) return "";
+          return `(${terms.map(t => t.includes(' ') ? `"${t}"` : t).join(" OR ")})`;
+        })
+        .filter(q => q !== "");
+
+      if (groupQueries.length === 0) return "";
+      return `(${groupQueries.join(" AND ")})`;
+    }).filter(q => q !== "");
+
+    if (blockQueries.length === 0) return "";
+
+    let query = blockQueries[0];
+    for (let i = 1; i < blockQueries.length; i++) {
+      query = `${query} ${blocks[i - 1].connector} ${blockQueries[i]}`;
+    }
+
+    // Apply sane limit if it gets too colossal
+    if (query.length > 350) {
+      const reduced = blocks.map(block => {
+        const terms = block.groups.flatMap(g => g.terms_pt || []).filter(t => t && t.trim() !== "");
+        const sorted = [...terms].sort((a, b) => a.length - b.length).slice(0, 4);
+        if (sorted.length === 0) return "";
+        return `(${sorted.map(t => t.includes(' ') ? `"${t}"` : t).join(" OR ")})`;
+      }).filter(q => q !== "");
+
+      query = reduced.length > 0 ? reduced[0] : "";
+      for (let i = 1; i < reduced.length; i++) {
+        query = `${query} AND ${reduced[i]}`;
+      }
+    }
+
+    return query;
   };
 
   const getActiveCql = (): string => {
