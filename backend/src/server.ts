@@ -1145,12 +1145,12 @@ function parseInpiResults(html: string): any[] {
         const classificationByPattern = cellTexts.find((text) => /^[A-H]\d{2}[A-Z]/i.test(text)) || '';
         const classification = classificationByCell || classificationByPattern;
 
-        const isSecret = /sigilo|aguardando\s+publica/i.test(title) || /sigilo|aguardando\s+publica/i.test(classification);
+        const isSecret = !title || /sigilo|aguardando\s+publica/i.test(title) || /sigilo|aguardando\s+publica/i.test(classification);
 
         if (number) {
             results.push({
                 publicationNumber: number,
-                title: title || (isSecret ? 'Mantido em sigilo' : '(Sem título)'),
+                title: title || 'Mantido em sigilo',
                 applicant: '',
                 date,
                 abstract: '',
