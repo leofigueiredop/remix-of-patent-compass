@@ -1281,12 +1281,15 @@ async function searchInpiViaCurl(params: {
     enrichDetails?: boolean;
     enrichLimit?: number;
     ignoreSecret?: boolean;
+    cookieFile?: string;
 }): Promise<any[]> {
-    const cookieFile = `/tmp/inpi_${randomUUID()}.txt`;
+    const cookieFile = params.cookieFile || `/tmp/inpi_${randomUUID()}.txt`;
     const payloadFile = `/tmp/inpi_payload_${randomUUID()}.txt`;
 
     try {
-        await initializeInpiAnonymousSession(cookieFile);
+        if (!params.cookieFile) {
+            await initializeInpiAnonymousSession(cookieFile);
+        }
 
         const requestedPage = typeof params.page === 'number' && params.page > 0 ? Math.floor(params.page) : 1;
         const requestedPageSize = typeof params.pageSize === 'number' && params.pageSize > 0
@@ -1633,25 +1636,17 @@ async function fetchInpiDetailByCod(codPedido: string, publicationNumber?: strin
         return detail;
     };
 
-    const lookupDetailUrlByCod = async (): Promise<string | null> => {
-        const list = await searchInpiViaCurl({ keywords: codPedido, resumo: codPedido });
-        const match = list.find((item: any) => typeof item?.url === 'string' && item.url.includes(`CodPedido=${codPedido}`));
-        return match?.url || null;
-    };
-
     try {
         await initializeInpiAnonymousSession(cookieFile);
-        let html = await fetchHtml(defaultUrl);
-        if (!html.trim() || isLoginHtml(html)) {
-            const discoveredUrl = await lookupDetailUrlByCod();
-            if (discoveredUrl && discoveredUrl !== defaultUrl) {
-                html = await fetchHtml(discoveredUrl);
-            }
-        }
-        if (!html.trim() || isLoginHtml(html)) {
-            await initializeInpiAnonymousSession(cookieFile);
-            html = await fetchHtml(defaultUrl);
-        }
+
+        // INPI drops HTTP connections (returning 0 bytes) or redirects to login if the session hasn't performed a search first.
+        const list = await searchInpiViaCurl({ number: codPedido, cookieFile });
+        const match = list.find((item: any) => typeof item?.url === 'string' && item.url.includes(`CodPedido=${codPedido}`));
+        const targetUrl = match?.url || defaultUrl;
+
+        let html = await fetchHtml(targetUrl);
+        fs.writeFileSync(`/tmp/debug_detail_${codPedido}.html`, html);
+
         if (!html.trim() || isLoginHtml(html)) {
             fastify.log.warn(`INPI detail fell back to login page for CodPedido=${codPedido}`);
             const fallback = publicationNumber ? await fetchEspacenetBiblioByPublicationNumber(publicationNumber) : null;
