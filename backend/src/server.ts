@@ -1583,7 +1583,7 @@ async function fetchInpiDetailByCod(codPedido: string, publicationNumber?: strin
     const fetchHtml = async (targetUrl: string): Promise<string> => {
         const encodedUrl = targetUrl.replace(/'/g, `%27`);
         const { stdout } = await inpiQueue.enqueue(() => execInpiCurlWithRetry(
-            `curl -s -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -c ${cookieFile} '${encodedUrl}' | iconv -f ISO-8859-1 -t UTF-8`,
+            `curl -s -L --http1.1 -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -c ${cookieFile} '${encodedUrl}' | iconv -f ISO-8859-1 -t UTF-8`,
             3,
             30000,
             5 * 1024 * 1024
@@ -2002,6 +2002,8 @@ fastify.post('/search/quick', async (request, reply) => {
     const fetchedInpiResults: any[] = [];
     const fetchedEspacenetResults: any[] = [];
 
+    let inpiMeta = { total: 0, totalPages: 1, perPage: requestedPageSize, currentPage: requestedPage };
+
     try {
         const inpi = await inpiQueue.enqueue(() => searchInpiViaCurl({
             number,
@@ -2014,6 +2016,13 @@ fastify.post('/search/quick', async (request, reply) => {
             maxPages: 1,
             enrichDetails: false
         }));
+        // Capture metadata BEFORE spread (custom props on array are lost by push/spread)
+        inpiMeta = {
+            total: (inpi as any).total ?? inpi.length,
+            totalPages: (inpi as any).totalPages ?? 1,
+            perPage: (inpi as any).perPage ?? requestedPageSize,
+            currentPage: (inpi as any).currentPage ?? requestedPage
+        };
         fetchedInpiResults.push(...inpi);
         enqueueSearchResultsPersistence(inpi);
     } catch (err: any) {
@@ -2059,11 +2068,11 @@ fastify.post('/search/quick', async (request, reply) => {
         espacenetResults = mergePatentLists(espacenetResults, fetchedEspacenetResults);
     }
 
-    const inpiCurrentPage = Math.max(1, (fetchedInpiResults as any).currentPage ?? requestedPage);
-    const inpiPageSize = (fetchedInpiResults as any).perPage ?? requestedPageSize;
+    const inpiCurrentPage = Math.max(1, inpiMeta.currentPage ?? requestedPage);
+    const inpiPageSize = inpiMeta.perPage ?? requestedPageSize;
     const inpiCurrentCount = inpiResults.length;
-    const inpiRawTotal = (fetchedInpiResults as any).total ?? inpiResults.length;
-    const inpiRawTotalPages = (fetchedInpiResults as any).totalPages
+    const inpiRawTotal = inpiMeta.total ?? inpiResults.length;
+    const inpiRawTotalPages = inpiMeta.totalPages
         ?? Math.max(1, Math.ceil(inpiRawTotal / requestedPageSize));
     const inpiMinTotalForPage = inpiCurrentCount > 0
         ? ((inpiCurrentPage - 1) * requestedPageSize) + inpiCurrentCount
