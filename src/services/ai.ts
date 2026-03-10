@@ -87,14 +87,15 @@ export const aiService = {
     /**
      * Searches patents across Espacenet and INPI in parallel.
      */
-    searchPatents: async (cql: string, inpiQuery: string, ipcCodes: string[]): Promise<{
+    searchPatents: async (cql: string, inpiQuery: string, ipcCodes: string[], ignoreSecret: boolean = false): Promise<{
         espacenet: any[];
         inpi: any[];
     }> => {
         const response = await api.post('/search', {
             cql,
             inpiQuery,
-            ipc_codes: ipcCodes
+            ipc_codes: ipcCodes,
+            ignoreSecret
         }, { timeout: 60000 });
         return response.data;
     },

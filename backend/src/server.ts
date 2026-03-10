@@ -1083,11 +1083,14 @@ Se o texto já estiver em português, retorne-o sem alteração. Se o resumo est
 
 // ─── POST /search/inpi ─────────────────────────────────────────
 fastify.post('/search/inpi', async (request, reply) => {
-    const { keywords, ipc_codes } = request.body as { keywords: string[]; ipc_codes: string[] };
+    const { keywords, ipc_codes, ignoreSecret } = request.body as { keywords: string[]; ipc_codes: string[]; ignoreSecret?: boolean };
     if (!keywords?.length) return reply.code(400).send({ error: 'Keywords are required' });
 
     try {
-        const results = await scrapeInpiBuscaWeb(keywords, ipc_codes);
+        let results = await scrapeInpiBuscaWeb(keywords, ipc_codes);
+        if (ignoreSecret) {
+            results = results.filter((r: any) => r.status !== 'Mantido em sigilo');
+        }
         enqueueSearchResultsPersistence(results);
         return { results, total: results.length };
     } catch (error: any) {
@@ -1142,16 +1145,19 @@ function parseInpiResults(html: string): any[] {
         const classificationByPattern = cellTexts.find((text) => /^[A-H]\d{2}[A-Z]/i.test(text)) || '';
         const classification = classificationByCell || classificationByPattern;
 
+        const isSecret = /sigilo|aguardando\s+publica/i.test(title) || /sigilo|aguardando\s+publica/i.test(classification);
+
         if (number) {
             results.push({
                 publicationNumber: number,
-                title: title || '(Sem título)',
+                title: title || (isSecret ? 'Mantido em sigilo' : '(Sem título)'),
                 applicant: '',
                 date,
                 abstract: '',
                 classification,
                 source: 'INPI',
-                url: detailUrl
+                url: detailUrl,
+                status: isSecret ? 'Mantido em sigilo' : undefined
             });
         }
     });
@@ -1274,6 +1280,7 @@ async function searchInpiViaCurl(params: {
     maxPages?: number;
     enrichDetails?: boolean;
     enrichLimit?: number;
+    ignoreSecret?: boolean;
 }): Promise<any[]> {
     const cookieFile = `/tmp/inpi_${randomUUID()}.txt`;
     const payloadFile = `/tmp/inpi_payload_${randomUUID()}.txt`;
@@ -1379,7 +1386,7 @@ async function searchInpiViaCurl(params: {
             }
         }
 
-        const pageMetaTotal = reportedTotal ?? (pageResults as any).total ?? pageResults.length;
+        let pageMetaTotal = reportedTotal ?? (pageResults as any).total ?? pageResults.length;
         const pageMetaPerPage = (pageResults as any).perPage ?? perPageEstimate;
         const pageMetaCurrentPage = (pageResults as any).currentPage ?? Math.min(requestedPage, estimatedTotalPages);
         const pageMetaTotalPages = reportedTotalPages ?? (pageResults as any).totalPages ?? estimatedTotalPages;
@@ -1425,7 +1432,14 @@ async function searchInpiViaCurl(params: {
             }
         }
 
-        const results = pageResults;
+        let results = pageResults;
+        if (params.ignoreSecret) {
+            const initialCount = results.length;
+            results = results.filter((r: any) => r.status !== 'Mantido em sigilo');
+            const ignoredCount = initialCount - results.length;
+            pageMetaTotal -= ignoredCount;
+        }
+
         (results as any).total = pageMetaTotal;
         (results as any).perPage = pageMetaPerPage;
         (results as any).currentPage = pageMetaCurrentPage;
@@ -1664,6 +1678,18 @@ async function fetchInpiDetailByCod(codPedido: string, publicationNumber?: strin
         }
         const detail = extractDetailFromHtml(html);
         if (!detail.title && !detail.abstract && !detail.applicant && !detail.inventor && (!detail.figures || detail.figures.length === 0)) {
+            const isSecretPage = html.toLowerCase().includes('sigilo') || html.toLowerCase().includes('aguardando public');
+            if (isSecretPage) {
+                return {
+                    codPedido,
+                    source: 'INPI',
+                    url: defaultUrl,
+                    figures: [],
+                    status: 'Mantido em sigilo',
+                    title: 'Mantido em sigilo'
+                };
+            }
+
             fastify.log.warn(`INPI did not return usable detail fields for CodPedido=${codPedido}`);
             const fallback = publicationNumber ? await fetchEspacenetBiblioByPublicationNumber(publicationNumber) : null;
             if (fallback) {
@@ -1975,7 +2001,7 @@ function extractTextFromOpsXml(xml: string): string {
 
 // ─── POST /search/quick ────────────────────────────────────────
 fastify.post('/search/quick', async (request, reply) => {
-    const { number, titular, inventor, keywords, page, pageSize, includeEspacenet } = request.body as {
+    const { number, titular, inventor, keywords, page, pageSize, includeEspacenet, ignoreSecret } = request.body as {
         number?: string;
         titular?: string;
         inventor?: string;
@@ -1983,6 +2009,7 @@ fastify.post('/search/quick', async (request, reply) => {
         page?: number;
         pageSize?: number;
         includeEspacenet?: boolean;
+        ignoreSecret?: boolean;
     };
 
     if (!number && !titular && !inventor && !keywords) {
@@ -2014,7 +2041,8 @@ fastify.post('/search/quick', async (request, reply) => {
             page: requestedPage,
             pageSize: requestedPageSize,
             maxPages: 1,
-            enrichDetails: false
+            enrichDetails: false,
+            ignoreSecret
         }));
         // Capture metadata BEFORE spread (custom props on array are lost by push/spread)
         inpiMeta = {
@@ -2120,11 +2148,12 @@ fastify.post('/search/quick', async (request, reply) => {
 
 // ─── POST /search (unified) ────────────────────────────────────
 fastify.post('/search', async (request, reply) => {
-    const { cql, inpiQuery, keywords, ipc_codes } = request.body as {
+    const { cql, inpiQuery, keywords, ipc_codes, ignoreSecret } = request.body as {
         cql: string;
         inpiQuery?: string;
         keywords?: string[];
         ipc_codes: string[];
+        ignoreSecret?: boolean;
     };
 
     fastify.log.info(`=== SEARCH REQUEST ===`);
@@ -2153,7 +2182,7 @@ fastify.post('/search', async (request, reply) => {
                 throw err;
             }
         })() : Promise.resolve([]),
-        inpiStr ? scrapeInpiBuscaWeb([inpiStr], ipc_codes || [], inpiQuery) : Promise.resolve([])
+        inpiStr ? scrapeInpiBuscaWeb([inpiStr], ipc_codes || [], inpiQuery).then(res => ignoreSecret ? res.filter((r: any) => r.status !== 'Mantido em sigilo') : res) : Promise.resolve([])
     ]);
 
     if (espacenetResult.status === 'fulfilled') {

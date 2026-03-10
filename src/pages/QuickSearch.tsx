@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
 import AppLayout from "@/components/AppLayout";
 import PatentDocumentModal, { PatentDocumentData } from "@/components/PatentDocumentModal";
 import axios from "axios";
@@ -68,6 +69,7 @@ export default function QuickSearch() {
     const [espacenetResults, setEspacenetResults] = useState<PatentResult[]>([]);
     const [loading, setLoading] = useState(false);
     const [searched, setSearched] = useState(false);
+    const [ignoreSecret, setIgnoreSecret] = useState(false);
     const [error, setError] = useState("");
     const [tab, setTab] = useState<"inpi" | "espacenet">("inpi");
     const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
@@ -268,7 +270,8 @@ export default function QuickSearch() {
                 keywords: keywords || undefined,
                 page: 1,
                 pageSize: INPI_PAGE_SIZE,
-                includeEspacenet: true
+                includeEspacenet: true,
+                ignoreSecret
             });
             applyQuickSearchResponse(response.data, currentSearchToken, false);
             setTab("inpi");
@@ -428,6 +431,7 @@ export default function QuickSearch() {
         setModalIndex(0);
         setPatentModalOpen(false);
         setSelectedPatent(null);
+        setIgnoreSecret(false);
     };
 
     return (
@@ -498,19 +502,27 @@ export default function QuickSearch() {
                         </div>
                     </div>
 
-                    <div className="flex gap-3 pt-2">
-                        <Button type="submit" disabled={loading || !hasInput} className="gap-2">
-                            {loading ? (
-                                <><Loader2 className="w-4 h-4 animate-spin" /> Buscando...</>
-                            ) : (
-                                <><Search className="w-4 h-4" /> Buscar</>
-                            )}
-                        </Button>
-                        {hasInput && (
-                            <Button type="button" variant="outline" onClick={clearAll} className="gap-2">
-                                <X className="w-4 h-4" /> Limpar
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pt-2">
+                        <div className="flex gap-3">
+                            <Button type="submit" disabled={loading || !hasInput} className="gap-2">
+                                {loading ? (
+                                    <><Loader2 className="w-4 h-4 animate-spin" /> Buscando...</>
+                                ) : (
+                                    <><Search className="w-4 h-4" /> Buscar</>
+                                )}
                             </Button>
-                        )}
+                            {hasInput && (
+                                <Button type="button" variant="outline" onClick={clearAll} className="gap-2">
+                                    <X className="w-4 h-4" /> Limpar
+                                </Button>
+                            )}
+                        </div>
+                        <div className="flex items-center space-x-2">
+                            <Checkbox id="ignoreSecret" checked={ignoreSecret} onCheckedChange={(c) => setIgnoreSecret(c === true)} />
+                            <label htmlFor="ignoreSecret" className="text-sm font-medium leading-none cursor-pointer text-muted-foreground whitespace-nowrap">
+                                Ignorar patentes em sigilo / não publicadas
+                            </label>
+                        </div>
                     </div>
                 </form>
 

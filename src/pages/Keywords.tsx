@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
 import AppLayout from "@/components/AppLayout";
 import WizardSteps from "@/components/WizardSteps";
 import LoadingTransition from "@/components/LoadingTransition";
@@ -151,6 +152,7 @@ export default function Keywords() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [ignoreSecret, setIgnoreSecret] = useState(false);
 
   // Populate from strategy when available
   useEffect(() => {
@@ -426,7 +428,7 @@ export default function Keywords() {
     setCqlQuery(cql);
 
     try {
-      const results = await aiService.searchPatents(cql, inpiQuery, classifications);
+      const results = await aiService.searchPatents(cql, inpiQuery, classifications, ignoreSecret);
       setSearchResults(results);
       navigate("/research/results");
     } catch (err: any) {
@@ -676,13 +678,21 @@ export default function Keywords() {
         </div>
 
         {/* Action Buttons Row */}
-        <div className="flex justify-between items-center gap-4 pt-8 mt-4 border-t">
-          <Button variant="outline" onClick={() => navigate("/research/structured")} className="h-10 px-6">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pt-8 mt-4 border-t">
+          <Button variant="outline" onClick={() => navigate("/research/structured")} className="h-10 px-6 shrink-0">
             Voltar
           </Button>
-          <Button onClick={handleExecution} className="h-10 px-8 shadow-lg shadow-primary/20 font-bold" disabled={loading}>
-            Executar Análise de Patenteabilidade
-          </Button>
+          <div className="flex flex-col sm:flex-row items-end sm:items-center gap-4 w-full sm:w-auto">
+            <div className="flex items-center space-x-2">
+              <Checkbox id="ignoreSecretAdvanced" checked={ignoreSecret} onCheckedChange={(c) => setIgnoreSecret(c === true)} />
+              <label htmlFor="ignoreSecretAdvanced" className="text-sm font-medium leading-none cursor-pointer text-muted-foreground whitespace-nowrap">
+                Ignorar patentes em sigilo / não publicadas
+              </label>
+            </div>
+            <Button onClick={handleExecution} className="h-10 px-8 shadow-lg shadow-primary/20 font-bold shrink-0" disabled={loading}>
+              Executar Análise de Patenteabilidade
+            </Button>
+          </div>
         </div>
 
         {/* Dual Query Preview */}
