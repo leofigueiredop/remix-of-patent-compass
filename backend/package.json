@@ -5,7 +5,7 @@
     "main": "dist/server.js",
     "scripts": {
         "build": "tsc",
-        "start": "node dist/server.js",
+        "start": "npx prisma db push && node dist/server.js",
         "dev": "ts-node-dev --respawn --transpile-only src/server.ts"
     },
     "dependencies": {
@@ -14,6 +14,7 @@
         "@fastify/multipart": "^8.1.0",
         "@google/genai": "^1.43.0",
         "@prisma/client": "^6.4.1",
+        "@supabase/supabase-js": "^2.99.0",
         "@types/cheerio": "^0.22.35",
         "axios": "^1.7.9",
         "bcryptjs": "^3.0.3",
@@ -22,13 +23,17 @@
         "fluent-ffmpeg": "^2.1.2",
         "form-data": "^4.0.0",
         "pdf-parse": "^1.1.1",
-        "prisma": "^6.4.1"
+        "prisma": "^6.4.1",
+        "puppeteer": "^22.0.0",
+        "puppeteer-extra": "^3.3.6",
+        "puppeteer-extra-plugin-stealth": "^2.11.2"
     },
     "devDependencies": {
         "@types/bcryptjs": "^2.4.6",
         "@types/fluent-ffmpeg": "^2.1.24",
         "@types/node": "^20.11.19",
         "@types/pdf-parse": "^1.1.4",
+        "@types/puppeteer": "^21.0.0",
         "ts-node-dev": "^2.0.0",
         "typescript": "^5.3.3"
     }

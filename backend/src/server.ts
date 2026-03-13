@@ -11,10 +11,11 @@ import { createWriteStream } from 'fs';
 import FormData from 'form-data';
 import * as cheerio from 'cheerio';
 import bcrypt from 'bcryptjs';
+import { prisma } from './db';
+import { startJobRunner } from './services/jobRunner';
 import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
 import { randomUUID } from 'crypto';
-import { PrismaClient } from '@prisma/client';
 import pdfParse from 'pdf-parse';
 
 const execAsync = promisify(exec);
@@ -22,7 +23,7 @@ const execAsync = promisify(exec);
 import { GoogleGenAI } from '@google/genai';
 
 const fastify = Fastify({ logger: true });
-const prisma = new PrismaClient();
+// const prisma = new PrismaClient(); // Removed, already imported from './db' oben.
 
 fastify.register(cors, { origin: '*' });
 fastify.register(multipart);
@@ -1190,7 +1191,10 @@ function parseInpiResults(html: string): any[] {
     return results;
 }
 
-async function initializeInpiAnonymousSession(cookieFile: string): Promise<void> {
+const INPI_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+const INPI_SEC_HEADERS = `-H 'sec-ch-ua: "Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"' -H 'sec-ch-ua-mobile: ?0' -H 'sec-ch-ua-platform: "Mac OS X"'`;
+
+async function initializeInpiSession(cookieFile: string): Promise<void> {
     const payloadFilePrimary = `/tmp/inpi_login_primary_${randomUUID()}.txt`;
     const payloadFileFallback = `/tmp/inpi_login_fallback_${randomUUID()}.txt`;
     const loginUrl = 'https://busca.inpi.gov.br/pePI/servlet/LoginController';
@@ -1199,28 +1203,78 @@ async function initializeInpiAnonymousSession(cookieFile: string): Promise<void>
     fs.writeFileSync(debugLog, `Init session start for ${cookieFile}\n`);
 
     try {
-        fs.appendFileSync(debugLog, 'Step 1: Accessing login page...\n');
+        fs.appendFileSync(debugLog, 'Step 1: Accessing root page to get initial cookies...\n');
         await execInpiCurlWithRetry(
-            `curl -v -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -c ${cookieFile} '${loginUrl}?action=login' -o /dev/null`,
+            `curl -v --http1.1 -L -A '${INPI_USER_AGENT}' ${INPI_SEC_HEADERS} -c ${cookieFile} 'https://busca.inpi.gov.br/pePI/' -o /dev/null`,
             3,
             20000
         );
 
-        fs.writeFileSync(payloadFilePrimary, 'submission=continuar', 'utf8');
-        fs.appendFileSync(debugLog, 'Step 2: Posting submission=continuar...\n');
+        if (fs.existsSync(cookieFile)) {
+            const cookies = fs.readFileSync(cookieFile, 'utf8');
+            fs.appendFileSync(debugLog, `Initial cookies:\n${cookies}\n`);
+        }
+
+        const inpiUser = process.env.INPI_USER || '';
+        const inpiPass = (process.env.INPI_PASSWORD || '').replace(/!/g, '%21');
+        const loginPayload = `T_Login=${encodeURIComponent(inpiUser)}&T_Senha=${inpiPass}&action=login&Usuario=`;
+
+        fs.writeFileSync(payloadFilePrimary, loginPayload, 'utf8');
+        fs.appendFileSync(debugLog, `Step 2: Authenticating as ${inpiUser ? inpiUser : 'anonymous'}...\n`);
+
+        const loginResp = `/tmp/inpi_login_resp_${randomUUID()}.html`;
         await execInpiCurlWithRetry(
-            `curl -v -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -c ${cookieFile} -X POST '${loginUrl}' --data-binary @${payloadFilePrimary} -o /dev/null`,
+            `curl -v --http1.1 -L -A '${INPI_USER_AGENT}' ${INPI_SEC_HEADERS} ` +
+            `-H 'Content-Type: application/x-www-form-urlencoded' ` +
+            `-H 'Origin: https://busca.inpi.gov.br' ` +
+            `-H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8' ` +
+            `-e 'https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login' ` +
+            `-b ${cookieFile} -c ${cookieFile} ` +
+            `-X POST '${loginUrl}' --data-binary @${payloadFilePrimary} -o ${loginResp}`,
             3,
-            25000
+            30000
         );
 
-        fs.writeFileSync(payloadFileFallback, 'action=login&T_Login=&T_Senha=&Usuario=', 'utf8');
-        fs.appendFileSync(debugLog, 'Step 3: Posting empty login...\n');
+        if (fs.existsSync(cookieFile)) {
+            const cookies = fs.readFileSync(cookieFile, 'utf8');
+            fs.appendFileSync(debugLog, `Cookies after POST:\n${cookies}\n`);
+        }
+
+        if (fs.existsSync(loginResp)) {
+            const respHtml = fs.readFileSync(loginResp, 'utf8');
+            const userRef = inpiUser || 'leopickler';
+            if (!respHtml.includes(`Login: ${userRef}`)) {
+                fs.appendFileSync(debugLog, `Login check failed: 'Login: ${userRef}' not found in response.\n`);
+                // If we're on the login page, it's a hard failure
+                if (respHtml.toLowerCase().includes('para realizar a pesquisa anonimamente')) {
+                    throw new Error('Falha na autenticação INPI: Login ignorado pelo portal.');
+                }
+            } else {
+                fs.appendFileSync(debugLog, `Login confirmed for ${userRef}.\n`);
+            }
+            try { fs.unlinkSync(loginResp); } catch { }
+        }
+
+        // Step 3: Access PatenteSearchBasico.jsp to ensure session is bound to the patent module
+        fs.appendFileSync(debugLog, 'Step 3: Accessing Patente Busca page to bind session...\n');
         await execInpiCurlWithRetry(
-            `curl -v -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -c ${cookieFile} -X POST '${loginUrl}' --data-binary @${payloadFileFallback} -o /dev/null`,
+            `curl -s --http1.1 -L -A '${INPI_USER_AGENT}' ${INPI_SEC_HEADERS} ` +
+            `-e 'https://busca.inpi.gov.br/pePI/servlet/LoginController' ` +
+            `-b ${cookieFile} -c ${cookieFile} 'https://busca.inpi.gov.br/pePI/jsp/patentes/PatenteSearchBasico.jsp' -o /dev/null`,
             3,
-            25000
+            20000
         );
+
+        // Step 4: Access SearchAvancado to fully activate patent session
+        fs.appendFileSync(debugLog, 'Step 4: Accessing SearchAvancado...\n');
+        await execInpiCurlWithRetry(
+            `curl -s --http1.1 -L -A '${INPI_USER_AGENT}' ${INPI_SEC_HEADERS} ` +
+            `-e 'https://busca.inpi.gov.br/pePI/jsp/patentes/PatenteSearchBasico.jsp' ` +
+            `-b ${cookieFile} -c ${cookieFile} 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=SearchAvancado' -o /dev/null`,
+            3,
+            20000
+        );
+
         fs.appendFileSync(debugLog, 'Session initialized successfully.\n');
     } catch (err: any) {
         fs.appendFileSync(debugLog, `Init failed: ${err.message}\nStack: ${err.stack}\n`);
@@ -1235,9 +1289,11 @@ async function fetchPatentDetailViaCurl(cookieFile: string, detailUrl: string): 
     try {
         // fastify.log.info(`Fetching detail: ${detailUrl}`);
         const { stdout } = await execInpiCurlWithRetry(
-            `curl -s -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} '${detailUrl}' | iconv -f ISO-8859-1 -t UTF-8`,
+            `curl -s --http1.1 -L -A '${INPI_USER_AGENT}' ${INPI_SEC_HEADERS} ` +
+            `-H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8' ` +
+            `-e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} '${detailUrl}' | iconv -f ISO-8859-1 -t UTF-8`,
             3,
-            12000,
+            20000,
             10 * 1024 * 1024
         );
         const $ = cheerio.load(stdout);
@@ -1288,7 +1344,7 @@ async function searchInpiViaCurl(params: {
 
     try {
         if (!params.cookieFile) {
-            await initializeInpiAnonymousSession(cookieFile);
+            await initializeInpiSession(cookieFile);
         }
 
         const requestedPage = typeof params.page === 'number' && params.page > 0 ? Math.floor(params.page) : 1;
@@ -1328,7 +1384,7 @@ async function searchInpiViaCurl(params: {
         fastify.log.info(`INPI curl search: Titulo="${(params.keywords || '').substring(0, 100)}" Resumo="${(params.resumo || '').substring(0, 100)}"`);
 
         const { stdout, stderr } = await execInpiCurlWithRetry(
-            `curl -sS -L --http1.1 -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -X POST 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController' --data-binary @${payloadFile} | iconv -f ISO-8859-1 -t UTF-8`,
+            `curl -sS -L --http1.1 -A '${INPI_USER_AGENT}' ${INPI_SEC_HEADERS} -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -X POST 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController' --data-binary @${payloadFile} | iconv -f ISO-8859-1 -t UTF-8`,
             3,
             35000,
             50 * 1024 * 1024
@@ -1600,7 +1656,7 @@ async function fetchInpiDetailByCod(codPedido: string, publicationNumber?: strin
     const fetchHtml = async (targetUrl: string): Promise<string> => {
         const encodedUrl = targetUrl.replace(/'/g, `%27`);
         const { stdout } = await inpiQueue.enqueue(() => execInpiCurlWithRetry(
-            `curl -s -L --http1.1 -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -c ${cookieFile} '${encodedUrl}' | iconv -f ISO-8859-1 -t UTF-8`,
+            `curl -s -L --http1.1 -A '${INPI_USER_AGENT}' ${INPI_SEC_HEADERS} -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -c ${cookieFile} '${encodedUrl}' | iconv -f ISO-8859-1 -t UTF-8`,
             3,
             30000,
             5 * 1024 * 1024
@@ -1637,7 +1693,7 @@ async function fetchInpiDetailByCod(codPedido: string, publicationNumber?: strin
     };
 
     try {
-        await initializeInpiAnonymousSession(cookieFile);
+        await initializeInpiSession(cookieFile);
 
         // INPI drops HTTP connections (returning 0 bytes) or redirects to login if the session hasn't performed a search first.
         const list = await searchInpiViaCurl({ number: codPedido, cookieFile });
@@ -1779,6 +1835,93 @@ async function fetchPatentPdf(url: string, fallbackName: string): Promise<{ buff
         throw new Error('URL de documento não permitida');
     }
 
+    if (url.includes('busca.inpi.gov.br')) {
+        const cookieFile = `/tmp/inpi_pdf_cookie_${randomUUID()}.txt`;
+        const pdfFile = `/tmp/inpi_pdf_${randomUUID()}.pdf`;
+
+        try {
+            // Step 1: Initialize session
+            await initializeInpiSession(cookieFile);
+            fastify.log.info(`Downloading INPI document via authenticated cURL: ${url}`);
+
+            // Step 2: Establish search context for this specific patent
+            const codPedidoMatch = url.match(/CodPedido=(\d+)/);
+            if (codPedidoMatch) {
+                const codPedido = codPedidoMatch[1];
+                fastify.log.info(`Establishing search context for CodPedido=${codPedido}`);
+                // Use searchInpiViaCurl to perform a real POST search for this number
+                // This activates the session for this specific record on the INPI side
+                await searchInpiViaCurl({ number: codPedido, cookieFile });
+            }
+
+            // Step 3: Download the detail page (as HTML) to extract PDF candidates
+            // IMPORTANT: Referer MUST be the PatenteServletController to get the body
+            const secFetchHeaders = `-H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: navigate' -H 'Sec-Fetch-User: ?1' -H 'Sec-Fetch-Dest: document'`;
+            let curlCmd = `curl -s --http1.1 -L -A '${INPI_USER_AGENT}' ${INPI_SEC_HEADERS} ${secFetchHeaders} ` +
+                `-H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8' ` +
+                `-e 'https://busca.inpi.gov.br/pePI/servlet/PatenteServletController' -b ${cookieFile} -c ${cookieFile} '${url}' -o ${pdfFile}`;
+
+            await new Promise<void>((resolve, reject) => {
+                exec(curlCmd, { timeout: 60000 }, (error) => {
+                    if (error) reject(error);
+                    else resolve();
+                });
+            });
+
+            if (!fs.existsSync(pdfFile)) {
+                throw new Error("Falha no curl: arquivo não foi criado.");
+            }
+
+            // Check if it's already a PDF
+            const magicBytes = fs.readFileSync(pdfFile, { encoding: 'binary', flag: 'r' }).substring(0, 5);
+            if (magicBytes.startsWith('%PDF-')) {
+                const buffer = fs.readFileSync(pdfFile);
+                return { buffer, filename: fallbackName };
+            }
+
+            // If not a PDF, it's an HTML detail page
+            const html = fs.readFileSync(pdfFile, 'utf8');
+            const candidates = extractPdfCandidatesFromHtml(html, url);
+            fastify.log.info(`Found ${candidates.length} PDF candidates in INPI HTML.`);
+
+            if (candidates.length === 0) {
+                const debugPath = `/tmp/inpi_fail_debug_${randomUUID()}.html`;
+                fs.writeFileSync(debugPath, html);
+                fastify.log.warn(`No PDF candidates found. Saved HTML to ${debugPath}`);
+            }
+
+            for (const candidate of candidates) {
+                fastify.log.info(`Trying candidate: ${candidate}`);
+                const candidateCmd = `curl -s --http1.1 -L -A '${INPI_USER_AGENT}' ${INPI_SEC_HEADERS} ` +
+                    `-H 'Accept: application/pdf,application/octet-stream,*/*' ` +
+                    `-e '${url}' -b ${cookieFile} -c ${cookieFile} '${candidate}' -o ${pdfFile}`;
+
+                await new Promise<void>((resolve, reject) => {
+                    exec(candidateCmd, { timeout: 60000 }, (error) => {
+                        if (error) reject(error);
+                        else resolve();
+                    });
+                });
+
+                if (fs.existsSync(pdfFile)) {
+                    const magicBytesCand = fs.readFileSync(pdfFile, { encoding: 'binary', flag: 'r' }).substring(0, 5);
+                    if (magicBytesCand.startsWith('%PDF-')) {
+                        const buffer = fs.readFileSync(pdfFile);
+                        fastify.log.info(`PDF successfully downloaded from candidate.`);
+                        return { buffer, filename: fallbackName };
+                    }
+                }
+            }
+
+            throw new Error("Nenhum PDF real foi retornado pelas URLs candidatas do INPI.");
+
+        } finally {
+            try { if (fs.existsSync(cookieFile)) fs.unlinkSync(cookieFile); } catch { }
+            try { if (fs.existsSync(pdfFile)) fs.unlinkSync(pdfFile); } catch { }
+        }
+    }
+
+    // Fallback for non-INPI URLs
     const initialResponse = await axios.get(url, {
         responseType: 'arraybuffer',
         timeout: 30000,
@@ -2296,11 +2439,81 @@ const start = async () => {
         const startupLog = `/tmp/server_startup.log`;
         fs.writeFileSync(startupLog, `Server starting at ${new Date().toISOString()} with PID ${process.pid}\n`);
 
-        await fastify.listen({ port: Number(process.env.PORT) || 3000, host: '0.0.0.0' });
+        // ─── STARTUP ──────────────────────────────────────────────────
+        await fastify.listen({ port: parseInt(process.env.PORT || '3001'), host: '0.0.0.0' }, (err) => {
+            if (err) {
+                fastify.log.error(err);
+                process.exit(1);
+            }
+            startJobRunner(); // Start the background scraping worker
+        });
     } catch (err) {
         fastify.log.error(err);
         process.exit(1);
     }
 };
+
+// ─── QUEUE ENDPOINT ───────────────────────────────────────────
+fastify.post('/patent/queue', async (request, reply) => {
+    const { codPedido } = request.body as { codPedido: string };
+    if (!codPedido) return reply.code(400).send({ error: 'codPedido is required' });
+
+    // Ensure the patent record exists
+    await prisma.inpiPatent.upsert({
+        where: { cod_pedido: codPedido },
+        update: {},
+        create: { cod_pedido: codPedido }
+    });
+
+    // Create a job if not already pending/running
+    const existing = await prisma.scrapingJob.findFirst({
+        where: { patent_id: codPedido, status: { in: ['pending', 'running'] } }
+    });
+
+    if (!existing) {
+        await prisma.scrapingJob.create({
+            data: { patent_id: codPedido, status: 'pending' }
+        });
+        return { message: 'Patent queued for full scrape' };
+    }
+
+    return { message: 'Patent is already being processed', status: existing.status };
+});
+
+// ─── UPDATED DETAIL ENDPOINT ──────────────────────────────────
+fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
+    const { codPedido } = request.params as { codPedido: string };
+    
+    // Check if we have granular data in DB
+    const dbData = await prisma.inpiPatent.findUnique({
+        where: { cod_pedido: codPedido },
+        include: {
+            publications: true,
+            petitions: true,
+            annuities: true,
+            scraping_jobs: {
+                orderBy: { created_at: 'desc' },
+                take: 1
+            }
+        }
+    });
+
+    if (dbData && dbData.publications.length > 0) {
+        return dbData;
+    }
+
+    // Fallback: Fetch basic via curl for real-time view
+    const cookieFile = `/tmp/inpi_detail_${randomUUID()}.txt`;
+    try {
+        await initializeInpiSession(cookieFile);
+        const detailUrl = `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${codPedido}`;
+        const basicData = await fetchPatentDetailViaCurl(cookieFile, detailUrl);
+        return { ...basicData, cod_pedido: codPedido, scraping_status: dbData?.scraping_jobs[0]?.status || 'available_for_queue' };
+    } catch (error: any) {
+        return reply.code(500).send({ error: 'Failed to fetch detail', details: error.message });
+    } finally {
+        try { fs.unlinkSync(cookieFile); } catch { }
+    }
+});
 
 start();

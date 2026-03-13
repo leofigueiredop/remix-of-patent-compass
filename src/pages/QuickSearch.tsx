@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Search, Loader2, ExternalLink, Hash, User, UserCheck, FileText, X, ChevronDown, ChevronUp, Building2, Lightbulb, ChevronLeft, ChevronRight, Expand } from "lucide-react";
+import { Search, Loader2, ExternalLink, Hash, User, UserCheck, FileText, X, ChevronDown, ChevronUp, Building2, Lightbulb, ChevronLeft, ChevronRight, Expand, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -434,6 +434,24 @@ export default function QuickSearch() {
         setIgnoreSecret(false);
     };
 
+    const [queueingPatents, setQueueingPatents] = useState<Record<string, boolean>>({});
+    const [queuedPatents, setQueuedPatents] = useState<Record<string, string>>({});
+
+    const handleQueuePatent = async (patent: PatentResult) => {
+        const codPedido = getCodPedido(patent);
+        if (!codPedido) return;
+        
+        setQueueingPatents(prev => ({ ...prev, [codPedido]: true }));
+        try {
+            const response = await axios.post(`${API_URL}/patent/queue`, { codPedido });
+            setQueuedPatents(prev => ({ ...prev, [codPedido]: response.data.status || 'pending' }));
+        } catch (err) {
+            console.error("Failed to queue patent:", err);
+        } finally {
+            setQueueingPatents(prev => ({ ...prev, [codPedido]: false }));
+        }
+    };
+
     return (
         <AppLayout>
             <div className="space-y-6">
@@ -667,9 +685,24 @@ export default function QuickSearch() {
                                                                     )}
                                                                 </div>
                                                                 <div className="flex items-center gap-1 shrink-0">
+                                                                    {patent.source === "INPI" && (
+                                                                        <Button
+                                                                            size="xs"
+                                                                            variant={queuedPatents[codPedido || ''] ? "secondary" : "outline"}
+                                                                            disabled={queueingPatents[codPedido || ''] || !!queuedPatents[codPedido || '']}
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                void handleQueuePatent(patent);
+                                                                            }}
+                                                                            className="gap-1 px-2"
+                                                                        >
+                                                                            {queueingPatents[codPedido || ''] ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                                                                            {queuedPatents[codPedido || ''] ? 'Na fila' : 'Baixar'}
+                                                                        </Button>
+                                                                    )}
                                                                     <button
                                                                         type="button"
-                                                                        className="p-2 rounded-lg hover:bg-muted transition-colors"
+                                                                        className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
                                                                         title="Abrir/fechar detalhes"
                                                                         onClick={(e) => {
                                                                             e.stopPropagation();
@@ -677,8 +710,8 @@ export default function QuickSearch() {
                                                                         }}
                                                                     >
                                                                         {isExpanded
-                                                                            ? <ChevronUp className="w-4 h-4 text-muted-foreground" />
-                                                                            : <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                                                                            ? <ChevronUp className="w-4 h-4" />
+                                                                            : <ChevronDown className="w-4 h-4" />
                                                                         }
                                                                     </button>
                                                                     <div className="p-2">

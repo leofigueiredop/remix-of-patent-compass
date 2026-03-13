@@ -87,3 +87,84 @@ model SearchResultCache {
   @@unique([source, publication_number])
   @@index([publication_number])
 }
+
+// 6. INPI Scraper Worker Data
+model InpiPatent {
+  cod_pedido        String   @id
+  numero_publicacao String?
+  title             String?
+  abstract          String?
+  applicant         String?
+  inventors         String?
+  status            String?
+  filing_date       String?
+  ipc_codes         String?
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  publications      InpiPublication[]
+  petitions          InpiPetition[]
+  annuities         InpiAnnuity[]
+  scraping_jobs     ScrapingJob[]
+
+  @@map("inpi_patents")
+}
+
+model InpiPublication {
+  id                String   @id @default(uuid())
+  patent_id         String
+  patent            InpiPatent @relation(fields: [patent_id], references: [cod_pedido])
+  rpi               String
+  date              String?
+  despacho_code     String?
+  despacho_desc     String?
+  complement        String?
+  rpi_url           String?  // PDF of the RPI page
+  has_image         Boolean  @default(false)
+  created_at        DateTime @default(now())
+
+  @@index([patent_id])
+}
+
+model InpiPetition {
+  id                String   @id @default(uuid())
+  patent_id         String
+  patent            InpiPatent @relation(fields: [patent_id], references: [cod_pedido])
+  service_code      String?
+  protocol          String?
+  date              String?
+  client            String?
+  delivery          String?
+  created_at        DateTime @default(now())
+
+  @@index([patent_id])
+}
+
+model InpiAnnuity {
+  id                String   @id @default(uuid())
+  patent_id         String
+  patent            InpiPatent @relation(fields: [patent_id], references: [cod_pedido])
+  title             String?   // e.g. "3ª Anuidade"
+  start_date        String?
+  end_date          String?
+  payment_date      String?
+  status            String?   // 'paid', 'pending', etc.
+  created_at        DateTime @default(now())
+
+  @@index([patent_id])
+}
+
+model ScrapingJob {
+  id                String   @id @default(uuid())
+  patent_id         String
+  patent            InpiPatent @relation(fields: [patent_id], references: [cod_pedido])
+  status            String   @default("pending") // 'pending', 'running', 'completed', 'failed'
+  error             String?
+  attempts          Int      @default(0)
+  last_attempt      DateTime?
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  @@index([patent_id, status])
+}
+

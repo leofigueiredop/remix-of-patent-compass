@@ -1,0 +1,22 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model InpiPatent {
+  cod_pedido        String   @id
+  numero_publicacao String?
+  title             String?
+  abstract          String?
+  applicant         String?
+  inventors         String?
+  status            String?
+  filing_date       String?
+  ipc_codes         String?
+  created_at        DateTime @default(now())
+
+  @@map("inpi_patents")
+}

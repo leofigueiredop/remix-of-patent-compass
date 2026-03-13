@@ -6,8 +6,36 @@ import { Button } from "@/components/ui/button";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
+export interface InpiPublication {
+  id: string;
+  rpi: string;
+  date?: string;
+  despacho_code?: string;
+  despacho_desc?: string;
+  complement?: string;
+  rpi_url?: string;
+}
+
+export interface InpiPetition {
+  id: string;
+  service_code?: string;
+  protocol?: string;
+  date?: string;
+  client?: string;
+}
+
+export interface InpiAnnuity {
+  id: string;
+  title?: string;
+  start_date?: string;
+  end_date?: string;
+  payment_date?: string;
+  status?: string;
+}
+
 export interface PatentDocumentData {
   publicationNumber: string;
+  cod_pedido?: string;
   title: string;
   applicant?: string;
   inventor?: string;
@@ -17,6 +45,10 @@ export interface PatentDocumentData {
   source?: string;
   url: string;
   status?: string;
+  publications?: InpiPublication[];
+  petitions?: InpiPetition[];
+  annuities?: InpiAnnuity[];
+  scraping_status?: string;
 }
 
 interface PatentDocumentModalProps {
@@ -53,8 +85,53 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
     setLoadingTranslation(false);
   }, [open, patent?.publicationNumber]);
 
+  const [detailedData, setDetailedData] = useState<PatentDocumentData | null>(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [queueing, setQueueing] = useState(false);
+
   useEffect(() => {
     let active = true;
+
+    const loadDetails = async () => {
+      if (!open || !patent) return;
+      if (patent.source !== "INPI") {
+        setDetailedData(patent);
+        return;
+      }
+
+      setLoadingDetails(true);
+      try {
+        const codPedidoMatch = patent.url.match(/CodPedido=(\d+)/);
+        const codPedido = codPedidoMatch ? codPedidoMatch[1] : patent.publicationNumber;
+        
+        const response = await axios.get(`${API_URL}/search/inpi/detail/${codPedido}`);
+        if (!active) return;
+        
+        // Map backend fields to frontend interface
+        const data = response.data;
+        setDetailedData({
+          ...patent,
+          cod_pedido: data.cod_pedido || codPedido,
+          title: data.title || patent.title,
+          abstract: data.abstract || patent.abstract,
+          applicant: data.applicant || patent.applicant,
+          inventor: data.inventors || patent.inventor,
+          date: data.filing_date || patent.date,
+          status: data.status || patent.status,
+          publications: data.publications,
+          petitions: data.petitions,
+          annuities: data.annuities,
+          scraping_status: data.scraping_status
+        });
+      } catch (err) {
+        console.error("Failed to load details:", err);
+        setDetailedData(patent);
+      } finally {
+        if (active) setLoadingDetails(false);
+      }
+    };
+
+    void loadDetails();
 
     const loadPdf = async () => {
       if (!open || !patent?.url) return;
@@ -94,6 +171,19 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
       active = false;
     };
   }, [open, patent]);
+
+  const handleQueueScraping = async () => {
+    if (!detailedData?.cod_pedido) return;
+    setQueueing(true);
+    try {
+      await axios.post(`${API_URL}/patent/queue`, { codPedido: detailedData.cod_pedido });
+      setDetailedData(prev => prev ? { ...prev, scraping_status: 'pending' } : null);
+    } catch (err) {
+      console.error("Failed to queue:", err);
+    } finally {
+      setQueueing(false);
+    }
+  };
 
   const headerItems = useMemo(() => {
     if (!patent) return [];
@@ -145,8 +235,23 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
       <DialogContent className="max-w-7xl w-[96vw] h-[92vh] p-4 flex flex-col gap-3">
         {patent && (
           <>
-            <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
-              <h3 className="text-sm font-semibold leading-snug">{patent.title || "Sem título"}</h3>
+            <div className="rounded-lg border bg-muted/30 p-3 space-y-2 overflow-auto max-h-[40vh]">
+              <div className="flex justify-between items-start gap-2">
+                <h3 className="text-sm font-semibold leading-snug flex-1">{patent.title || "Sem título"}</h3>
+                {patent.source === "INPI" && (
+                  <Button 
+                    size="xs" 
+                    variant={detailedData?.scraping_status === 'pending' || detailedData?.scraping_status === 'running' ? "secondary" : "default"}
+                    onClick={handleQueueScraping}
+                    disabled={queueing || detailedData?.scraping_status === 'pending' || detailedData?.scraping_status === 'running'}
+                  >
+                    {queueing ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+                    {detailedData?.scraping_status === 'pending' ? 'Na fila...' : 
+                     detailedData?.scraping_status === 'running' ? 'Processando...' : 
+                     'Solicitar Raspagem Completa'}
+                  </Button>
+                )}
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
                 {headerItems.map((item) => (
                   <div key={item.label} className="text-xs rounded border bg-background px-2 py-1.5">
@@ -156,9 +261,100 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
                 ))}
               </div>
               {patent.abstract && (
-                <p className="text-xs text-muted-foreground line-clamp-2">
+                <p className="text-xs text-muted-foreground">
                   <span className="font-medium">Resumo:</span> {patent.abstract}
                 </p>
+              )}
+
+              {loadingDetails ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground py-2 border-t">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Carregando histórico do INPI...
+                </div>
+              ) : (
+                <div className="space-y-4 pt-2 border-t">
+                  {detailedData?.publications && detailedData.publications.length > 0 && (
+                    <div className="space-y-1.5">
+                      <h4 className="text-[10px] font-bold uppercase text-muted-foreground">Histórico de Publicações (RPI)</h4>
+                      <div className="rounded border overflow-hidden">
+                        <table className="w-full text-[10px] text-left border-collapse">
+                          <thead className="bg-muted text-muted-foreground">
+                            <tr>
+                              <th className="px-2 py-1 border-b">RPI</th>
+                              <th className="px-2 py-1 border-b">Data</th>
+                              <th className="px-2 py-1 border-b">Despacho</th>
+                              <th className="px-2 py-1 border-b">Complemento</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {detailedData.publications.map((p) => (
+                              <tr key={p.id} className={p.despacho_code === '3.1' ? "bg-yellow-500/10" : "hover:bg-muted/50"}>
+                                <td className="px-2 py-1 border-b font-medium">{p.rpi}</td>
+                                <td className="px-2 py-1 border-b">{p.date}</td>
+                                <td className="px-2 py-1 border-b">{p.despacho_code}</td>
+                                <td className="px-2 py-1 border-b">{p.complement}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {detailedData?.petitions && detailedData.petitions.length > 0 && (
+                    <div className="space-y-1.5">
+                      <h4 className="text-[10px] font-bold uppercase text-muted-foreground">Petições</h4>
+                      <div className="rounded border overflow-hidden">
+                        <table className="w-full text-[10px] text-left border-collapse">
+                          <thead className="bg-muted text-muted-foreground">
+                            <tr>
+                              <th className="px-2 py-1 border-b">Código</th>
+                              <th className="px-2 py-1 border-b">Protocolo</th>
+                              <th className="px-2 py-1 border-b">Data</th>
+                              <th className="px-2 py-1 border-b">Cliente</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {detailedData.petitions.map((p) => (
+                              <tr key={p.id} className="hover:bg-muted/50">
+                                <td className="px-2 py-1 border-b">{p.service_code}</td>
+                                <td className="px-2 py-1 border-b">{p.protocol}</td>
+                                <td className="px-2 py-1 border-b">{p.date}</td>
+                                <td className="px-2 py-1 border-b truncate max-w-[150px]">{p.client}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {detailedData?.annuities && detailedData.annuities.length > 0 && (
+                    <div className="space-y-1.5">
+                      <h4 className="text-[10px] font-bold uppercase text-muted-foreground">Anuidades</h4>
+                      <div className="rounded border overflow-hidden">
+                        <table className="w-full text-[10px] text-left border-collapse">
+                          <thead className="bg-muted text-muted-foreground">
+                            <tr>
+                              <th className="px-2 py-1 border-b">Título</th>
+                              <th className="px-2 py-1 border-b">Vencimento</th>
+                              <th className="px-2 py-1 border-b">Pagamento</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {detailedData.annuities.map((a) => (
+                              <tr key={a.id} className="hover:bg-muted/50">
+                                <td className="px-2 py-1 border-b font-medium">{a.title}</td>
+                                <td className="px-2 py-1 border-b">{a.end_date}</td>
+                                <td className="px-2 py-1 border-b">{a.payment_date || '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
