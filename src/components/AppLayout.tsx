@@ -28,6 +28,7 @@ const navigation = [
     items: [
       { label: "Dashboard", icon: LayoutDashboard, path: "/monitoring/dashboard" },
       { label: "Patentes", icon: ShieldCheck, path: "/monitoring/patents" },
+      { label: "Base de Patentes", icon: SearchCheck, path: "/monitoring/base" },
       { label: "Base de Conhecimento", icon: BookOpen, path: "/knowledge-base" },
       { label: "Configurações", icon: Settings, path: "/monitoring/settings" },
     ],

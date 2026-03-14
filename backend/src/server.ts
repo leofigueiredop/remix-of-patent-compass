@@ -2525,4 +2525,55 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
     }
 });
 
+// ─── Patent Base Endpoints ──────────────────────────────
+fastify.get('/patents/processed', async (request: any, reply) => {
+    const { page = 1, pageSize = 20 } = request.query as any;
+    const skip = (parseInt(page, 10) - 1) * parseInt(pageSize, 10);
+    const take = parseInt(pageSize, 10);
+
+    const [patents, total] = await Promise.all([
+        prisma.inpiPatent.findMany({
+            skip,
+            take,
+            orderBy: { updated_at: 'desc' },
+            include: {
+                _count: {
+                    select: {
+                        publications: true,
+                        petitions: true,
+                        annuities: true
+                    }
+                }
+            }
+        }),
+        prisma.inpiPatent.count()
+    ]);
+
+    return {
+        patents,
+        total,
+        page: parseInt(page, 10),
+        pageSize: take,
+        totalPages: Math.ceil(total / take)
+    };
+});
+
+fastify.get('/patents/queue', async (request: any, reply) => {
+    const jobs = await prisma.scrapingJob.findMany({
+        where: {
+            status: { in: ['pending', 'running', 'failed'] }
+        },
+        orderBy: { created_at: 'desc' },
+        include: {
+            patent: {
+                select: {
+                    numero_publicacao: true,
+                    title: true
+                }
+            }
+        }
+    });
+    return { jobs };
+});
+
 start();
