@@ -1111,15 +1111,15 @@ function parseInpiResults(html: string): any[] {
         const link = $(row).find('a[href*="PatenteServletController"]').first();
         if (!link.length) return;
 
-        // Skip pagination links (Page=1, Page=2, Next Page, etc.)
+        // Only accept detail view links (skips pagination, header/footer)
         const href = link.attr('href') || '';
         const onclick = link.attr('onclick') || '';
-        if (href.includes('Action=nextPage') || onclick.includes('Action=nextPage')) return;
+        if (!href.includes('Action=detail') && !onclick.includes('Action=detail')) return;
         
-        // Skip links that just look like page numbers
+        // Skip links that just look like page numbers or control text
         const linkText = link.text().trim();
         if (/^\d+$/.test(linkText) && linkText.length < 5) return;
-        if (/pr[óo]xima/i.test(linkText) || /anterior/i.test(linkText)) return;
+        if (/pr[óo]xima|anterior|in[íi]cio|fim/i.test(linkText)) return;
 
         const cells = $(row).find('td');
         if (cells.length < 2) return;
@@ -1172,9 +1172,12 @@ function parseInpiResults(html: string): any[] {
     });
 
     const pageText = $.root().text().replace(/\u00a0/g, ' ').replace(/\s+/g, ' ');
-    const totalMatch = html.match(/Foram encontrados[\s\S]{0,120}?<b>\s*([\d.,]+)\s*<\/b>\s*processos/i)
-        || html.match(/Foram encontrados[\s\S]{0,120}?<b>\s*([\d.,]+)\s*<\/b>/i)
-        || pageText.match(/Foram encontrados\s*([\d.,]+)/i);
+    // Improved regex to capture totals even with dots/commas and varied bold tags
+    const totalMatch = html.match(/Foram\s+encontrados.*?<b>\s*([\d.,]+)\s*<\/b>\s*processos/i)
+        || html.match(/Foram\s+encontrados.*?([\d.,]+)\s*processos/i)
+        || html.match(/Foram\s+encontrados.*?<b>\s*([\d.,]+)\s*<\/b>/i)
+        || pageText.match(/Foram\s+encontrados\s*([\d.,]+)/i);
+    
     const totalRaw = totalMatch?.[1]?.replace(/[^\d]/g, '');
     const currentPageMatch = html.match(/Mostrando\s+p[aá]gina[\s\S]{0,60}?<b>\s*(\d+)\s*<\/b>[\s\S]{0,40}?<b>\s*(\d+)\s*<\/b>/i)
         || pageText.match(/Mostrando\s+p[aá]gina\s*(\d+)\s*de\s*(\d+)/i);
@@ -2252,7 +2255,7 @@ fastify.post('/search/quick', async (request, reply) => {
     const inpiMinTotalForPage = inpiCurrentCount > 0
         ? ((inpiCurrentPage - 1) * requestedPageSize) + inpiCurrentCount
         : 0;
-    const inpiMayHaveNextPage = inpiCurrentCount === requestedPageSize;
+    const inpiMayHaveNextPage = inpiCurrentCount >= requestedPageSize;
     const inpiTotalPages = Math.max(
         inpiRawTotalPages,
         inpiCurrentPage,
