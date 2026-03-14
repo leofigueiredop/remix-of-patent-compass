@@ -2446,32 +2446,6 @@ const start = async () => {
     }
 };
 
-// ─── QUEUE ENDPOINT ───────────────────────────────────────────
-fastify.post('/patent/queue', async (request, reply) => {
-    const { codPedido } = request.body as { codPedido: string };
-    if (!codPedido) return reply.code(400).send({ error: 'codPedido is required' });
-
-    // Ensure the patent record exists
-    await prisma.inpiPatent.upsert({
-        where: { cod_pedido: codPedido },
-        update: {},
-        create: { cod_pedido: codPedido }
-    });
-
-    // Create a job if not already pending/running
-    const existing = await prisma.scrapingJob.findFirst({
-        where: { patent_id: codPedido, status: { in: ['pending', 'running'] } }
-    });
-
-    if (!existing) {
-        await prisma.scrapingJob.create({
-            data: { patent_id: codPedido, status: 'pending' }
-        });
-        return { message: 'Patent queued for full scrape' };
-    }
-
-    return { message: 'Patent is already being processed', status: existing.status };
-});
 
 // ─── UPDATED DETAIL ENDPOINT ──────────────────────────────────
 fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
