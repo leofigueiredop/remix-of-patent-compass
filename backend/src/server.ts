@@ -2236,7 +2236,7 @@ fastify.post('/search/quick', async (request, reply) => {
     const inpiMinTotalForPage = inpiCurrentCount > 0
         ? ((inpiCurrentPage - 1) * requestedPageSize) + inpiCurrentCount
         : 0;
-    const inpiMayHaveNextPage = inpiCurrentCount >= requestedPageSize;
+    const inpiMayHaveNextPage = fetchedInpiResults.length >= requestedPageSize;
     const inpiTotalPages = Math.max(
         inpiRawTotalPages,
         inpiCurrentPage,
@@ -2427,6 +2427,28 @@ Responda um JSON com array "results" contendo EXATAMENTE ${batch.length} objetos
 });
 
 // ─── Start ─────────────────────────────────────────────────────
+fastify.post('/debug/clear-cache', async (request, reply) => {
+    const { secret } = request.body as { secret: string };
+    if (secret !== 'leo123') return reply.code(403).send({ error: 'Unauthorized' });
+    
+    await prisma.searchResultCache.deleteMany({});
+    return { message: 'Cache de busca limpo com sucesso' };
+});
+
+fastify.get('/debug/test-inpi', async (request, reply) => {
+    try {
+        const { stdout, stderr } = await execInpiCurlWithRetry(
+            `curl -v --http1.1 -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' 'https://busca.inpi.gov.br/pePI/' -o /dev/null`,
+            1,
+            10000,
+            1024
+        );
+        return { success: true, stdout, stderr };
+    } catch (err: any) {
+        return { success: false, message: err.message, stderr: err.stderr };
+    }
+});
+
 const start = async () => {
     try {
         const startupLog = `/tmp/server_startup.log`;

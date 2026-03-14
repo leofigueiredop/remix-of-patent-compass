@@ -9,7 +9,7 @@ import AppLayout from "@/components/AppLayout";
 import PatentDocumentModal, { PatentDocumentData } from "@/components/PatentDocumentModal";
 import axios from "axios";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000").replace(/\/$/, "");
 
 interface PatentResult {
     publicationNumber: string;
