@@ -2018,25 +2018,6 @@ Retorne somente o texto traduzido, sem explicações.`;
     }
 }
 
-// ─── GET /search/inpi/detail/:codPedido ────────────────────────
-fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
-    const { codPedido } = request.params as { codPedido: string };
-    const { publicationNumber } = request.query as { publicationNumber?: string };
-    if (!codPedido) return reply.code(400).send({ error: 'CodPedido é obrigatório' });
-    try {
-        const detail = await fetchInpiDetailByCod(codPedido, publicationNumber);
-        return detail;
-    } catch (error: any) {
-        fastify.log.warn(`INPI detail scrape failed: ${error.message}`);
-        return {
-            codPedido,
-            source: 'INPI',
-            url: `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${encodeURIComponent(codPedido)}`,
-            figures: [],
-            detailUnavailable: true
-        };
-    }
-});
 
 fastify.get('/patent/document', async (request, reply) => {
     const { url, publicationNumber } = request.query as {
