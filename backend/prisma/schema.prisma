@@ -4,7 +4,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // 1. Authenticated Users (Admins/Consultants)
@@ -99,6 +98,8 @@ model InpiPatent {
   status            String?
   filing_date       String?
   ipc_codes         String?
+  last_rpi          String?
+  last_event        String?
   created_at        DateTime @default(now())
   updated_at        DateTime @updatedAt
 
@@ -124,6 +125,7 @@ model InpiPublication {
   created_at        DateTime @default(now())
 
   @@index([patent_id])
+  @@index([rpi])
 }
 
 model InpiPetition {

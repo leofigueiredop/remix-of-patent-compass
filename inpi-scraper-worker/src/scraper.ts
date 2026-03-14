@@ -2,7 +2,8 @@ import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import * as cheerio from 'cheerio';
 import * as dotenv from 'dotenv';
-import { prisma } from './db';
+import { prisma } from './db.js';
+import { updateWorkerState, state } from './state.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -298,20 +299,41 @@ async function scrapeMonth(year: number, month: number) {
     }
 }
 
-export async function startWorkerLoop() {
-    let year = new Date().getFullYear();
-    let month = new Date().getMonth() + 1;
+import { processRpi } from './rpi-crawler.js';
 
-    while (year >= 1990) {
+export async function startWorkerLoop() {
+    console.log("=== INPI RPI Worker Loop Started ===");
+    updateWorkerState({ status: 'Running' });
+    
+    // For now, let's process the current week and the last few weeks to ensure coverage
+    const latestRpi = 2879; // Hand-picked for 2026 test
+    const startRpi = 2870; // Start of year approximately
+    
+    for (let current = latestRpi; current >= startRpi; current--) {
         try {
-            await scrapeMonth(year, month);
-        } catch (error) {
-            console.error(`Fatal error scraping ${month}/${year}:`, error);
+            console.log(`\n[Worker] Syncing RPI ${current}...`);
+            updateWorkerState({ currentRPI: current });
+            await processRpi(current);
+            console.log(`[Worker] RPI ${current} synced successfully.`);
+            
+            // Humanized delay between RPI journals (ZIP downloads)
+            const delay = Math.floor(Math.random() * 5000) + 3000;
+            console.log(`[Worker] Waiting ${delay}ms before next journal...`);
+            await sleep(delay);
+        } catch (error: any) {
+            console.error(`[Worker] Failed to process RPI ${current}:`, error.message);
+            updateWorkerState({ errors: (state as any).errors + 1 });
         }
-        month -= 1;
-        if (month < 1) {
-            month = 12;
-            year -= 1;
-        }
+    }
+
+    console.log("=== Initial 2026 Sync Complete ===");
+    updateWorkerState({ status: 'Idle' });
+    
+    // Idle loop: check for new RPI every 12 hours
+    while (true) {
+        console.log("[Worker] Sleeping for 12 hours before next check...");
+        await sleep(12 * 60 * 60 * 1000);
+        updateWorkerState({ status: 'Running' });
+        // Add logic to autodiscover next RPI here eventually
     }
 }

@@ -6,30 +6,40 @@
   "scripts": {
     "start": "node dist/index.js",
     "build": "npx prisma generate && tsc",
-    "dev": "nodemon src/index.ts"
+    "dev": "nodemon src/index.ts",
+    "test:espacenet": "tsx src/test_espacenet.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@prisma/client": "^7.4.2",
+    "@aws-sdk/client-s3": "^3.1009.0",
+    "@aws-sdk/lib-storage": "^3.1009.0",
+    "@prisma/adapter-pg": "^7.5.0",
+    "@prisma/client": "^7.5.0",
+    "adm-zip": "^0.5.16",
     "axios": "^1.13.6",
     "cheerio": "^1.2.0",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
+    "fast-xml-parser": "^5.5.5",
+    "fs-extra": "^11.3.4",
     "pg": "^8.20.0",
     "puppeteer": "^24.39.0",
     "puppeteer-extra": "^3.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "tsx": "^4.21.0"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
     "@types/cheerio": "^0.22.35",
     "@types/express": "^5.0.6",
+    "@types/fs-extra": "^11.0.4",
     "@types/node": "^25.4.0",
     "@types/pg": "^8.18.0",
     "nodemon": "^3.1.14",
-    "prisma": "^7.4.2",
+    "prisma": "^7.5.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }

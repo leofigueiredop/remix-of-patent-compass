@@ -2,19 +2,12 @@ import express from 'express';
 import * as dotenv from 'dotenv';
 dotenv.config();
 
-import { startWorkerLoop } from './scraper';
+import { startWorkerLoop } from './scraper.js';
+import { state } from './state.js';
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// State management
-let state = {
-    status: 'Booting',
-    totalScraped: 0,
-    errors: 0,
-    lastPatentProcessed: null as string | null,
-    currentRPI: null as number | null,
-};
 
 app.get('/', (req, res) => {
     res.send(`
@@ -34,7 +27,7 @@ app.get('/', (req, res) => {
                 <div class="card">
                     <h1>⚙️ INPI Worker Status</h1>
                     <div class="metric">Status: <span class="status">${state.status}</span></div>
-                    <div class="metric">Patents Processed: <b>${state.totalScraped}</b></div>
+                    <div class="metric">Patents Processed: <b>${state.totalProcessed}</b></div>
                     <div class="metric">Errors Encountered: <b>${state.errors}</b></div>
                     <div class="metric">Current RPI / Date: <b>${state.currentRPI || 'Initializing...'}</b></div>
                     <div class="metric">Last Patent: <b>${state.lastPatentProcessed || 'None'}</b></div>
