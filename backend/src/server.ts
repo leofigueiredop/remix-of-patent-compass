@@ -2579,4 +2579,53 @@ fastify.get('/patents/queue', async (request: any, reply) => {
     return { jobs };
 });
 
+fastify.post('/patent/queue', async (request: any, reply) => {
+    const { codPedido, publicationNumber, title } = request.body as {
+        codPedido: string;
+        publicationNumber?: string;
+        title?: string;
+    };
+
+    if (!codPedido) {
+        return reply.code(400).send({ error: 'codPedido é obrigatório' });
+    }
+
+    // 1. Ensure patent exists (upsert stub)
+    await prisma.inpiPatent.upsert({
+        where: { cod_pedido: codPedido },
+        update: {
+            // Keep existing data, but update numbering if provided
+            numero_publicacao: publicationNumber || undefined,
+            title: title || undefined
+        },
+        create: {
+            cod_pedido: codPedido,
+            numero_publicacao: publicationNumber || null,
+            title: title || null
+        }
+    });
+
+    // 2. Check if a job is already active/pending
+    const activeJob = await prisma.scrapingJob.findFirst({
+        where: {
+            patent_id: codPedido,
+            status: { in: ['pending', 'running'] }
+        }
+    });
+
+    if (activeJob) {
+        return { status: activeJob.status, message: 'Já está na fila ou sendo processado' };
+    }
+
+    // 3. Create new job
+    const job = await prisma.scrapingJob.create({
+        data: {
+            patent_id: codPedido,
+            status: 'pending'
+        }
+    });
+
+    return { status: job.status, jobId: job.id };
+});
+
 start();

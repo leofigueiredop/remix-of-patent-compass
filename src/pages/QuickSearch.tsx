@@ -443,7 +443,12 @@ export default function QuickSearch() {
         
         setQueueingPatents(prev => ({ ...prev, [codPedido]: true }));
         try {
-            const response = await axios.post(`${API_URL}/patent/queue`, { codPedido });
+            const cleanApiUrl = API_URL.endsWith('/') ? API_URL.slice(0, -1) : API_URL;
+            const response = await axios.post(`${cleanApiUrl}/patent/queue`, { 
+                codPedido,
+                publicationNumber: patent.publicationNumber,
+                title: patent.title
+            });
             setQueuedPatents(prev => ({ ...prev, [codPedido]: response.data.status || 'pending' }));
         } catch (err) {
             console.error("Failed to queue patent:", err);
