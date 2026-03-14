@@ -1111,14 +1111,22 @@ function parseInpiResults(html: string): any[] {
         const link = $(row).find('a[href*="PatenteServletController"]').first();
         if (!link.length) return;
 
+        // Skip pagination links (Page=1, Page=2, Next Page, etc.)
+        const href = link.attr('href') || '';
+        const onclick = link.attr('onclick') || '';
+        if (href.includes('Action=nextPage') || onclick.includes('Action=nextPage')) return;
+        
+        // Skip links that just look like page numbers
+        const linkText = link.text().trim();
+        if (/^\d+$/.test(linkText) && linkText.length < 5) return;
+        if (/pr[óo]xima/i.test(linkText) || /anterior/i.test(linkText)) return;
+
         const cells = $(row).find('td');
         if (cells.length < 2) return;
 
-        const number = link.text().trim();
+        const number = linkText;
         if (!number) return;
 
-        const href = link.attr('href') || '';
-        const onclick = link.attr('onclick') || '';
         const codMatch = (href.match(/[?&]CodPedido=(\d+)/i) || onclick.match(/[?&]CodPedido=(\d+)/i));
         const codPedido = codMatch ? codMatch[1] : '';
         const detailUrl = href
@@ -1164,7 +1172,8 @@ function parseInpiResults(html: string): any[] {
     });
 
     const pageText = $.root().text().replace(/\u00a0/g, ' ').replace(/\s+/g, ' ');
-    const totalMatch = html.match(/Foram encontrados[\s\S]{0,120}?<b>\s*([\d.,]+)\s*<\/b>/i)
+    const totalMatch = html.match(/Foram encontrados[\s\S]{0,120}?<b>\s*([\d.,]+)\s*<\/b>\s*processos/i)
+        || html.match(/Foram encontrados[\s\S]{0,120}?<b>\s*([\d.,]+)\s*<\/b>/i)
         || pageText.match(/Foram encontrados\s*([\d.,]+)/i);
     const totalRaw = totalMatch?.[1]?.replace(/[^\d]/g, '');
     const currentPageMatch = html.match(/Mostrando\s+p[aá]gina[\s\S]{0,60}?<b>\s*(\d+)\s*<\/b>[\s\S]{0,40}?<b>\s*(\d+)\s*<\/b>/i)
@@ -1420,8 +1429,8 @@ async function searchInpiViaCurl(params: {
         const reportedTotal: number | undefined = (firstPageResults as any).total;
         const perPageFromHtml: number | undefined = (firstPageResults as any).perPage;
         const reportedTotalPages: number | undefined = (firstPageResults as any).totalPages;
-        const maxResults = 500;
-        const maxPages = typeof params.maxPages === 'number' && params.maxPages > 0 ? params.maxPages : 5;
+        const maxResults = 10000;
+        const maxPages = typeof params.maxPages === 'number' && params.maxPages > 0 ? params.maxPages : 20;
         const targetTotal = reportedTotal && reportedTotal > 0 ? Math.min(reportedTotal, maxResults) : maxResults;
         const perPageEstimate = perPageFromHtml && perPageFromHtml > 0 ? perPageFromHtml : requestedPageSize;
         const estimatedTotalPages = reportedTotalPages && reportedTotalPages > 0
