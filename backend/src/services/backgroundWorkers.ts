@@ -152,16 +152,35 @@ async function rpiZipExists(rpiNumber: number): Promise<boolean> {
     } catch {
         headStatus = undefined;
     }
-    if (headStatus === 200) return true;
+    const isZipSignature = (value: Buffer): boolean => {
+        if (!value || value.length < 4) return false;
+        const signature = value.subarray(0, 4).toString('hex');
+        return signature === '504b0304' || signature === '504b0506' || signature === '504b0708';
+    };
+    if (headStatus === 200) {
+        try {
+            const probe = await axios.get(url, {
+                timeout: 15000,
+                responseType: 'arraybuffer',
+                headers: { Range: 'bytes=0-3', 'Cache-Control': 'no-cache' },
+                validateStatus: () => true
+            });
+            const data = Buffer.from(probe.data || []);
+            return isZipSignature(data);
+        } catch {
+            return false;
+        }
+    }
     if (typeof headStatus === 'number' && ![403, 405].includes(headStatus)) return false;
     try {
         const response = await axios.get(url, {
             timeout: 15000,
             responseType: 'arraybuffer',
-            maxContentLength: 2048,
+            headers: { Range: 'bytes=0-3', 'Cache-Control': 'no-cache' },
             validateStatus: () => true
         });
-        return response.status === 200;
+        const data = Buffer.from(response.data || []);
+        return (response.status === 200 || response.status === 206) && isZipSignature(data);
     } catch {
         return false;
     }
@@ -240,6 +259,11 @@ async function validateZipFile(zipPath: string) {
 }
 
 async function downloadRpiZipWithRetry(zipUrl: string, zipPath: string, maxAttempts = 5) {
+    const hasZipSignature = (value: Buffer): boolean => {
+        if (!value || value.length < 4) return false;
+        const signature = value.subarray(0, 4).toString('hex');
+        return signature === '504b0304' || signature === '504b0506' || signature === '504b0708';
+    };
     let lastError = 'Falha desconhecida no download do ZIP';
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
@@ -251,6 +275,10 @@ async function downloadRpiZipWithRetry(zipUrl: string, zipPath: string, maxAttem
             });
             if (response.status !== 200) {
                 throw new Error(`HTTP ${response.status} ao baixar ${zipUrl}`);
+            }
+            const payload = Buffer.from(response.data || []);
+            if (!hasZipSignature(payload)) {
+                throw new Error('Arquivo remoto não é ZIP válido (RPI inexistente neste endpoint)');
             }
             await fs.writeFile(zipPath, response.data);
             await validateZipFile(zipPath);
@@ -471,11 +499,13 @@ async function processNextRpiImportJob() {
                 }
             });
         } catch (error: unknown) {
+            const message = errorMessage(error, 'Erro ao processar RPI');
+            const permanentByContent = message.toLowerCase().includes('não é zip válido');
             await prisma.rpiImportJob.update({
                 where: { id: job.id },
                 data: {
-                    status: nextAttempt >= MAX_RPI_ATTEMPTS ? 'failed_permanent' : 'failed',
-                    error: truncateError(errorMessage(error, 'Erro ao processar RPI')),
+                    status: permanentByContent || nextAttempt >= MAX_RPI_ATTEMPTS ? 'failed_permanent' : 'failed',
+                    error: truncateError(message),
                     finished_at: new Date()
                 }
             });
@@ -515,6 +545,22 @@ async function recoverStaleRunningJobs() {
             status: 'failed',
             finished_at: new Date(),
             error: `Job reiniciado automaticamente: execução travada por mais de ${STALE_JOB_MINUTES} minutos`
+        }
+    });
+}
+
+async function quarantineInvalidFutureRpiJobs() {
+    const latest = await detectLatestRpiNumber();
+    if (!latest) return;
+    await prisma.rpiImportJob.updateMany({
+        where: {
+            rpi_number: { gt: latest + 2 },
+            status: { in: ['pending', 'failed', 'running'] }
+        },
+        data: {
+            status: 'failed_permanent',
+            finished_at: new Date(),
+            error: `RPI fora da janela atual detectada (${latest}). Job bloqueado automaticamente`
         }
     });
 }
@@ -748,6 +794,7 @@ export async function startBackgroundWorkers() {
     if (loopsStarted) return;
     loopsStarted = true;
     recoverStaleRunningJobs().catch(() => undefined);
+    quarantineInvalidFutureRpiJobs().catch(() => undefined);
     enqueueLastFiveYearsRpi().catch(() => undefined);
     processNextRpiImportJob().catch(() => undefined);
     processNextDocumentJob().catch(() => undefined);
@@ -760,6 +807,9 @@ export async function startBackgroundWorkers() {
     setInterval(() => {
         recoverStaleRunningJobs().catch(() => undefined);
     }, 60 * 1000);
+    setInterval(() => {
+        quarantineInvalidFutureRpiJobs().catch(() => undefined);
+    }, 30 * 60 * 1000);
     setInterval(() => {
         enqueueLastFiveYearsRpi().catch(() => undefined);
     }, 6 * 60 * 60 * 1000);
