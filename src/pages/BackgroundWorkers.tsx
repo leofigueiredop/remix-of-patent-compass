@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { RefreshCw, Clock, CheckCircle2, AlertCircle, FileDown, Files, PauseCircle, PlayCircle } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
@@ -250,6 +251,13 @@ export default function BackgroundWorkers() {
   const [rpiTab, setRpiTab] = useState("processing");
   const [docsTab, setDocsTab] = useState("processing");
   const [opsTab, setOpsTab] = useState("processing");
+  const [enqueueFrom, setEnqueueFrom] = useState("");
+  const [enqueueTo, setEnqueueTo] = useState("");
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+  const [filterCodes, setFilterCodes] = useState("");
+  const [filterTarget, setFilterTarget] = useState<"all" | "docs" | "ops">("all");
+  const [actionMessage, setActionMessage] = useState("");
 
   const counters = useMemo(() => ({
     rpiProcessing: data.rpi.counts?.processing ?? data.rpi.processing.length,
@@ -312,6 +320,70 @@ export default function BackgroundWorkers() {
     await fetchQueues();
   };
 
+  const enqueueRange = async () => {
+    const from = Number.parseInt(enqueueFrom, 10);
+    const to = Number.parseInt(enqueueTo, 10);
+    setLoading(true);
+    try {
+      const response = await axios.post(`${API_URL}/background-workers/rpi/enqueue-range`, { from, to });
+      setActionMessage(`RPIs enfileiradas: ${response.data.created}/${response.data.requested} (${response.data.from} até ${response.data.to})`);
+      await fetchQueues();
+    } catch (error: any) {
+      setActionMessage(error?.response?.data?.error || "Falha ao enfileirar intervalo de RPI");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const enqueueByFilter = async () => {
+    const rpiFrom = filterFrom ? Number.parseInt(filterFrom, 10) : undefined;
+    const rpiTo = filterTo ? Number.parseInt(filterTo, 10) : undefined;
+    setLoading(true);
+    try {
+      const response = await axios.post(`${API_URL}/background-workers/requeue-by-filter`, {
+        rpiFrom,
+        rpiTo,
+        dispatchCodes: filterCodes,
+        target: filterTarget
+      });
+      setActionMessage(`Filtro aplicado: ${response.data.selectedRows} registros, docs=${response.data.docsQueued}, ops=${response.data.opsQueued}`);
+      await fetchQueues();
+    } catch (error: any) {
+      setActionMessage(error?.response?.data?.error || "Falha ao enfileirar por filtro");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const clearProcessingAndErrors = async () => {
+    if (!window.confirm("Limpar listas de erros e processando das filas RPI/Docs/OPS?")) return;
+    setLoading(true);
+    try {
+      const response = await axios.post(`${API_URL}/background-workers/clear-active-errors`);
+      setActionMessage(`Listas limpas: RPI=${response.data.rpiDeleted}, Docs=${response.data.docsDeleted}, OPS=${response.data.opsDeleted}`);
+      await fetchQueues();
+    } catch (error: any) {
+      setActionMessage(error?.response?.data?.error || "Falha ao limpar listas");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const reprocessAllFiveYears = async () => {
+    if (!window.confirm("Reprocessar tudo (5 anos) e limpar erros/processando atuais?")) return;
+    setLoading(true);
+    try {
+      const response = await axios.post(`${API_URL}/background-workers/reprocess-all`);
+      const enqueued = response.data.enqueued || {};
+      setActionMessage(`Reprocessamento iniciado: RPI ${enqueued.from}→${enqueued.to} (${enqueued.count} enfileiradas)`);
+      await fetchQueues();
+    } catch (error: any) {
+      setActionMessage(error?.response?.data?.error || "Falha ao iniciar reprocessamento total");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchQueues();
     const timer = setInterval(() => fetchQueues(), 8000);
@@ -342,6 +414,12 @@ export default function BackgroundWorkers() {
               <Files className="w-4 h-4" />
               Enfileirar 5 anos de RPI
             </Button>
+            <Button variant="outline" onClick={clearProcessingAndErrors} disabled={loading} className="gap-2">
+              Limpar Erros/Processando
+            </Button>
+            <Button variant="default" onClick={reprocessAllFiveYears} disabled={loading} className="gap-2">
+              Reprocessar Tudo (5 anos)
+            </Button>
             <Button variant="outline" onClick={fetchQueues} disabled={loading} className="gap-2">
               <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
               Atualizar
@@ -350,6 +428,62 @@ export default function BackgroundWorkers() {
         </div>
 
         <Tabs value={mainTab} onValueChange={setMainTab}>
+          <Card>
+            <CardHeader>
+              <CardTitle>Enfileiramento por Filtro</CardTitle>
+              <CardDescription>Use a interface para enfileirar RPIs e jobs sem usar terminal.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                <Input
+                  placeholder="RPI de"
+                  value={enqueueFrom}
+                  onChange={(event) => setEnqueueFrom(event.target.value)}
+                />
+                <Input
+                  placeholder="RPI até"
+                  value={enqueueTo}
+                  onChange={(event) => setEnqueueTo(event.target.value)}
+                />
+                <Button onClick={enqueueRange} disabled={loading} className="md:col-span-2">
+                  Enfileirar intervalo RPI
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-6 gap-2">
+                <Input
+                  placeholder="Filtro RPI de"
+                  value={filterFrom}
+                  onChange={(event) => setFilterFrom(event.target.value)}
+                />
+                <Input
+                  placeholder="Filtro RPI até"
+                  value={filterTo}
+                  onChange={(event) => setFilterTo(event.target.value)}
+                />
+                <Input
+                  placeholder="Códigos despacho (ex: 3.1,16.1)"
+                  value={filterCodes}
+                  onChange={(event) => setFilterCodes(event.target.value)}
+                  className="md:col-span-2"
+                />
+                <select
+                  className="h-10 rounded-md border bg-background px-3 text-sm"
+                  value={filterTarget}
+                  onChange={(event) => setFilterTarget(event.target.value as "all" | "docs" | "ops")}
+                >
+                  <option value="all">Docs + OPS</option>
+                  <option value="docs">Só Docs</option>
+                  <option value="ops">Só OPS</option>
+                </select>
+                <Button onClick={enqueueByFilter} disabled={loading}>
+                  Enfileirar por filtro
+                </Button>
+              </div>
+              {actionMessage && (
+                <div className="text-xs text-muted-foreground">{actionMessage}</div>
+              )}
+            </CardContent>
+          </Card>
           <TabsList>
             <TabsTrigger value="rpi" className="gap-2">
               <Files className="w-4 h-4" />

@@ -2924,6 +2924,167 @@ fastify.post('/background-workers/rpi/bootstrap', async (request, reply) => {
     }
 });
 
+fastify.post('/background-workers/rpi/enqueue-range', async (request: any, reply) => {
+    const { from, to } = request.body as { from?: number; to?: number };
+    const start = Number.isFinite(from) ? Math.max(1, Math.floor(Number(from))) : 0;
+    const end = Number.isFinite(to) ? Math.max(1, Math.floor(Number(to))) : 0;
+    if (!start || !end || end < start) {
+        return reply.code(400).send({ error: 'Intervalo inválido (from/to)' });
+    }
+    const rows = [];
+    for (let rpi = start; rpi <= end; rpi++) {
+        rows.push({
+            rpi_number: rpi,
+            status: 'pending',
+            source_url: `https://revistas.inpi.gov.br/txt/P${rpi}.zip`
+        });
+    }
+    const created = await prisma.rpiImportJob.createMany({
+        data: rows,
+        skipDuplicates: true
+    });
+    return { from: start, to: end, requested: rows.length, created: created.count };
+});
+
+fastify.post('/background-workers/requeue-by-filter', async (request: any, reply) => {
+    const {
+        rpiFrom,
+        rpiTo,
+        dispatchCodes,
+        target = 'all',
+        maxRows = 2000
+    } = request.body as {
+        rpiFrom?: number;
+        rpiTo?: number;
+        dispatchCodes?: string;
+        target?: 'docs' | 'ops' | 'all';
+        maxRows?: number;
+    };
+    const safeMaxRows = Math.min(10000, Math.max(1, Math.floor(Number(maxRows) || 2000)));
+    const where: any = {};
+    if (Number.isFinite(rpiFrom) || Number.isFinite(rpiTo)) {
+        where.rpi = {};
+        if (Number.isFinite(rpiFrom)) where.rpi.gte = String(Math.max(1, Math.floor(Number(rpiFrom))));
+        if (Number.isFinite(rpiTo)) where.rpi.lte = String(Math.max(1, Math.floor(Number(rpiTo))));
+    }
+    const codeFilter = (dispatchCodes || '')
+        .split(',')
+        .map((item) => normalizeDispatchCode(item))
+        .filter(Boolean);
+    const rows = await prisma.inpiPublication.findMany({
+        where,
+        orderBy: [{ created_at: 'desc' }],
+        take: safeMaxRows,
+        select: {
+            id: true,
+            patent_id: true,
+            patent_number: true,
+            rpi: true,
+            despacho_code: true,
+            eligible_for_doc_download: true
+        }
+    });
+    const filteredRows = codeFilter.length > 0
+        ? rows.filter((row) => codeFilter.includes(normalizeDispatchCode(row.despacho_code || '')))
+        : rows;
+    let docsQueued = 0;
+    let opsQueued = 0;
+    for (const row of filteredRows) {
+        const normalizedCode = normalizeDispatchCode(row.despacho_code || '');
+        const docEligible = row.eligible_for_doc_download || normalizedCode === '3.1' || normalizedCode === '16.1';
+        if ((target === 'all' || target === 'docs') && docEligible && row.patent_id) {
+            await prisma.documentDownloadJob.upsert({
+                where: { patent_id: row.patent_id },
+                update: {
+                    status: 'pending',
+                    error: null,
+                    finished_at: null,
+                    publication_number: row.patent_number || undefined
+                },
+                create: {
+                    patent_id: row.patent_id,
+                    status: 'pending',
+                    publication_number: row.patent_number || undefined
+                }
+            });
+            docsQueued++;
+        }
+        if ((target === 'all' || target === 'ops') && (!docEligible) && row.patent_number) {
+            await prisma.opsBibliographicJob.upsert({
+                where: { patent_number: row.patent_number },
+                update: {
+                    status: 'pending',
+                    error: null,
+                    finished_at: null,
+                    rpi_number: Number.parseInt(row.rpi, 10) || undefined
+                },
+                create: {
+                    patent_number: row.patent_number,
+                    status: 'pending',
+                    rpi_number: Number.parseInt(row.rpi, 10) || undefined
+                }
+            });
+            opsQueued++;
+        }
+    }
+    return {
+        selectedRows: filteredRows.length,
+        docsQueued,
+        opsQueued,
+        target
+    };
+});
+
+fastify.post('/background-workers/clear-active-errors', async () => {
+    const [rpiDeleted, docsDeleted, opsDeleted] = await Promise.all([
+        prisma.rpiImportJob.deleteMany({
+            where: {
+                status: { in: ['pending', 'running', 'failed', 'failed_permanent'] }
+            }
+        }),
+        prisma.documentDownloadJob.deleteMany({
+            where: {
+                status: { in: ['pending', 'running', 'failed', 'failed_permanent', 'not_found', 'skipped_sigilo'] }
+            }
+        }),
+        prisma.opsBibliographicJob.deleteMany({
+            where: {
+                status: { in: ['pending', 'running', 'failed', 'failed_permanent', 'not_found'] }
+            }
+        })
+    ]);
+    return {
+        rpiDeleted: rpiDeleted.count,
+        docsDeleted: docsDeleted.count,
+        opsDeleted: opsDeleted.count
+    };
+});
+
+fastify.post('/background-workers/reprocess-all', async () => {
+    const [rpiDeleted, docsDeleted, opsDeleted] = await Promise.all([
+        prisma.rpiImportJob.deleteMany({}),
+        prisma.documentDownloadJob.deleteMany({
+            where: {
+                status: { in: ['pending', 'running', 'failed', 'failed_permanent', 'not_found', 'skipped_sigilo'] }
+            }
+        }),
+        prisma.opsBibliographicJob.deleteMany({
+            where: {
+                status: { in: ['pending', 'running', 'failed', 'failed_permanent', 'not_found'] }
+            }
+        })
+    ]);
+    const boot = await enqueueLastFiveYearsRpi();
+    return {
+        queuesCleared: {
+            rpiDeleted: rpiDeleted.count,
+            docsDeleted: docsDeleted.count,
+            opsDeleted: opsDeleted.count
+        },
+        enqueued: boot
+    };
+});
+
 fastify.get('/background-workers/state', async () => {
     return getBackgroundWorkerState();
 });
