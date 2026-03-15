@@ -45,6 +45,14 @@ export interface PatentDocumentData {
   source?: string;
   url: string;
   status?: string;
+  figures?: string[];
+  inpiUrl?: string;
+  storage?: {
+    hasStoredDocument?: boolean;
+    fullDocumentPath?: string;
+    drawingsPath?: string;
+    firstPagePath?: string;
+  };
   publications?: InpiPublication[];
   petitions?: InpiPetition[];
   annuities?: InpiAnnuity[];
@@ -85,9 +93,29 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
     setLoadingTranslation(false);
   }, [open, patent?.publicationNumber]);
 
+  useEffect(() => {
+    if (!open) return;
+    setViewerMode("doc");
+  }, [open, patent?.publicationNumber]);
+
   const [detailedData, setDetailedData] = useState<PatentDocumentData | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [queueing, setQueueing] = useState(false);
+  const [viewerMode, setViewerMode] = useState<"doc" | "drawings" | "first">("doc");
+
+  const normalizeApiUrl = API_URL.replace(/\/$/, "");
+  const resolveAssetUrl = (value?: string | null) => {
+    if (!value) return "";
+    if (/^https?:\/\//i.test(value)) return value;
+    const normalized = value.startsWith("/") ? value : `/${value}`;
+    return `${normalizeApiUrl}${normalized}`;
+  };
+
+  const fullDocumentPath = resolveAssetUrl(patent?.storage?.fullDocumentPath || patent?.url || "");
+  const drawingsPath = resolveAssetUrl(patent?.storage?.drawingsPath || "");
+  const firstPagePath = resolveAssetUrl(patent?.storage?.firstPagePath || patent?.figures?.[0] || "");
+  const hasDrawings = Boolean(drawingsPath);
+  const hasFirstPage = Boolean(firstPagePath);
 
   useEffect(() => {
     let active = true;
@@ -118,6 +146,9 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
           inventor: data.inventors || patent.inventor,
           date: data.filing_date || patent.date,
           status: data.status || patent.status,
+          figures: Array.isArray(data.figures) ? data.figures : patent.figures,
+          inpiUrl: data.inpiUrl || patent.inpiUrl,
+          storage: data.storage || patent.storage,
           publications: data.publications,
           petitions: data.petitions,
           annuities: data.annuities,
@@ -134,7 +165,13 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
     void loadDetails();
 
     const loadPdf = async () => {
-      if (!open || !patent?.url) return;
+      if (!open) return;
+      const targetUrl = viewerMode === "doc"
+        ? fullDocumentPath
+        : viewerMode === "drawings"
+          ? drawingsPath
+          : firstPagePath;
+      if (!targetUrl) return;
       setLoadingPdf(true);
       setPdfError("");
       if (pdfUrl) {
@@ -143,9 +180,14 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
       setPdfUrl(null);
 
       try {
+        if (targetUrl.includes("/patent/storage/")) {
+          if (!active) return;
+          setPdfUrl(targetUrl);
+          return;
+        }
         const response = await axios.get(`${API_URL}/patent/document`, {
           params: {
-            url: patent.url,
+            url: targetUrl,
             publicationNumber: patent.publicationNumber
           },
           responseType: "blob",
@@ -170,7 +212,7 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
     return () => {
       active = false;
     };
-  }, [open, patent]);
+  }, [open, patent, viewerMode, fullDocumentPath, drawingsPath, firstPagePath]);
 
   const handleQueueScraping = async () => {
     if (!detailedData?.cod_pedido) return;
@@ -200,6 +242,10 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
 
   const handleDownload = () => {
     if (!pdfUrl || !patent) return;
+    if (/^https?:\/\//i.test(pdfUrl) || pdfUrl.includes("/patent/storage/")) {
+      window.open(pdfUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
     const anchor = document.createElement("a");
     anchor.href = pdfUrl;
     anchor.download = `${(patent.publicationNumber || "patente").replace(/[^\w.-]/g, "_")}.pdf`;
@@ -369,10 +415,40 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
                 )}
                 <Button
                   type="button"
+                  variant={viewerMode === "doc" ? "secondary" : "outline"}
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => setViewerMode("doc")}
+                  disabled={!fullDocumentPath}
+                >
+                  Documento
+                </Button>
+                <Button
+                  type="button"
+                  variant={viewerMode === "drawings" ? "secondary" : "outline"}
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => setViewerMode("drawings")}
+                  disabled={!hasDrawings}
+                >
+                  Figuras
+                </Button>
+                <Button
+                  type="button"
+                  variant={viewerMode === "first" ? "secondary" : "outline"}
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => setViewerMode("first")}
+                  disabled={!hasFirstPage}
+                >
+                  Primeira página
+                </Button>
+                <Button
+                  type="button"
                   variant="outline"
                   size="sm"
                   className="gap-1.5"
-                  onClick={() => window.open(patent.url, "_blank", "noopener,noreferrer")}
+                  onClick={() => window.open(patent.inpiUrl || patent.url, "_blank", "noopener,noreferrer")}
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
                   Fonte original

@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import jwt from '@fastify/jwt';
 import axios from 'axios';
+import { GetObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -43,6 +44,11 @@ const WHISPER_BASE_URL = process.env.WHISPER_BASE_URL || 'http://whisper:8000';
 const OPS_CONSUMER_KEY = process.env.OPS_CONSUMER_KEY || '';
 const OPS_CONSUMER_SECRET = process.env.OPS_CONSUMER_SECRET || '';
 const INPI_MODE = process.env.INPI_MODE || 'scrape';
+const S3_ENDPOINT = process.env.S3_ENDPOINT || '';
+const S3_REGION = process.env.S3_REGION || 'garage';
+const S3_ACCESS_KEY = process.env.S3_ACCESS_KEY || '';
+const S3_SECRET_KEY = process.env.S3_SECRET_KEY || '';
+const S3_BUCKET = process.env.S3_BUCKET || 'patents';
 
 // ─── Queues (Throttle APIs) ───────────────────────────────────
 class AsyncQueue {
@@ -381,6 +387,45 @@ function parseQueryTokens(value?: string): string[] {
         .filter((token) => token.length >= 3);
 }
 
+function getS3Client() {
+    return new S3Client({
+        endpoint: S3_ENDPOINT,
+        region: S3_REGION,
+        credentials: {
+            accessKeyId: S3_ACCESS_KEY,
+            secretAccessKey: S3_SECRET_KEY
+        },
+        forcePathStyle: true
+    });
+}
+
+function sanitizePublicationForStorage(publicationNumber?: string): string {
+    return (publicationNumber || '').replace(/[^\w.-]/g, '_');
+}
+
+function buildStorageAssetPath(publicationNumber: string, asset: 'full' | 'drawings' | 'first'): string {
+    const encodedPublication = encodeURIComponent(publicationNumber);
+    return `/patent/storage/${encodedPublication}/${asset}`;
+}
+
+function buildStorageAssetKey(publicationNumber: string, asset: 'full' | 'drawings' | 'first'): string {
+    const safeBase = sanitizePublicationForStorage(publicationNumber);
+    const fileName = asset === 'full'
+        ? 'full_document.pdf'
+        : asset === 'drawings'
+            ? 'drawings.pdf'
+            : 'first_page.pdf';
+    return `patent-docs/${safeBase}/${fileName}`;
+}
+
+function buildStorageAssets(publicationNumber: string) {
+    return {
+        fullDocumentPath: buildStorageAssetPath(publicationNumber, 'full'),
+        drawingsPath: buildStorageAssetPath(publicationNumber, 'drawings'),
+        firstPagePath: buildStorageAssetPath(publicationNumber, 'first')
+    };
+}
+
 async function searchLocalPatentBase(input: LocalPatentSearchInput): Promise<{
     results: any[];
     total: number;
@@ -471,10 +516,16 @@ async function searchLocalPatentBase(input: LocalPatentSearchInput): Promise<{
             classification: patent.ipc_codes || '',
             source: 'INPI',
             url: downloadable
-                ? buildEspacenetUrl(publicationNumber)
+                ? buildStorageAssetPath(publicationNumber, 'full')
                 : buildInpiDetailUrl(patent.cod_pedido, publicationNumber),
             status: patent.status || '',
-            cod_pedido: patent.cod_pedido
+            cod_pedido: patent.cod_pedido,
+            inpiUrl: buildInpiDetailUrl(patent.cod_pedido, publicationNumber),
+            figures: downloadable ? [buildStorageAssetPath(publicationNumber, 'first'), buildStorageAssetPath(publicationNumber, 'drawings')] : [],
+            storage: {
+                hasStoredDocument: downloadable,
+                ...buildStorageAssets(publicationNumber)
+            }
         };
     });
 
@@ -2616,6 +2667,11 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
             publications: true,
             petitions: true,
             annuities: true,
+            document_jobs: {
+                where: { status: 'completed', storage_key: { not: null } },
+                orderBy: { updated_at: 'desc' },
+                take: 1
+            },
             scraping_jobs: {
                 orderBy: { created_at: 'desc' },
                 take: 1
@@ -2629,11 +2685,52 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
             inpiUrl: buildInpiDetailUrl(codPedido)
         });
     }
+    const publicationNumber = dbData.numero_publicacao || dbData.cod_pedido;
+    const completedDocJob = dbData.document_jobs[0];
+    const hasStoredDocument = Boolean(completedDocJob?.storage_key);
     return {
         ...dbData,
         scraping_status: dbData.scraping_jobs[0]?.status || 'available_for_queue',
-        inpiUrl: buildInpiDetailUrl(codPedido, dbData.numero_publicacao || codPedido)
+        inpiUrl: buildInpiDetailUrl(codPedido, publicationNumber),
+        figures: hasStoredDocument ? [buildStorageAssetPath(publicationNumber, 'first'), buildStorageAssetPath(publicationNumber, 'drawings')] : [],
+        storage: hasStoredDocument
+            ? {
+                hasStoredDocument: true,
+                ...buildStorageAssets(publicationNumber)
+            }
+            : {
+                hasStoredDocument: false
+            }
     };
+});
+
+fastify.get('/patent/storage/:publicationNumber/:asset', async (request: any, reply) => {
+    const { publicationNumber, asset } = request.params as { publicationNumber: string; asset: string };
+    const decodedPublication = decodeURIComponent(publicationNumber || '');
+    const normalizedAsset = asset === 'full' || asset === 'drawings' || asset === 'first'
+        ? asset
+        : null;
+    if (!decodedPublication || !normalizedAsset) {
+        return reply.code(400).send({ error: 'Parâmetros inválidos' });
+    }
+    if (!S3_ENDPOINT || !S3_ACCESS_KEY || !S3_SECRET_KEY) {
+        return reply.code(500).send({ error: 'Storage não configurado' });
+    }
+    const key = buildStorageAssetKey(decodedPublication, normalizedAsset);
+    const s3 = getS3Client();
+    try {
+        await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: key }));
+        const object = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: key }));
+        const body = object.Body as any;
+        if (!body) {
+            return reply.code(404).send({ error: 'Arquivo não encontrado no storage' });
+        }
+        reply.header('Content-Type', 'application/pdf');
+        reply.header('Cache-Control', 'public, max-age=3600');
+        return reply.send(body);
+    } catch (error: any) {
+        return reply.code(404).send({ error: 'Arquivo não encontrado no storage', details: error?.message || '' });
+    }
 });
 
 // ─── Patent Base Endpoints ──────────────────────────────

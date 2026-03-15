@@ -23,6 +23,13 @@ interface PatentResult {
     url: string;
     figures?: string[];
     status?: string;
+    inpiUrl?: string;
+    storage?: {
+        hasStoredDocument?: boolean;
+        fullDocumentPath?: string;
+        drawingsPath?: string;
+        firstPagePath?: string;
+    };
 }
 
 interface PatentDetail {
@@ -34,6 +41,13 @@ interface PatentDetail {
     title?: string;
     status?: string;
     figures?: string[];
+    inpiUrl?: string;
+    storage?: {
+        hasStoredDocument?: boolean;
+        fullDocumentPath?: string;
+        drawingsPath?: string;
+        firstPagePath?: string;
+    };
 }
 
 interface QuickSearchResponse {
@@ -126,6 +140,15 @@ export default function QuickSearch() {
         const figures = Array.isArray(figuresRaw)
             ? figuresRaw.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
             : [];
+        const storageRaw = raw.storage;
+        const storage = (storageRaw && typeof storageRaw === "object")
+            ? {
+                hasStoredDocument: Boolean((storageRaw as Record<string, unknown>).hasStoredDocument),
+                fullDocumentPath: readText((storageRaw as Record<string, unknown>).fullDocumentPath) || undefined,
+                drawingsPath: readText((storageRaw as Record<string, unknown>).drawingsPath) || undefined,
+                firstPagePath: readText((storageRaw as Record<string, unknown>).firstPagePath) || undefined
+            }
+            : undefined;
 
         return {
             applicant: readText(raw.applicant) || undefined,
@@ -135,7 +158,9 @@ export default function QuickSearch() {
             filingDate: readText(raw.filingDate) || undefined,
             title: readText(raw.title) || undefined,
             status: readText(raw.status) || undefined,
-            figures
+            figures,
+            inpiUrl: readText(raw.inpiUrl) || undefined,
+            storage
         };
     };
 
@@ -365,6 +390,18 @@ export default function QuickSearch() {
         return baseFigures;
     };
 
+    const resolveAssetUrl = (value?: string) => {
+        if (!value) return "";
+        if (/^https?:\/\//i.test(value)) return value;
+        const normalized = value.startsWith("/") ? value : `/${value}`;
+        return `${API_URL}${normalized}`;
+    };
+
+    const isPdfAsset = (value?: string) => {
+        const url = (value || "").toLowerCase();
+        return url.includes(".pdf") || url.includes("/patent/storage/");
+    };
+
     const getCurrentFigureIndex = (patent: PatentResult, idx: number, total: number) => {
         if (total <= 0) return 0;
         const key = getPatentKey(patent, idx);
@@ -397,8 +434,11 @@ export default function QuickSearch() {
             abstract: detail?.abstract || patent.abstract,
             classification: detail?.classification || patent.classification,
             source: patent.source,
-            url: patent.url,
-            status: detail?.status
+            url: detail?.storage?.fullDocumentPath || patent.storage?.fullDocumentPath || patent.url,
+            status: detail?.status || patent.status,
+            figures: getPatentFigures(patent, detail).map((item) => resolveAssetUrl(item)),
+            inpiUrl: detail?.inpiUrl || patent.inpiUrl || patent.url,
+            storage: detail?.storage || patent.storage
         });
         setPatentModalOpen(true);
     };
@@ -683,6 +723,23 @@ export default function QuickSearch() {
                                                                             <span className="font-medium">Resumo:</span> {abstractText}
                                                                         </p>
                                                                     )}
+                                                                    {figures.length > 0 && (
+                                                                        <div className="mt-2 rounded border bg-muted/20 overflow-hidden">
+                                                                            {isPdfAsset(currentFigure) ? (
+                                                                                <iframe
+                                                                                    src={`${resolveAssetUrl(currentFigure)}#view=FitH`}
+                                                                                    title={`Preview ${patent.publicationNumber}`}
+                                                                                    className="w-full h-32"
+                                                                                />
+                                                                            ) : (
+                                                                                <img
+                                                                                    src={resolveAssetUrl(currentFigure)}
+                                                                                    alt={`Figura de ${patent.publicationNumber}`}
+                                                                                    className="w-full h-32 object-cover"
+                                                                                />
+                                                                            )}
+                                                                        </div>
+                                                                    )}
                                                                     {patent.classification && (
                                                                         <p className="text-xs text-muted-foreground">
                                                                             <span className="font-medium">IPC:</span> {patent.classification}
@@ -784,11 +841,19 @@ export default function QuickSearch() {
                                                                                     </p>
                                                                                 </div>
                                                                                 <div className="relative rounded-lg border bg-background overflow-hidden">
-                                                                                    <img
-                                                                                        src={currentFigure}
-                                                                                        alt={`Figura ${currentFigureIndex + 1} da patente ${patent.publicationNumber}`}
-                                                                                        className="w-full h-64 object-contain bg-muted/30"
-                                                                                    />
+                                                                                    {isPdfAsset(currentFigure) ? (
+                                                                                        <iframe
+                                                                                            src={`${resolveAssetUrl(currentFigure)}#view=FitH`}
+                                                                                            title={`PDF Figura ${currentFigureIndex + 1}`}
+                                                                                            className="w-full h-64"
+                                                                                        />
+                                                                                    ) : (
+                                                                                        <img
+                                                                                            src={resolveAssetUrl(currentFigure)}
+                                                                                            alt={`Figura ${currentFigureIndex + 1} da patente ${patent.publicationNumber}`}
+                                                                                            className="w-full h-64 object-contain bg-muted/30"
+                                                                                        />
+                                                                                    )}
                                                                                     {figures.length > 1 && (
                                                                                         <>
                                                                                             <Button
@@ -919,11 +984,19 @@ export default function QuickSearch() {
                                 </p>
                             </div>
                             <div className="relative rounded-lg border bg-muted/20 overflow-hidden">
-                                <img
-                                    src={modalFigures[modalIndex]}
-                                    alt={`Figura ampliada ${modalIndex + 1}`}
-                                    className="w-full max-h-[75vh] object-contain"
-                                />
+                                {isPdfAsset(modalFigures[modalIndex]) ? (
+                                    <iframe
+                                        src={`${resolveAssetUrl(modalFigures[modalIndex])}#view=FitH`}
+                                        title={`Figura ampliada ${modalIndex + 1}`}
+                                        className="w-full h-[75vh]"
+                                    />
+                                ) : (
+                                    <img
+                                        src={resolveAssetUrl(modalFigures[modalIndex])}
+                                        alt={`Figura ampliada ${modalIndex + 1}`}
+                                        className="w-full max-h-[75vh] object-contain"
+                                    />
+                                )}
                                 {modalFigures.length > 1 && (
                                     <>
                                         <Button

@@ -54,8 +54,11 @@ export default function SearchResults() {
     date: p.dataDeposito || p.date || "",
     abstract: p.resumo || p.abstract || "",
     score: p.score || 0,
-    source: "Base Local",
+    source: "INPI",
     url: p.url,
+    inpiUrl: p.inpiUrl,
+    figures: p.figures || [],
+    storage: p.storage,
     classification: p.classification || "",
   }));
 
