@@ -5,7 +5,7 @@ import { exec } from 'child_process';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { CreateBucketCommand, HeadBucketCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { CreateBucketCommand, HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { prisma } from '../db';
 
 const execAsync = promisify(exec);
@@ -161,6 +161,20 @@ async function uploadPdfToS3(key: string, content: Buffer) {
         Body: content,
         ContentType: 'application/pdf'
     }));
+}
+
+async function objectExistsInS3(key: string): Promise<boolean> {
+    const s3 = getS3Client();
+    await ensureS3Bucket();
+    try {
+        await s3.send(new HeadObjectCommand({
+            Bucket: S3_BUCKET,
+            Key: key
+        }));
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 async function rpiZipExists(rpiNumber: number): Promise<boolean> {
@@ -700,6 +714,7 @@ async function resolveDocdbId(publicationNumber: string): Promise<string | null>
     const apCandidates = new Set<string>();
     const addKinds = (base: string) => {
         if (!base) return;
+        pnCandidates.add(base);
         pnCandidates.add(`${base}A2`);
         pnCandidates.add(`${base}A8`);
         pnCandidates.add(`${base}B1`);
@@ -749,6 +764,22 @@ async function resolveDocdbId(publicationNumber: string): Promise<string | null>
         const kind = normalizeText(exchange.attr('kind') || '');
         if (!country || !docNumber || !kind) continue;
         return `${country}.${docNumber}.${kind}`;
+    }
+    return null;
+}
+
+async function resolveExistingStorageKey(candidates: Array<string | undefined | null>): Promise<string | null> {
+    const seen = new Set<string>();
+    for (const raw of candidates) {
+        const normalized = normalizeText(raw || '');
+        if (!normalized) continue;
+        const safeBase = normalized.replace(/[^\w.-]/g, '_');
+        if (!safeBase || seen.has(safeBase)) continue;
+        seen.add(safeBase);
+        const key = `patent-docs/${safeBase}/full_document.pdf`;
+        if (await objectExistsInS3(key)) {
+            return key;
+        }
     }
     return null;
 }
@@ -1016,6 +1047,24 @@ async function processNextDocumentJob() {
                 await prisma.documentDownloadJob.update({
                     where: { id: job.id },
                     data: { status: 'not_found', error: 'Número de publicação ausente', finished_at: new Date() }
+                });
+                return;
+            }
+            const existingStorageKey = await resolveExistingStorageKey([
+                job.publication_number,
+                patent.numero_publicacao,
+                patent.cod_pedido,
+                publicationNumber
+            ]);
+            if (existingStorageKey) {
+                await prisma.documentDownloadJob.update({
+                    where: { id: job.id },
+                    data: {
+                        status: 'completed',
+                        storage_key: existingStorageKey,
+                        finished_at: new Date(),
+                        publication_number: publicationNumber
+                    }
                 });
                 return;
             }
