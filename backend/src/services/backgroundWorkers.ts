@@ -19,6 +19,7 @@ const MAX_DOC_ATTEMPTS = Math.max(2, parseInt(process.env.MAX_DOC_ATTEMPTS || '6
 const STALE_JOB_MINUTES = Math.max(5, parseInt(process.env.STALE_JOB_MINUTES || '12', 10));
 const OPS_CONSUMER_KEY = process.env.OPS_CONSUMER_KEY || '';
 const OPS_CONSUMER_SECRET = process.env.OPS_CONSUMER_SECRET || '';
+const BIBLIO_ENRICHMENT_MODE = (process.env.BIBLIO_ENRICHMENT_MODE || 'xml_first').toLowerCase();
 const S3_ENDPOINT = process.env.S3_ENDPOINT || '';
 const S3_REGION = process.env.S3_REGION || 'garage';
 const S3_ACCESS_KEY = process.env.S3_ACCESS_KEY || '';
@@ -123,6 +124,22 @@ function buildPatentNumberKey(value?: string): string {
 
 function isDocumentEligibleDispatch(dispatchCode?: string): boolean {
     return shouldQueueDocumentByDispatchCode(dispatchCode);
+}
+
+function hasBasicBibliographicData(data: {
+    title?: string;
+    applicant?: string;
+    inventor?: string;
+    ipc?: string;
+    filingDate?: string;
+}) {
+    return Boolean(
+        normalizeText(data.title)
+        || normalizeText(data.applicant)
+        || normalizeText(data.inventor)
+        || normalizeText(data.ipc)
+        || normalizeText(data.filingDate)
+    );
 }
 
 async function getOpsToken(): Promise<string> {
@@ -479,6 +496,16 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
         const patentNumber = buildPatentNumberKey(numeroPublicacao || numeroRaw || codPedidoFromNumero);
         if (!patentNumber) continue;
         const isDocumentEligible = isDocumentEligibleDispatch(dispatchCode);
+        const hasXmlBiblio = hasBasicBibliographicData({
+            title: inventionTitle || dispatchTitle,
+            applicant: applicants,
+            inventor: inventors,
+            ipc: ipcs,
+            filingDate
+        });
+        const shouldQueueOpsBiblio = !isDocumentEligible
+            && !hasXmlBiblio
+            && BIBLIO_ENRICHMENT_MODE !== 'xml_only';
         const existingPatent = await prisma.inpiPatent.findFirst({
             where: {
                 OR: [
@@ -567,7 +594,13 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
                     despacho_desc: dispatchTitle || null,
                     complement: complement || null,
                     eligible_for_doc_download: isDocumentEligible,
-                    bibliographic_status: isDocumentEligible ? 'queued_document' : 'pending'
+                    bibliographic_status: isDocumentEligible ? 'queued_document' : (hasXmlBiblio ? 'completed' : 'pending'),
+                    ops_title: inventionTitle || dispatchTitle || null,
+                    ops_applicant: applicants || null,
+                    ops_inventor: inventors || null,
+                    ops_ipc: ipcs || null,
+                    ops_publication_date: filingDate || null,
+                    ops_last_sync_at: hasXmlBiblio ? new Date() : null
                 }
             });
         } else if (patentId && !publicationExists.patent_id) {
@@ -575,6 +608,19 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
                 where: { id: publicationExists.id },
                 data: { patent_id: patentId }
             });
+        } else if (hasXmlBiblio) {
+            await prisma.inpiPublication.update({
+                where: { id: publicationExists.id },
+                data: {
+                    bibliographic_status: 'completed',
+                    ops_title: inventionTitle || dispatchTitle || undefined,
+                    ops_applicant: applicants || undefined,
+                    ops_inventor: inventors || undefined,
+                    ops_ipc: ipcs || undefined,
+                    ops_publication_date: filingDate || undefined,
+                    ops_last_sync_at: new Date()
+                }
+            }).catch(() => undefined);
         }
 
         if (isDocumentEligible && patentId) {
@@ -585,7 +631,7 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
                 status: dispatchTitle,
                 dispatchCode: dispatchCode
             });
-        } else {
+        } else if (shouldQueueOpsBiblio) {
             await queueOpsBibliographicJob({
                 patentNumber,
                 rpiNumber
