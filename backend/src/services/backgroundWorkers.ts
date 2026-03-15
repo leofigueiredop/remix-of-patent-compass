@@ -455,7 +455,8 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
                     date: dataPublicacao || null,
                     despacho_code: dispatchCode || null,
                     despacho_desc: dispatchTitle || null,
-                    complement: complement || null
+                    complement: complement || null,
+                    eligible_for_doc_download: shouldQueueDocumentByDispatchCode(dispatchCode)
                 }
             });
         }

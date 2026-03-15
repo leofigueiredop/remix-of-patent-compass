@@ -122,6 +122,7 @@ model InpiPublication {
   despacho_code     String?
   despacho_desc     String?
   complement        String?
+  eligible_for_doc_download Boolean @default(false)
   rpi_url           String?  // PDF of the RPI page
   has_image         Boolean  @default(false)
   created_at        DateTime @default(now())

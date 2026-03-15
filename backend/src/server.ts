@@ -2703,7 +2703,9 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
     const publications = (dbData.publications || [])
         .map((item: any) => ({
             ...item,
-            eligible_for_doc_download: isEligibleForDocDownloadByCode(item?.despacho_code)
+            eligible_for_doc_download: typeof item?.eligible_for_doc_download === 'boolean'
+                ? item.eligible_for_doc_download
+                : isEligibleForDocDownloadByCode(item?.despacho_code)
         }))
         .sort((a: any, b: any) => {
             const dateA = new Date(a?.date || 0).getTime();
