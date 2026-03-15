@@ -28,8 +28,10 @@ const S3_BUCKET = process.env.S3_BUCKET || 'patents';
 let loopsStarted = false;
 let rpiRunning = false;
 let docRunning = false;
+let opsRunning = false;
 let rpiPaused = false;
 let docsPaused = false;
+let opsPaused = false;
 let latestRpiCache: { value: number; expiresAt: number } | null = null;
 let opsAccessToken: string | null = null;
 let opsTokenExpiration = 0;
@@ -92,6 +94,14 @@ function shouldQueueDocumentByDispatchCode(dispatchCode?: string): boolean {
 
 function normalizePublicationNumber(value?: string): string {
     return normalizeText(value).replace(/\s+/g, '');
+}
+
+function buildPatentNumberKey(value?: string): string {
+    return normalizePublicationNumber(value).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+}
+
+function isDocumentEligibleDispatch(dispatchCode?: string): boolean {
+    return shouldQueueDocumentByDispatchCode(dispatchCode);
 }
 
 async function getOpsToken(): Promise<string> {
@@ -371,6 +381,27 @@ async function queueDocumentJobForPatent(params: {
     });
 }
 
+async function queueOpsBibliographicJob(params: {
+    patentNumber: string;
+    rpiNumber: number;
+}) {
+    if (!params.patentNumber) return;
+    await prisma.opsBibliographicJob.upsert({
+        where: { patent_number: params.patentNumber },
+        update: {
+            status: 'pending',
+            error: null,
+            finished_at: null,
+            rpi_number: params.rpiNumber
+        },
+        create: {
+            patent_number: params.patentNumber,
+            rpi_number: params.rpiNumber,
+            status: 'pending'
+        }
+    });
+}
+
 async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Promise<number> {
     const $ = cheerio.load(xmlContent, { xmlMode: true });
     const revista = $('revista').first();
@@ -383,8 +414,9 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
         const processo = despacho.find('processo-patente').first();
         if (!processo.length) continue;
         const numeroRaw = nodeText(processo, 'numero');
-        const codPedido = extractDigits(numeroRaw);
-        if (!codPedido) continue;
+        const numeroPublicacao = normalizePublicationNumber(numeroRaw);
+        const codPedidoFromNumero = extractDigits(numeroRaw);
+        if (!numeroPublicacao && !codPedidoFromNumero) continue;
         const dispatchCode = nodeText(despacho, 'codigo') || normalizeText(despacho.attr('codigo') || '');
         const dispatchTitle = nodeText(despacho, 'titulo') || normalizeText(despacho.attr('titulo') || '');
         const complement = nodeText(despacho, 'comentario');
@@ -409,65 +441,121 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
             .filter(Boolean)
             .join(', ');
 
-        await prisma.inpiPatent.upsert({
-            where: { cod_pedido: codPedido },
-            update: {
-                numero_publicacao: numeroRaw || undefined,
-                title: inventionTitle || undefined,
-                applicant: applicants || undefined,
-                inventors: inventors || undefined,
-                ipc_codes: ipcs || undefined,
-                filing_date: filingDate || undefined,
-                last_rpi: String(rpiNumber),
-                last_event: dispatchCode || undefined,
-                status: dispatchTitle || undefined
+        const patentNumber = buildPatentNumberKey(numeroPublicacao || numeroRaw || codPedidoFromNumero);
+        if (!patentNumber) continue;
+        const isDocumentEligible = isDocumentEligibleDispatch(dispatchCode);
+        const existingPatent = await prisma.inpiPatent.findFirst({
+            where: {
+                OR: [
+                    { cod_pedido: patentNumber },
+                    codPedidoFromNumero ? { cod_pedido: codPedidoFromNumero } : undefined,
+                    numeroPublicacao ? { numero_publicacao: numeroPublicacao } : undefined,
+                    numeroRaw ? { numero_publicacao: numeroRaw } : undefined
+                ].filter(Boolean) as any[]
             },
-            create: {
-                cod_pedido: codPedido,
-                numero_publicacao: numeroRaw || null,
-                title: inventionTitle || null,
-                applicant: applicants || null,
-                inventors: inventors || null,
-                ipc_codes: ipcs || null,
-                filing_date: filingDate || null,
-                last_rpi: String(rpiNumber),
-                last_event: dispatchCode || null,
-                status: dispatchTitle || null
-            }
+            select: { cod_pedido: true }
         });
+
+        let patentId: string | null = existingPatent?.cod_pedido || null;
+        if (isDocumentEligible) {
+            patentId = patentId || patentNumber || codPedidoFromNumero;
+            if (!patentId) continue;
+            await prisma.inpiPatent.upsert({
+                where: { cod_pedido: patentId },
+                update: {
+                    numero_publicacao: numeroPublicacao || numeroRaw || patentNumber,
+                    title: inventionTitle || dispatchTitle || undefined,
+                    applicant: applicants || undefined,
+                    inventors: inventors || undefined,
+                    ipc_codes: ipcs || undefined,
+                    filing_date: filingDate || undefined,
+                    last_rpi: String(rpiNumber),
+                    last_event: dispatchCode || undefined,
+                    status: dispatchTitle || undefined
+                },
+                create: {
+                    cod_pedido: patentId,
+                    numero_publicacao: numeroPublicacao || numeroRaw || patentNumber,
+                    title: inventionTitle || dispatchTitle || null,
+                    applicant: applicants || null,
+                    inventors: inventors || null,
+                    ipc_codes: ipcs || null,
+                    filing_date: filingDate || null,
+                    last_rpi: String(rpiNumber),
+                    last_event: dispatchCode || null,
+                    status: dispatchTitle || null
+                }
+            });
+            await prisma.inpiPublication.updateMany({
+                where: {
+                    patent_number: patentNumber,
+                    patent_id: null
+                },
+                data: {
+                    patent_id: patentId
+                }
+            });
+        } else if (patentId) {
+            await prisma.inpiPatent.update({
+                where: { cod_pedido: patentId },
+                data: {
+                    applicant: applicants || undefined,
+                    inventors: inventors || undefined,
+                    ipc_codes: ipcs || undefined,
+                    filing_date: filingDate || undefined,
+                    last_rpi: String(rpiNumber),
+                    last_event: dispatchCode || undefined,
+                    status: dispatchTitle || undefined
+                }
+            }).catch(() => undefined);
+        }
 
         const publicationExists = await prisma.inpiPublication.findFirst({
             where: {
-                patent_id: codPedido,
+                patent_number: patentNumber,
                 rpi: String(rpiNumber),
                 despacho_code: dispatchCode || null,
                 despacho_desc: dispatchTitle || null,
                 complement: complement || null
             },
-            select: { id: true }
+            select: { id: true, patent_id: true }
         });
 
         if (!publicationExists) {
             await prisma.inpiPublication.create({
                 data: {
-                    patent_id: codPedido,
+                    patent_id: patentId,
+                    patent_number: patentNumber,
                     rpi: String(rpiNumber),
                     date: dataPublicacao || null,
                     despacho_code: dispatchCode || null,
                     despacho_desc: dispatchTitle || null,
                     complement: complement || null,
-                    eligible_for_doc_download: shouldQueueDocumentByDispatchCode(dispatchCode)
+                    eligible_for_doc_download: isDocumentEligible,
+                    bibliographic_status: isDocumentEligible ? 'queued_document' : 'pending'
                 }
+            });
+        } else if (patentId && !publicationExists.patent_id) {
+            await prisma.inpiPublication.update({
+                where: { id: publicationExists.id },
+                data: { patent_id: patentId }
             });
         }
 
-        await queueDocumentJobForPatent({
-            patentId: codPedido,
-            rpiNumber,
-            publicationNumber: numeroRaw,
-            status: dispatchTitle,
-            dispatchCode: dispatchCode
-        });
+        if (isDocumentEligible && patentId) {
+            await queueDocumentJobForPatent({
+                patentId,
+                rpiNumber,
+                publicationNumber: numeroPublicacao || numeroRaw || patentNumber,
+                status: dispatchTitle,
+                dispatchCode: dispatchCode
+            });
+        } else {
+            await queueOpsBibliographicJob({
+                patentNumber,
+                rpiNumber
+            });
+        }
 
         imported++;
     }
@@ -556,6 +644,20 @@ async function recoverStaleRunningJobs() {
         }
     });
     await prisma.documentDownloadJob.updateMany({
+        where: {
+            status: 'running',
+            OR: [
+                { started_at: { lt: staleDate } },
+                { started_at: null, updated_at: { lt: staleDate } }
+            ]
+        },
+        data: {
+            status: 'failed',
+            finished_at: new Date(),
+            error: `Job reiniciado automaticamente: execução travada por mais de ${STALE_JOB_MINUTES} minutos`
+        }
+    });
+    await prisma.opsBibliographicJob.updateMany({
         where: {
             status: 'running',
             OR: [
@@ -693,6 +795,176 @@ async function downloadOpsPdfByLink(link: string, pages: string): Promise<Buffer
     return Buffer.from(response.data);
 }
 
+type OpsBibliographicData = {
+    docdbId: string;
+    title?: string;
+    applicant?: string;
+    inventor?: string;
+    ipc?: string;
+    publicationDate?: string;
+};
+
+async function fetchOpsBibliographicData(patentNumber: string): Promise<OpsBibliographicData | null> {
+    const docdbId = await resolveDocdbId(patentNumber);
+    if (!docdbId) return null;
+    const token = await getOpsToken();
+    const response = await axios.get(
+        `https://ops.epo.org/3.2/rest-services/published-data/publication/docdb/${docdbId}/biblio`,
+        {
+            headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: 'application/xml'
+            },
+            timeout: 40000
+        }
+    );
+    const $ = cheerio.load(response.data, { xmlMode: true });
+    const exchange = $('exchange-document').first();
+    const title = normalizeText($('invention-title').first().text());
+    const applicants = $('applicants applicant app-name name')
+        .toArray()
+        .map((el) => normalizeText($(el).text()))
+        .filter(Boolean)
+        .join('; ');
+    const inventors = $('inventors inventor inventor-name name')
+        .toArray()
+        .map((el) => normalizeText($(el).text()))
+        .filter(Boolean)
+        .join('; ');
+    const ipcs = $('classification-ipcr text')
+        .toArray()
+        .map((el) => normalizeText($(el).text()))
+        .filter(Boolean)
+        .join(', ');
+    const publicationDate = normalizeText(exchange.attr('date-publ') || '');
+    return {
+        docdbId,
+        title: title || undefined,
+        applicant: applicants || undefined,
+        inventor: inventors || undefined,
+        ipc: ipcs || undefined,
+        publicationDate: publicationDate || undefined
+    };
+}
+
+async function processNextOpsBibliographicJob() {
+    if (opsRunning || opsPaused) return;
+    opsRunning = true;
+    try {
+        let job = await prisma.opsBibliographicJob.findFirst({
+            where: { status: 'pending' },
+            orderBy: [{ created_at: 'asc' }]
+        });
+        if (!job) {
+            job = await prisma.opsBibliographicJob.findFirst({
+                where: {
+                    status: 'failed',
+                    attempts: { lt: MAX_DOC_ATTEMPTS }
+                },
+                orderBy: [{ attempts: 'asc' }, { updated_at: 'asc' }, { created_at: 'asc' }]
+            });
+        }
+        if (!job) return;
+        const nextAttempt = job.attempts + 1;
+        await prisma.opsBibliographicJob.update({
+            where: { id: job.id },
+            data: {
+                status: 'running',
+                started_at: new Date(),
+                attempts: { increment: 1 },
+                error: null
+            }
+        });
+
+        try {
+            const biblio = await fetchOpsBibliographicData(job.patent_number);
+            if (!biblio) {
+                await prisma.opsBibliographicJob.update({
+                    where: { id: job.id },
+                    data: {
+                        status: 'not_found',
+                        error: `Dados bibliográficos não encontrados no OPS para ${job.patent_number}`,
+                        finished_at: new Date()
+                    }
+                });
+                await prisma.inpiPublication.updateMany({
+                    where: { patent_number: job.patent_number },
+                    data: {
+                        bibliographic_status: 'not_found',
+                        ops_error: `Sem dados no OPS para ${job.patent_number}`,
+                        ops_last_sync_at: new Date()
+                    }
+                });
+                return;
+            }
+
+            await prisma.inpiPublication.updateMany({
+                where: { patent_number: job.patent_number },
+                data: {
+                    bibliographic_status: 'completed',
+                    ops_docdb_id: biblio.docdbId,
+                    ops_title: biblio.title || null,
+                    ops_applicant: biblio.applicant || null,
+                    ops_inventor: biblio.inventor || null,
+                    ops_ipc: biblio.ipc || null,
+                    ops_publication_date: biblio.publicationDate || null,
+                    ops_error: null,
+                    ops_last_sync_at: new Date()
+                }
+            });
+
+            const linkedPatent = await prisma.inpiPatent.findFirst({
+                where: {
+                    OR: [
+                        { numero_publicacao: { contains: job.patent_number, mode: 'insensitive' } },
+                        { cod_pedido: job.patent_number }
+                    ]
+                }
+            });
+            if (linkedPatent) {
+                await prisma.inpiPatent.update({
+                    where: { cod_pedido: linkedPatent.cod_pedido },
+                    data: {
+                        title: linkedPatent.title || biblio.title || undefined,
+                        applicant: linkedPatent.applicant || biblio.applicant || undefined,
+                        inventors: linkedPatent.inventors || biblio.inventor || undefined,
+                        ipc_codes: linkedPatent.ipc_codes || biblio.ipc || undefined
+                    }
+                });
+            }
+
+            await prisma.opsBibliographicJob.update({
+                where: { id: job.id },
+                data: {
+                    status: 'completed',
+                    docdb_id: biblio.docdbId,
+                    finished_at: new Date()
+                }
+            });
+        } catch (error: unknown) {
+            const message = truncateError(errorMessage(error, 'Erro ao consultar bibliografia no OPS'));
+            await prisma.opsBibliographicJob.update({
+                where: { id: job.id },
+                data: {
+                    status: nextAttempt >= MAX_DOC_ATTEMPTS ? 'failed_permanent' : 'failed',
+                    error: message,
+                    finished_at: new Date()
+                }
+            });
+            await prisma.inpiPublication.updateMany({
+                where: { patent_number: job.patent_number },
+                data: {
+                    bibliographic_status: 'failed',
+                    ops_error: message,
+                    ops_last_sync_at: new Date()
+                }
+            });
+        }
+    } finally {
+        opsRunning = false;
+    }
+}
+
 async function processNextDocumentJob() {
     if (docRunning || docsPaused) return;
     docRunning = true;
@@ -814,14 +1086,17 @@ export function getBackgroundWorkerState() {
     return {
         rpiPaused,
         docsPaused,
+        opsPaused,
         rpiRunning,
-        docRunning
+        docRunning,
+        opsRunning
     };
 }
 
-export function setBackgroundWorkerPause(queue: 'rpi' | 'docs' | 'all', paused: boolean) {
+export function setBackgroundWorkerPause(queue: 'rpi' | 'docs' | 'ops' | 'all', paused: boolean) {
     if (queue === 'all' || queue === 'rpi') rpiPaused = paused;
     if (queue === 'all' || queue === 'docs') docsPaused = paused;
+    if (queue === 'all' || queue === 'ops') opsPaused = paused;
     return getBackgroundWorkerState();
 }
 
@@ -855,6 +1130,21 @@ export async function retryDocumentJob(jobId: string) {
     return updated;
 }
 
+export async function retryOpsBibliographicJob(jobId: string) {
+    const updated = await prisma.opsBibliographicJob.update({
+        where: { id: jobId },
+        data: {
+            status: 'pending',
+            attempts: 0,
+            error: null,
+            started_at: null,
+            finished_at: null
+        }
+    });
+    processNextOpsBibliographicJob().catch(() => undefined);
+    return updated;
+}
+
 export async function startBackgroundWorkers() {
     if (loopsStarted) return;
     loopsStarted = true;
@@ -863,11 +1153,15 @@ export async function startBackgroundWorkers() {
     enqueueLastFiveYearsRpi().catch(() => undefined);
     processNextRpiImportJob().catch(() => undefined);
     processNextDocumentJob().catch(() => undefined);
+    processNextOpsBibliographicJob().catch(() => undefined);
     setInterval(() => {
         processNextRpiImportJob().catch(() => undefined);
     }, 4000);
     setInterval(() => {
         processNextDocumentJob().catch(() => undefined);
+    }, 3000);
+    setInterval(() => {
+        processNextOpsBibliographicJob().catch(() => undefined);
     }, 3000);
     setInterval(() => {
         recoverStaleRunningJobs().catch(() => undefined);

@@ -17,6 +17,7 @@ import {
     enqueueLastFiveYearsRpi,
     getBackgroundWorkerState,
     retryDocumentJob,
+    retryOpsBibliographicJob,
     retryRpiJob,
     setBackgroundWorkerPause,
     startBackgroundWorkers
@@ -2796,7 +2797,7 @@ fastify.get('/patents/processed', async (request: any, reply) => {
 
 fastify.get('/background-workers/queues', async (request: any, reply) => {
     const limit = Math.min(200, Math.max(20, parseInt((request.query?.limit || '100') as string, 10)));
-    const [rpiProcessing, rpiSuccess, rpiErrors, docsProcessing, docsSuccess, docsErrors, rpiProcessingCount, rpiSuccessCount, rpiErrorsCount, docsProcessingCount, docsSuccessCount, docsErrorsCount] = await Promise.all([
+    const [rpiProcessing, rpiSuccess, rpiErrors, docsProcessing, docsSuccess, docsErrors, opsProcessing, opsSuccess, opsErrors, rpiProcessingCount, rpiSuccessCount, rpiErrorsCount, docsProcessingCount, docsSuccessCount, docsErrorsCount, opsProcessingCount, opsSuccessCount, opsErrorsCount] = await Promise.all([
         prisma.rpiImportJob.findMany({
             where: { status: { in: ['pending', 'running'] } },
             orderBy: [{ rpi_number: 'asc' }, { created_at: 'asc' }],
@@ -2836,6 +2837,21 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
             },
             take: limit
         }),
+        prisma.opsBibliographicJob.findMany({
+            where: { status: { in: ['pending', 'running'] } },
+            orderBy: { created_at: 'asc' },
+            take: limit
+        }),
+        prisma.opsBibliographicJob.findMany({
+            where: { status: 'completed' },
+            orderBy: { finished_at: 'desc' },
+            take: limit
+        }),
+        prisma.opsBibliographicJob.findMany({
+            where: { status: { in: ['failed', 'failed_permanent', 'not_found'] } },
+            orderBy: { finished_at: 'desc' },
+            take: limit
+        }),
         prisma.rpiImportJob.count({
             where: { status: { in: ['pending', 'running'] } }
         }),
@@ -2853,6 +2869,15 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
         }),
         prisma.documentDownloadJob.count({
             where: { status: { in: ['failed', 'failed_permanent', 'not_found', 'skipped_sigilo'] } }
+        }),
+        prisma.opsBibliographicJob.count({
+            where: { status: { in: ['pending', 'running'] } }
+        }),
+        prisma.opsBibliographicJob.count({
+            where: { status: 'completed' }
+        }),
+        prisma.opsBibliographicJob.count({
+            where: { status: { in: ['failed', 'failed_permanent', 'not_found'] } }
         })
     ]);
 
@@ -2876,6 +2901,16 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
                 success: docsSuccessCount,
                 errors: docsErrorsCount
             }
+        },
+        ops: {
+            processing: opsProcessing,
+            success: opsSuccess,
+            errors: opsErrors,
+            counts: {
+                processing: opsProcessingCount,
+                success: opsSuccessCount,
+                errors: opsErrorsCount
+            }
         }
     };
 });
@@ -2894,7 +2929,7 @@ fastify.get('/background-workers/state', async () => {
 });
 
 fastify.post('/background-workers/control', async (request: any, reply) => {
-    const { queue, action } = request.body as { queue?: 'rpi' | 'docs' | 'all'; action?: 'pause' | 'resume' };
+    const { queue, action } = request.body as { queue?: 'rpi' | 'docs' | 'ops' | 'all'; action?: 'pause' | 'resume' };
     if (!queue || !action) {
         return reply.code(400).send({ error: 'queue e action são obrigatórios' });
     }
@@ -2919,6 +2954,16 @@ fastify.post('/background-workers/docs/retry/:id', async (request: any, reply) =
         return { id: job.id, status: job.status };
     } catch (error) {
         return reply.code(404).send({ error: 'Job de documento não encontrado' });
+    }
+});
+
+fastify.post('/background-workers/ops/retry/:id', async (request: any, reply) => {
+    const { id } = request.params as { id: string };
+    try {
+        const job = await retryOpsBibliographicJob(id);
+        return { id: job.id, status: job.status };
+    } catch (error) {
+        return reply.code(404).send({ error: 'Job bibliográfico OPS não encontrado' });
     }
 });
 

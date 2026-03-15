@@ -61,18 +61,43 @@ type QueuePayload = {
       errors: number;
     };
   };
+  ops: {
+    processing: OpsJob[];
+    success: OpsJob[];
+    errors: OpsJob[];
+    counts?: {
+      processing: number;
+      success: number;
+      errors: number;
+    };
+  };
+};
+
+type OpsJob = {
+  id: string;
+  patent_number: string;
+  rpi_number?: number | null;
+  status: string;
+  attempts: number;
+  docdb_id?: string | null;
+  error?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
 };
 
 type WorkerState = {
   rpiPaused: boolean;
   docsPaused: boolean;
+  opsPaused: boolean;
   rpiRunning: boolean;
   docRunning: boolean;
+  opsRunning: boolean;
 };
 
 const initialData: QueuePayload = {
   rpi: { processing: [], success: [], errors: [] },
-  docs: { processing: [], success: [], errors: [] }
+  docs: { processing: [], success: [], errors: [] },
+  ops: { processing: [], success: [], errors: [] }
 };
 
 function formatDate(value?: string | null): string {
@@ -172,18 +197,59 @@ function DocsTable({ rows, onRetry }: { rows: DocJob[]; onRetry?: (id: string) =
   );
 }
 
+function OpsTable({ rows, onRetry }: { rows: OpsJob[]; onRetry?: (id: string) => void }) {
+  if (rows.length === 0) return <div className="p-8 text-sm text-muted-foreground">Sem registros.</div>;
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Número</TableHead>
+          <TableHead>RPI</TableHead>
+          <TableHead>Status</TableHead>
+          <TableHead>Tentativas</TableHead>
+          <TableHead>DOCDB</TableHead>
+          <TableHead>Log</TableHead>
+          <TableHead>Fim</TableHead>
+          <TableHead className="text-right">Ação</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((row) => (
+          <TableRow key={row.id}>
+            <TableCell className="font-mono text-xs">{row.patent_number}</TableCell>
+            <TableCell className="font-mono text-xs">{row.rpi_number ?? "-"}</TableCell>
+            <TableCell>{statusBadge(row.status)}</TableCell>
+            <TableCell>{row.attempts}</TableCell>
+            <TableCell className="font-mono text-[11px]">{row.docdb_id || "-"}</TableCell>
+            <TableCell className="text-xs text-muted-foreground max-w-[320px] truncate" title={row.error || ""}>{row.error || "-"}</TableCell>
+            <TableCell className="text-xs text-muted-foreground">{formatDate(row.finished_at)}</TableCell>
+            <TableCell className="text-right">
+              {onRetry && (row.status === "failed" || row.status === "not_found") && (
+                <Button size="sm" variant="outline" onClick={() => onRetry(row.id)}>Reprocessar</Button>
+              )}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
 export default function BackgroundWorkers() {
   const [data, setData] = useState<QueuePayload>(initialData);
   const [loading, setLoading] = useState(false);
   const [state, setState] = useState<WorkerState>({
     rpiPaused: false,
     docsPaused: false,
+    opsPaused: false,
     rpiRunning: false,
-    docRunning: false
+    docRunning: false,
+    opsRunning: false
   });
   const [mainTab, setMainTab] = useState("rpi");
   const [rpiTab, setRpiTab] = useState("processing");
   const [docsTab, setDocsTab] = useState("processing");
+  const [opsTab, setOpsTab] = useState("processing");
 
   const counters = useMemo(() => ({
     rpiProcessing: data.rpi.counts?.processing ?? data.rpi.processing.length,
@@ -191,7 +257,10 @@ export default function BackgroundWorkers() {
     rpiErrors: data.rpi.counts?.errors ?? data.rpi.errors.length,
     docsProcessing: data.docs.counts?.processing ?? data.docs.processing.length,
     docsSuccess: data.docs.counts?.success ?? data.docs.success.length,
-    docsErrors: data.docs.counts?.errors ?? data.docs.errors.length
+    docsErrors: data.docs.counts?.errors ?? data.docs.errors.length,
+    opsProcessing: data.ops.counts?.processing ?? data.ops.processing.length,
+    opsSuccess: data.ops.counts?.success ?? data.ops.success.length,
+    opsErrors: data.ops.counts?.errors ?? data.ops.errors.length
   }), [data]);
 
   const fetchQueues = async () => {
@@ -218,7 +287,7 @@ export default function BackgroundWorkers() {
     }
   };
 
-  const controlWorkers = async (queue: "rpi" | "docs" | "all", action: "pause" | "resume") => {
+  const controlWorkers = async (queue: "rpi" | "docs" | "ops" | "all", action: "pause" | "resume") => {
     setLoading(true);
     try {
       await axios.post(`${API_URL}/background-workers/control`, { queue, action });
@@ -235,6 +304,11 @@ export default function BackgroundWorkers() {
 
   const retryDocsJob = async (id: string) => {
     await axios.post(`${API_URL}/background-workers/docs/retry/${id}`);
+    await fetchQueues();
+  };
+
+  const retryOpsJob = async (id: string) => {
+    await axios.post(`${API_URL}/background-workers/ops/retry/${id}`);
     await fetchQueues();
   };
 
@@ -257,12 +331,12 @@ export default function BackgroundWorkers() {
           <div className="flex gap-2">
             <Button
               variant="outline"
-              onClick={() => controlWorkers("all", state.rpiPaused && state.docsPaused ? "resume" : "pause")}
+              onClick={() => controlWorkers("all", state.rpiPaused && state.docsPaused && state.opsPaused ? "resume" : "pause")}
               disabled={loading}
               className="gap-2"
             >
-              {state.rpiPaused && state.docsPaused ? <PlayCircle className="w-4 h-4" /> : <PauseCircle className="w-4 h-4" />}
-              {state.rpiPaused && state.docsPaused ? "Retomar Workers" : "Pausar Workers"}
+              {state.rpiPaused && state.docsPaused && state.opsPaused ? <PlayCircle className="w-4 h-4" /> : <PauseCircle className="w-4 h-4" />}
+              {state.rpiPaused && state.docsPaused && state.opsPaused ? "Retomar Workers" : "Pausar Workers"}
             </Button>
             <Button variant="outline" onClick={bootstrapRpi} disabled={loading} className="gap-2">
               <Files className="w-4 h-4" />
@@ -284,6 +358,10 @@ export default function BackgroundWorkers() {
             <TabsTrigger value="docs" className="gap-2">
               <FileDown className="w-4 h-4" />
               Fila Docs
+            </TabsTrigger>
+            <TabsTrigger value="ops" className="gap-2">
+              <Files className="w-4 h-4" />
+              Fila OPS
             </TabsTrigger>
           </TabsList>
 
@@ -364,6 +442,47 @@ export default function BackgroundWorkers() {
                   <TabsContent value="processing"><DocsTable rows={data.docs.processing} /></TabsContent>
                   <TabsContent value="success"><DocsTable rows={data.docs.success} /></TabsContent>
                   <TabsContent value="errors"><DocsTable rows={data.docs.errors} onRetry={retryDocsJob} /></TabsContent>
+                </Tabs>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="ops" className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>Processando</CardDescription>
+                  <CardTitle className="text-2xl flex items-center gap-2"><Clock className="w-5 h-5" />{counters.opsProcessing}</CardTitle>
+                </CardHeader>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>Sucesso</CardDescription>
+                  <CardTitle className="text-2xl flex items-center gap-2"><CheckCircle2 className="w-5 h-5 text-emerald-600" />{counters.opsSuccess}</CardTitle>
+                </CardHeader>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>Erros/Logs</CardDescription>
+                  <CardTitle className="text-2xl flex items-center gap-2"><AlertCircle className="w-5 h-5 text-red-600" />{counters.opsErrors}</CardTitle>
+                </CardHeader>
+              </Card>
+            </div>
+            <Card>
+              <CardHeader>
+                <CardTitle>Fila Bibliográfica OPS</CardTitle>
+                <CardDescription>Enriquecimento bibliográfico para despachos que não são 3.1/16.1.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Tabs value={opsTab} onValueChange={setOpsTab}>
+                  <TabsList>
+                    <TabsTrigger value="processing">Processando</TabsTrigger>
+                    <TabsTrigger value="success">Sucesso</TabsTrigger>
+                    <TabsTrigger value="errors">Erros</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="processing"><OpsTable rows={data.ops.processing} /></TabsContent>
+                  <TabsContent value="success"><OpsTable rows={data.ops.success} /></TabsContent>
+                  <TabsContent value="errors"><OpsTable rows={data.ops.errors} onRetry={retryOpsJob} /></TabsContent>
                 </Tabs>
               </CardContent>
             </Card>

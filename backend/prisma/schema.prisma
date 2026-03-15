@@ -115,19 +115,30 @@ model InpiPatent {
 
 model InpiPublication {
   id                String   @id @default(uuid())
-  patent_id         String
-  patent            InpiPatent @relation(fields: [patent_id], references: [cod_pedido])
+  patent_id         String?
+  patent            InpiPatent? @relation(fields: [patent_id], references: [cod_pedido], onDelete: SetNull)
+  patent_number     String?
   rpi               String
   date              String?
   despacho_code     String?
   despacho_desc     String?
   complement        String?
   eligible_for_doc_download Boolean @default(false)
+  bibliographic_status String? @default("pending")
+  ops_docdb_id      String?
+  ops_title         String?
+  ops_applicant     String?
+  ops_inventor      String?
+  ops_ipc           String?
+  ops_publication_date String?
+  ops_error         String?
+  ops_last_sync_at  DateTime?
   rpi_url           String?  // PDF of the RPI page
   has_image         Boolean  @default(false)
   created_at        DateTime @default(now())
 
   @@index([patent_id])
+  @@index([patent_number])
   @@index([rpi])
 }
 
@@ -209,4 +220,21 @@ model DocumentDownloadJob {
   @@unique([patent_id])
   @@index([status, created_at])
   @@index([rpi_number])
+}
+
+model OpsBibliographicJob {
+  id                 String   @id @default(uuid())
+  patent_number      String
+  rpi_number         Int?
+  status             String   @default("pending")
+  attempts           Int      @default(0)
+  docdb_id           String?
+  error              String?
+  started_at         DateTime?
+  finished_at        DateTime?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  @@unique([patent_number])
+  @@index([status, created_at])
 }
