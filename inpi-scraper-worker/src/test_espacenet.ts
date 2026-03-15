@@ -1,7 +1,9 @@
 import axios, { AxiosRequestConfig } from 'axios';
 import * as dotenv from 'dotenv';
+import path from 'path';
 import { CreateBucketCommand, HeadBucketCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
+dotenv.config({ path: path.resolve(process.cwd(), '../.env') });
 dotenv.config();
 
 const OPS_KEY = process.env.OPS_CONSUMER_KEY || '';

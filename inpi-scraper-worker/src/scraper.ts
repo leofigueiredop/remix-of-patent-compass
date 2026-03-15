@@ -2,10 +2,11 @@ import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import * as cheerio from 'cheerio';
 import * as dotenv from 'dotenv';
+import path from 'path';
 import { prisma } from './db.js';
 import { updateWorkerState, state } from './state.js';
 import * as fs from 'fs';
-import * as path from 'path';
+dotenv.config({ path: path.resolve(process.cwd(), '../.env') });
 
 dotenv.config();
 

@@ -13,6 +13,7 @@ const RPI_BASE_URL = 'https://revistas.inpi.gov.br/txt';
 const RPI_LOOKBACK_ISSUES = Math.max(26, parseInt(process.env.RPI_LOOKBACK_ISSUES || '260', 10));
 const RPI_SCAN_MAX = Math.max(2000, parseInt(process.env.RPI_SCAN_MAX || '4000', 10));
 const RPI_SCAN_MIN = Math.max(1, parseInt(process.env.RPI_SCAN_MIN || '2000', 10));
+const RPI_FORCE_LATEST = parseInt(process.env.RPI_FORCE_LATEST || '0', 10);
 const MAX_RPI_ATTEMPTS = Math.max(2, parseInt(process.env.MAX_RPI_ATTEMPTS || '8', 10));
 const MAX_DOC_ATTEMPTS = Math.max(2, parseInt(process.env.MAX_DOC_ATTEMPTS || '6', 10));
 const STALE_JOB_MINUTES = Math.max(5, parseInt(process.env.STALE_JOB_MINUTES || '12', 10));
@@ -187,6 +188,9 @@ async function rpiZipExists(rpiNumber: number): Promise<boolean> {
 }
 
 async function detectLatestRpiNumber(): Promise<number | null> {
+    if (Number.isFinite(RPI_FORCE_LATEST) && RPI_FORCE_LATEST > 0) {
+        return RPI_FORCE_LATEST;
+    }
     if (latestRpiCache && Date.now() < latestRpiCache.expiresAt) return latestRpiCache.value;
     let foundBlockTop: number | null = null;
     for (let probe = RPI_SCAN_MAX; probe >= RPI_SCAN_MIN; probe -= 10) {
@@ -458,7 +462,7 @@ async function processNextRpiImportJob() {
     try {
         let job = await prisma.rpiImportJob.findFirst({
             where: { status: 'pending' },
-            orderBy: [{ rpi_number: 'asc' }, { created_at: 'asc' }]
+            orderBy: [{ rpi_number: 'desc' }, { created_at: 'asc' }]
         });
         if (!job) {
             job = await prisma.rpiImportJob.findFirst({
@@ -466,7 +470,7 @@ async function processNextRpiImportJob() {
                     status: 'failed',
                     attempts: { lt: MAX_RPI_ATTEMPTS }
                 },
-                orderBy: [{ attempts: 'asc' }, { updated_at: 'asc' }, { rpi_number: 'asc' }]
+                orderBy: [{ attempts: 'asc' }, { updated_at: 'asc' }, { rpi_number: 'desc' }]
             });
         }
         if (!job) return;
@@ -566,24 +570,57 @@ async function quarantineInvalidFutureRpiJobs() {
 }
 
 async function resolveDocdbId(publicationNumber: string): Promise<string | null> {
-    const cleaned = normalizePublicationNumber(publicationNumber);
-    if (!cleaned) return null;
+    const normalized = normalizePublicationNumber(publicationNumber);
+    if (!normalized) return null;
+    const compact = normalized.replace(/[^A-Za-z0-9]/g, '');
+    const upper = compact.toUpperCase();
+    const digitsOnly = upper.replace(/[^\d]/g, '');
+    const base7 = digitsOnly.length > 7 ? digitsOnly.slice(0, 7) : digitsOnly;
+    const pnCandidates = new Set<string>([normalized, compact, upper]);
+    if (!upper.startsWith('BR')) pnCandidates.add(`BR${upper}`);
+    if (base7) {
+        pnCandidates.add(`BRPI${base7}A`);
+        pnCandidates.add(`BRPI${base7}A2`);
+        pnCandidates.add(`BRPI${base7}A8`);
+        pnCandidates.add(`BRPI${base7}B1`);
+        pnCandidates.add(`BRPI${base7}U2`);
+        pnCandidates.add(`PI${base7}A`);
+        pnCandidates.add(`PI${base7}A2`);
+        pnCandidates.add(`PI${base7}A8`);
+        pnCandidates.add(`PI${base7}B1`);
+        pnCandidates.add(`PI${base7}U2`);
+    }
+    const apCandidates = new Set<string>();
+    if (base7) {
+        apCandidates.add(`BRPI${base7}`);
+        apCandidates.add(`PI${base7}`);
+    }
     const token = await getOpsToken();
-    const url = `https://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=${encodeURIComponent(`pn=${cleaned}`)}`;
-    const response = await axios.get(url, {
-        headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: 'application/xml'
-        },
-        timeout: 40000
-    });
-    const $ = cheerio.load(response.data, { xmlMode: true });
-    const exchange = $('exchange-document').first();
-    const country = normalizeText(exchange.attr('country') || '');
-    const docNumber = normalizeText(exchange.attr('doc-number') || '');
-    const kind = normalizeText(exchange.attr('kind') || '');
-    if (!country || !docNumber || !kind) return null;
-    return `${country}.${docNumber}.${kind}`;
+    const queryCandidates = [
+        ...Array.from(pnCandidates).map((candidate) => `pn=${candidate}`),
+        ...Array.from(apCandidates).map((candidate) => `ap=${candidate}`)
+    ];
+    for (const query of queryCandidates) {
+        const url = `https://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=${encodeURIComponent(query)}`;
+        const response = await axios.get(url, {
+            headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: 'application/xml'
+            },
+            timeout: 40000,
+            validateStatus: () => true
+        });
+        if (response.status === 404 || response.status === 400) continue;
+        if (response.status < 200 || response.status >= 300) continue;
+        const $ = cheerio.load(response.data, { xmlMode: true });
+        const exchange = $('exchange-document').first();
+        const country = normalizeText(exchange.attr('country') || '');
+        const docNumber = normalizeText(exchange.attr('doc-number') || '');
+        const kind = normalizeText(exchange.attr('kind') || '');
+        if (!country || !docNumber || !kind) continue;
+        return `${country}.${docNumber}.${kind}`;
+    }
+    return null;
 }
 
 type OpsDocumentInstance = {
@@ -686,7 +723,7 @@ async function processNextDocumentJob() {
             if (!docdbId) {
                 await prisma.documentDownloadJob.update({
                     where: { id: job.id },
-                    data: { status: 'not_found', error: 'Documento não encontrado no Espacenet', finished_at: new Date() }
+                    data: { status: 'not_found', error: `Sem documento no Espacenet para ${publicationNumber}`, finished_at: new Date() }
                 });
                 return;
             }
