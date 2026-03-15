@@ -185,11 +185,17 @@ export async function enqueueLastFiveYearsRpi() {
 }
 
 async function getXmlFromZip(zipPath: string): Promise<{ xmlFileName: string; xmlContent: string }> {
-    const { stdout: listOut } = await execAsync(`unzip -Z1 "${zipPath}"`, { maxBuffer: 2 * 1024 * 1024 });
-    const xmlFileName = listOut
+    const { stdout: listOut } = await execAsync(`unzip -l "${zipPath}"`, { maxBuffer: 2 * 1024 * 1024 });
+    const xmlCandidates = listOut
         .split('\n')
         .map((line) => line.trim())
-        .find((line) => line.toLowerCase().endsWith('.xml'));
+        .filter((line) => line.length > 0)
+        .map((line) => {
+            const parts = line.split(/\s+/);
+            return parts.length >= 4 ? parts.slice(3).join(' ') : '';
+        })
+        .filter((entry) => entry.toLowerCase().endsWith('.xml'));
+    const xmlFileName = xmlCandidates[0];
     if (!xmlFileName) throw new Error('Nenhum XML encontrado no ZIP da RPI');
     const { stdout: xmlContent } = await execAsync(`unzip -p "${zipPath}" "${xmlFileName}"`, { maxBuffer: 80 * 1024 * 1024 });
     return { xmlFileName, xmlContent };
