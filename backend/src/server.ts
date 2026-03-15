@@ -22,7 +22,7 @@ import {
     setBackgroundWorkerPause,
     startBackgroundWorkers
 } from './services/backgroundWorkers';
-import { exec, execSync } from 'child_process';
+import { exec } from 'child_process';
 import { promisify } from 'util';
 import { randomUUID } from 'crypto';
 import pdfParse from 'pdf-parse';
@@ -91,7 +91,6 @@ class AsyncQueue {
 }
 
 const espacenetQueue = new AsyncQueue(800); // 800ms between calls
-const inpiQueue = new AsyncQueue(1500); // 1.5s between calls
 
 function isRetryableInpiNetworkError(message: string): boolean {
     const normalized = (message || '').toLowerCase();
@@ -373,12 +372,6 @@ function buildInpiDetailUrl(codPedido?: string, publicationNumber?: string): str
     }
     const fallback = publicationNumber || '';
     return `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${encodeURIComponent(fallback)}`;
-}
-
-function buildEspacenetUrl(publicationNumber?: string): string {
-    const value = (publicationNumber || '').replace(/\s+/g, '');
-    const query = value ? `pn=${value}` : publicationNumber || '';
-    return `https://worldwide.espacenet.com/patent/search?q=${encodeURIComponent(query)}`;
 }
 
 function parseQueryTokens(value?: string): string[] {
@@ -740,25 +733,25 @@ const briefingPrompts: Record<string, string> = {
     applications: "Trabalhe como um especialista em patentes. Analise o texto e identifique as APLICAÇÕES INDUSTRIAIS e MERCADOS-ALVO da invenção. REGRA ESTRITA: NÃO use introduções como 'Como especialista, analisei...' nem frases de encerramento. Comece DIRETAMENTE com as aplicações."
 };
 
-fastify.post('/briefing/problem', async (request, reply) => {
+fastify.post('/briefing/problem', async (request) => {
     const { text } = request.body as { text: string };
     const raw = await generateWithGemini(`${briefingPrompts.problem}\n\nText:\n${text.substring(0, 15000)}`, false);
     return { problemaTecnico: raw.replace(/["{}]/g, '').trim() };
 });
 
-fastify.post('/briefing/solution', async (request, reply) => {
+fastify.post('/briefing/solution', async (request) => {
     const { text } = request.body as { text: string };
     const raw = await generateWithGemini(`${briefingPrompts.solution}\n\nText:\n${text.substring(0, 15000)}`, false);
     return { solucaoProposta: raw.replace(/["{}]/g, '').trim() };
 });
 
-fastify.post('/briefing/highlights', async (request, reply) => {
+fastify.post('/briefing/highlights', async (request) => {
     const { text } = request.body as { text: string };
     const raw = await generateWithGemini(`${briefingPrompts.highlights}\n\nText:\n${text.substring(0, 15000)}`, false);
     return { diferenciais: raw.replace(/["{}]/g, '').trim() };
 });
 
-fastify.post('/briefing/applications', async (request, reply) => {
+fastify.post('/briefing/applications', async (request) => {
     const { text } = request.body as { text: string };
     const raw = await generateWithGemini(`${briefingPrompts.applications}\n\nText:\n${text.substring(0, 15000)}`, false);
     return { aplicacoes: raw.replace(/["{}]/g, '').trim() };
@@ -1777,232 +1770,6 @@ async function searchInpiViaCurl(params: {
     }
 }
 
-async function scrapeInpiBuscaWeb(keywords: string[], _ipcCodes: string[], inpiQuery?: string): Promise<any[]> {
-    const resumoFromQuery = (inpiQuery || keywords.join(' '))
-        .replace(/[()"]/g, ' ')
-        .replace(/\b(AND|OR|NOT|E|OU|NÃO|NAO)\b/gi, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-    if (inpiQuery) {
-        fastify.log.info(`INPI boolean query: ${inpiQuery.substring(0, 300)}`);
-        return inpiQueue.enqueue(() => searchInpiViaCurl({ keywords: inpiQuery, resumo: resumoFromQuery }));
-    }
-    return inpiQueue.enqueue(() => searchInpiViaCurl({ keywords: keywords.join(' '), resumo: resumoFromQuery }));
-}
-
-async function fetchEspacenetBiblioByPublicationNumber(publicationNumber: string): Promise<{
-    title?: string;
-    applicant?: string;
-    inventor?: string;
-    abstract?: string;
-    classification?: string;
-    date?: string;
-} | null> {
-    if (!OPS_CONSUMER_KEY || !OPS_CONSUMER_SECRET) return null;
-    const cleanedPn = publicationNumber.replace(/\s+/g, '');
-    if (!cleanedPn) return null;
-    try {
-        const token = await getOpsToken();
-        const url = `https://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=${encodeURIComponent(`pn=${cleanedPn}`)}`;
-        const response = await espacenetQueue.enqueue(() => axios.get(url, {
-            headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
-            timeout: 30000
-        }));
-        const opsResults = parseOpsResponse(response.data);
-        const translated = await translatePatentsToPortuguese(opsResults);
-        const first = translated[0];
-        if (!first) return null;
-        return {
-            title: first.title,
-            applicant: first.applicant,
-            inventor: first.inventor,
-            abstract: first.abstract,
-            classification: first.classification,
-            date: first.date
-        };
-    } catch (error: any) {
-        fastify.log.warn(`Espacenet biblio fallback failed for PN=${publicationNumber}: ${error.message}`);
-        return null;
-    }
-}
-
-function extractInpiFigureUrls(html: string): string[] {
-    const $ = cheerio.load(html);
-    const baseUrl = 'https://busca.inpi.gov.br/pePI/';
-    const blockedTokens = ['logo', 'banner', 'sprite', 'seta', 'icone', 'icon', 'blank', 'spacer', '.css', '.js'];
-    const figureTokens = ['fig', 'image', 'imagem', 'desenho', 'thumbnail', 'thumb', 'patente'];
-    const figures = new Set<string>();
-
-    const normalizeUrl = (value: string): string => {
-        const decoded = value.trim().replace(/&amp;/g, '&');
-        if (!decoded) return '';
-        try {
-            return new URL(decoded, baseUrl).toString();
-        } catch {
-            return '';
-        }
-    };
-
-    const collect = (rawValue?: string) => {
-        if (!rawValue) return;
-        const normalized = normalizeUrl(rawValue);
-        if (!normalized) return;
-        const lower = normalized.toLowerCase();
-        if (blockedTokens.some(token => lower.includes(token))) return;
-        const hasImageExtension = /\.(jpg|jpeg|png|gif|webp|bmp|tif|tiff)(\?|$)/i.test(lower);
-        const hasFigureToken = figureTokens.some(token => lower.includes(token));
-        if (!hasImageExtension && !hasFigureToken) return;
-        figures.add(normalized);
-    };
-
-    $('img').each((_, el) => {
-        collect($(el).attr('src'));
-        collect($(el).attr('data-src'));
-        collect($(el).attr('data-original'));
-    });
-
-    $('a').each((_, el) => {
-        collect($(el).attr('href'));
-        const onclick = $(el).attr('onclick') || '';
-        const quotedMatches = onclick.match(/['"]([^'"]+\.(?:jpg|jpeg|png|gif|webp|bmp|tif|tiff)[^'"]*)['"]/gi) || [];
-        quotedMatches.forEach((match) => {
-            const cleaned = match.replace(/^['"]|['"]$/g, '');
-            collect(cleaned);
-        });
-    });
-
-    return Array.from(figures).slice(0, 20);
-}
-
-async function fetchInpiDetailByCod(codPedido: string, publicationNumber?: string): Promise<any> {
-    const cookieFile = `/tmp/inpi_detail_${randomUUID()}.txt`;
-    const defaultUrl = `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${encodeURIComponent(codPedido)}`;
-    const fetchHtml = async (targetUrl: string): Promise<string> => {
-        const encodedUrl = targetUrl.replace(/'/g, `%27`);
-        const { stdout } = await inpiQueue.enqueue(() => execInpiCurlWithRetry(
-            `curl -s -L --http1.1 -A '${INPI_USER_AGENT}' ${INPI_SEC_HEADERS} -e 'https://busca.inpi.gov.br/pePI/' -b ${cookieFile} -c ${cookieFile} '${encodedUrl}' | iconv -f ISO-8859-1 -t UTF-8`,
-            3,
-            30000,
-            5 * 1024 * 1024
-        ));
-        return stdout;
-    };
-    const isLoginHtml = (html: string): boolean => {
-        const normalized = normalizeText(html);
-        return normalized.includes('pepi - pesquisa em propriedade industrial')
-            && normalized.includes('para realizar a pesquisa anonimamente');
-    };
-    const extractDetailFromHtml = (html: string): Record<string, any> => {
-        const $ = cheerio.load(html);
-        const detail: Record<string, any> = {};
-        $('table tr').each((_, row) => {
-            const cells = $(row).find('td');
-            if (cells.length >= 2) {
-                const label = $(cells[0]).text().trim().toLowerCase().replace(/[:\s]+$/g, '').trim();
-                const value = $(cells[1]).text().trim();
-
-                if (label.includes('depositante') || label.includes('titular')) detail.applicant = value;
-                if (label.includes('inventor')) detail.inventor = value;
-                if (label.includes('resumo')) detail.abstract = value;
-                if (label.includes('classifica')) detail.classification = value;
-                if (label.includes('dep') && label.includes('sito') && !detail.filingDate) detail.filingDate = value;
-                if (label.includes('t') && label.includes('tulo') && !detail.title) detail.title = value;
-                if (label.includes('despacho') || label.includes('situa')) detail.status = value;
-            }
-        });
-        const resumoDiv = $('div.resumo, #resumo, .abstract').text().trim();
-        if (resumoDiv && !detail.abstract) detail.abstract = resumoDiv;
-        detail.figures = extractInpiFigureUrls(html);
-        return detail;
-    };
-
-    try {
-        await initializeInpiSession(cookieFile);
-
-        // INPI drops HTTP connections (returning 0 bytes) or redirects to login if the session hasn't performed a search first.
-        const list = await searchInpiViaCurl({ number: codPedido, cookieFile });
-        const match = list.find((item: any) => typeof item?.url === 'string' && item.url.includes(`CodPedido=${codPedido}`));
-        const targetUrl = match?.url || defaultUrl;
-
-        let html = await fetchHtml(targetUrl);
-        fs.writeFileSync(`/tmp/debug_detail_${codPedido}.html`, html);
-
-        if (!html.trim() || isLoginHtml(html)) {
-            fastify.log.warn(`INPI detail fell back to login page for CodPedido=${codPedido}`);
-            const fallback = publicationNumber ? await fetchEspacenetBiblioByPublicationNumber(publicationNumber) : null;
-            if (fallback) {
-                return {
-                    codPedido,
-                    title: fallback.title,
-                    applicant: fallback.applicant,
-                    inventor: fallback.inventor,
-                    abstract: fallback.abstract,
-                    classification: fallback.classification,
-                    filingDate: fallback.date,
-                    source: 'INPI',
-                    url: defaultUrl,
-                    figures: []
-                };
-            }
-            return {
-                codPedido,
-                source: 'INPI',
-                url: defaultUrl,
-                figures: []
-            };
-        }
-        const detail = extractDetailFromHtml(html);
-        if (!detail.title && !detail.abstract && !detail.applicant && !detail.inventor && (!detail.figures || detail.figures.length === 0)) {
-            const isSecretPage = html.toLowerCase().includes('sigilo') || html.toLowerCase().includes('aguardando public');
-            if (isSecretPage) {
-                return {
-                    codPedido,
-                    source: 'INPI',
-                    url: defaultUrl,
-                    figures: [],
-                    status: 'Mantido em sigilo',
-                    title: 'Mantido em sigilo'
-                };
-            }
-
-            fastify.log.warn(`INPI did not return usable detail fields for CodPedido=${codPedido}`);
-            const fallback = publicationNumber ? await fetchEspacenetBiblioByPublicationNumber(publicationNumber) : null;
-            if (fallback) {
-                return {
-                    codPedido,
-                    title: fallback.title,
-                    applicant: fallback.applicant,
-                    inventor: fallback.inventor,
-                    abstract: fallback.abstract,
-                    classification: fallback.classification,
-                    filingDate: fallback.date,
-                    source: 'INPI',
-                    url: defaultUrl,
-                    figures: []
-                };
-            }
-            return {
-                codPedido,
-                source: 'INPI',
-                url: defaultUrl,
-                figures: []
-            };
-        }
-
-        return {
-            codPedido,
-            ...detail,
-            source: 'INPI',
-            url: defaultUrl
-        };
-    } catch (error: any) {
-        throw error;
-    } finally {
-        try { execSync(`rm -f ${cookieFile}`); } catch { }
-    }
-}
-
 const ALLOWED_PATENT_DOCUMENT_HOSTS = [
     'busca.inpi.gov.br',
     'worldwide.espacenet.com',
@@ -2474,7 +2241,7 @@ fastify.post('/search/quick', async (request, reply) => {
 });
 
 // ─── POST /search (unified) ────────────────────────────────────
-fastify.post('/search', async (request, reply) => {
+fastify.post('/search', async (request) => {
     const { cql, inpiQuery, keywords, ipc_codes, ignoreSecret } = request.body as {
         cql: string;
         inpiQuery?: string;
@@ -2636,7 +2403,7 @@ fastify.post('/debug/clear-cache', async (request, reply) => {
     return { message: 'Cache de busca limpo com sucesso' };
 });
 
-fastify.get('/debug/test-inpi', async (request, reply) => {
+fastify.get('/debug/test-inpi', async () => {
     try {
         const { stdout, stderr } = await execInpiCurlWithRetry(
             `curl -v --http1.1 -L -A 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' 'https://busca.inpi.gov.br/pePI/' -o /dev/null`,
@@ -2656,13 +2423,8 @@ const start = async () => {
         fs.writeFileSync(startupLog, `Server starting at ${new Date().toISOString()} with PID ${process.pid}\n`);
 
         // ─── STARTUP ──────────────────────────────────────────────────
-        await fastify.listen({ port: parseInt(process.env.PORT || '3001'), host: '0.0.0.0' }, (err) => {
-            if (err) {
-                fastify.log.error(err);
-                process.exit(1);
-            }
-            startBackgroundWorkers();
-        });
+        await fastify.listen({ port: parseInt(process.env.PORT || '3001'), host: '0.0.0.0' });
+        startBackgroundWorkers();
     } catch (err) {
         fastify.log.error(err);
         process.exit(1);
@@ -2763,7 +2525,7 @@ fastify.get('/patent/storage/:publicationNumber/:asset', async (request: any, re
 });
 
 // ─── Patent Base Endpoints ──────────────────────────────
-fastify.get('/patents/processed', async (request: any, reply) => {
+fastify.get('/patents/processed', async (request: any) => {
     const { page = 1, pageSize = 20 } = request.query as any;
     const skip = (parseInt(page, 10) - 1) * parseInt(pageSize, 10);
     const take = parseInt(pageSize, 10);
@@ -2795,7 +2557,7 @@ fastify.get('/patents/processed', async (request: any, reply) => {
     };
 });
 
-fastify.get('/background-workers/queues', async (request: any, reply) => {
+fastify.get('/background-workers/queues', async (request: any) => {
     const limit = Math.min(200, Math.max(20, parseInt((request.query?.limit || '100') as string, 10)));
     const [rpiProcessing, rpiSuccess, rpiErrors, docsProcessing, docsSuccess, docsErrors, opsProcessing, opsSuccess, opsErrors, rpiProcessingCount, rpiSuccessCount, rpiErrorsCount, docsProcessingCount, docsSuccessCount, docsErrorsCount, opsProcessingCount, opsSuccessCount, opsErrorsCount] = await Promise.all([
         prisma.rpiImportJob.findMany({
@@ -2915,7 +2677,7 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
     };
 });
 
-fastify.post('/background-workers/rpi/bootstrap', async (request, reply) => {
+fastify.post('/background-workers/rpi/bootstrap', async (_request, reply) => {
     try {
         const result = await enqueueLastFiveYearsRpi();
         return result;
@@ -2946,7 +2708,7 @@ fastify.post('/background-workers/rpi/enqueue-range', async (request: any, reply
     return { from: start, to: end, requested: rows.length, created: created.count };
 });
 
-fastify.post('/background-workers/requeue-by-filter', async (request: any, reply) => {
+fastify.post('/background-workers/requeue-by-filter', async (request: any) => {
     const {
         rpiFrom,
         rpiTo,
@@ -3128,7 +2890,7 @@ fastify.post('/background-workers/ops/retry/:id', async (request: any, reply) =>
     }
 });
 
-fastify.get('/patents/queue', async (request: any, reply) => {
+fastify.get('/patents/queue', async () => {
     const jobs = await prisma.scrapingJob.findMany({
         where: {
             status: { in: ['pending', 'running', 'failed'] }
