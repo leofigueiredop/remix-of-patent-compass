@@ -78,6 +78,18 @@ function isSigiloStatus(value?: string): boolean {
     return /sigil|restrit|proteg/.test(normalized);
 }
 
+function normalizeDispatchCode(value?: string): string {
+    return normalizeText(value)
+        .replace(',', '.')
+        .replace(/\s+/g, '')
+        .replace(/[^\d.]/g, '');
+}
+
+function shouldQueueDocumentByDispatchCode(dispatchCode?: string): boolean {
+    const normalized = normalizeDispatchCode(dispatchCode);
+    return normalized === '3.1' || normalized === '16.1';
+}
+
 function normalizePublicationNumber(value?: string): string {
     return normalizeText(value).replace(/\s+/g, '');
 }
@@ -308,6 +320,7 @@ async function queueDocumentJobForPatent(params: {
     rpiNumber: number;
     publicationNumber?: string;
     status?: string;
+    dispatchCode?: string;
 }) {
     const existing = await prisma.documentDownloadJob.findUnique({
         where: { patent_id: params.patentId }
@@ -333,6 +346,9 @@ async function queueDocumentJobForPatent(params: {
                 }
             });
         }
+        return;
+    }
+    if (!shouldQueueDocumentByDispatchCode(params.dispatchCode)) {
         return;
     }
     if (existing && ['pending', 'running', 'completed'].includes(existing.status)) return;
@@ -372,7 +388,7 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
         const dispatchCode = nodeText(despacho, 'codigo') || normalizeText(despacho.attr('codigo') || '');
         const dispatchTitle = nodeText(despacho, 'titulo') || normalizeText(despacho.attr('titulo') || '');
         const complement = nodeText(despacho, 'comentario');
-        const title = nodeText(processo, 'titulo') || dispatchTitle;
+        const inventionTitle = nodeText(processo, 'titulo');
         const filingDate = nodeText(processo, 'data-deposito');
         const applicants = processo
             .find('titular-lista > titular > nome-completo')
@@ -397,7 +413,7 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
             where: { cod_pedido: codPedido },
             update: {
                 numero_publicacao: numeroRaw || undefined,
-                title: title || undefined,
+                title: inventionTitle || undefined,
                 applicant: applicants || undefined,
                 inventors: inventors || undefined,
                 ipc_codes: ipcs || undefined,
@@ -409,7 +425,7 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
             create: {
                 cod_pedido: codPedido,
                 numero_publicacao: numeroRaw || null,
-                title: title || null,
+                title: inventionTitle || null,
                 applicant: applicants || null,
                 inventors: inventors || null,
                 ipc_codes: ipcs || null,
@@ -448,7 +464,8 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
             patentId: codPedido,
             rpiNumber,
             publicationNumber: numeroRaw,
-            status: dispatchTitle
+            status: dispatchTitle,
+            dispatchCode: dispatchCode
         });
 
         imported++;

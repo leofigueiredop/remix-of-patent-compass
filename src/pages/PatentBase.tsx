@@ -19,6 +19,7 @@ import {
 import axios from "axios";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import PatentDocumentModal, { PatentDocumentData } from "@/components/PatentDocumentModal";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
@@ -55,6 +56,8 @@ export default function PatentBase() {
     const [tab, setTab] = useState("fila");
     const [page, setPage] = useState(1);
     const [totalPatents, setTotalPatents] = useState(0);
+    const [patentModalOpen, setPatentModalOpen] = useState(false);
+    const [selectedPatent, setSelectedPatent] = useState<PatentDocumentData | null>(null);
 
     const fetchData = async () => {
         setLoading(true);
@@ -89,6 +92,21 @@ export default function PatentBase() {
             case "failed": return <Badge variant="destructive" className="flex gap-1 items-center"><AlertCircle className="w-3 h-3"/> Falha</Badge>;
             default: return <Badge variant="secondary" className="flex gap-1 items-center"><Clock className="w-3 h-3"/> Pendente</Badge>;
         }
+    };
+
+    const openPatentModal = (patent: InpiPatent) => {
+        const fallbackUrl = `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${encodeURIComponent(patent.cod_pedido)}`;
+        setSelectedPatent({
+            publicationNumber: patent.numero_publicacao || patent.cod_pedido,
+            cod_pedido: patent.cod_pedido,
+            title: patent.title || "Sem título",
+            applicant: patent.applicant || "",
+            date: patent.filing_date || "",
+            source: "INPI",
+            url: fallbackUrl,
+            inpiUrl: fallbackUrl
+        });
+        setPatentModalOpen(true);
     };
 
     return (
@@ -248,7 +266,7 @@ export default function PatentBase() {
                                                 {patents.map((patent) => (
                                                     <TableRow key={patent.cod_pedido} className="hover:bg-muted/10 transition-colors border-b-muted/20">
                                                         <TableCell className="font-mono font-medium text-xs">
-                                                            {patent.numero_publicacao}
+                                                            {patent.numero_publicacao || patent.cod_pedido}
                                                         </TableCell>
                                                         <TableCell className="py-4">
                                                             <div className="font-semibold text-sm line-clamp-1" title={patent.title}>
@@ -275,8 +293,13 @@ export default function PatentBase() {
                                                             {format(new Date(patent.updated_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
                                                         </TableCell>
                                                         <TableCell className="text-right">
-                                                            <Button variant="ghost" size="xs" className="text-primary hover:bg-primary/10">
-                                                                <Download className="w-3 h-3 mr-1" /> PDF
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="xs"
+                                                                className="text-primary hover:bg-primary/10"
+                                                                onClick={() => openPatentModal(patent)}
+                                                            >
+                                                                <Download className="w-3 h-3 mr-1" /> Abrir
                                                             </Button>
                                                         </TableCell>
                                                     </TableRow>
@@ -314,6 +337,11 @@ export default function PatentBase() {
                     </TabsContent>
                 </Tabs>
             </div>
+            <PatentDocumentModal
+                open={patentModalOpen}
+                onOpenChange={setPatentModalOpen}
+                patent={selectedPatent}
+            />
         </AppLayout>
     );
 }

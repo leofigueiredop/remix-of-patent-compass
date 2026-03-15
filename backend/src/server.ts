@@ -387,6 +387,18 @@ function parseQueryTokens(value?: string): string[] {
         .filter((token) => token.length >= 3);
 }
 
+function normalizeDispatchCode(value?: string): string {
+    return normalizeStringField(value)
+        .replace(',', '.')
+        .replace(/\s+/g, '')
+        .replace(/[^\d.]/g, '');
+}
+
+function isEligibleForDocDownloadByCode(value?: string): boolean {
+    const normalized = normalizeDispatchCode(value);
+    return normalized === '3.1' || normalized === '16.1';
+}
+
 function getS3Client() {
     return new S3Client({
         endpoint: S3_ENDPOINT,
@@ -2688,8 +2700,22 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
     const publicationNumber = dbData.numero_publicacao || dbData.cod_pedido;
     const completedDocJob = dbData.document_jobs[0];
     const hasStoredDocument = Boolean(completedDocJob?.storage_key);
+    const publications = (dbData.publications || [])
+        .map((item: any) => ({
+            ...item,
+            eligible_for_doc_download: isEligibleForDocDownloadByCode(item?.despacho_code)
+        }))
+        .sort((a: any, b: any) => {
+            const dateA = new Date(a?.date || 0).getTime();
+            const dateB = new Date(b?.date || 0).getTime();
+            if (!Number.isNaN(dateA) && !Number.isNaN(dateB) && dateA !== dateB) {
+                return dateB - dateA;
+            }
+            return (a?.rpi || '').localeCompare(b?.rpi || '', 'pt-BR', { numeric: true });
+        });
     return {
         ...dbData,
+        publications,
         scraping_status: dbData.scraping_jobs[0]?.status || 'available_for_queue',
         inpiUrl: buildInpiDetailUrl(codPedido, publicationNumber),
         figures: hasStoredDocument ? [buildStorageAssetPath(publicationNumber, 'first'), buildStorageAssetPath(publicationNumber, 'drawings')] : [],

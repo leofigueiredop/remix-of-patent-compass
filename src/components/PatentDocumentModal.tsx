@@ -14,6 +14,7 @@ export interface InpiPublication {
   despacho_desc?: string;
   complement?: string;
   rpi_url?: string;
+  eligible_for_doc_download?: boolean;
 }
 
 export interface InpiPetition {
@@ -116,6 +117,66 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
   const firstPagePath = resolveAssetUrl(patent?.storage?.firstPagePath || patent?.figures?.[0] || "");
   const hasDrawings = Boolean(drawingsPath);
   const hasFirstPage = Boolean(firstPagePath);
+  const formatStorageName = (pathValue: string) => pathValue.split("/").pop() || "documento.pdf";
+  const normalizeCode = (value?: string) => (value || "").replace(",", ".").replace(/\s+/g, "");
+
+  const availableDocumentRows = useMemo(() => {
+    const basePublications = (detailedData?.publications || []).filter((item) => {
+      if (item.eligible_for_doc_download === true) return true;
+      const code = normalizeCode(item.despacho_code);
+      return code === "3.1" || code === "16.1";
+    });
+    const rows: Array<{
+      key: string;
+      despacho_code?: string;
+      date?: string;
+      descricao?: string;
+      comentario?: string;
+      name: string;
+      path: string;
+      asset: "doc" | "drawings" | "first";
+    }> = [];
+
+    for (const item of basePublications) {
+      if (fullDocumentPath) {
+        rows.push({
+          key: `${item.id}-doc`,
+          despacho_code: item.despacho_code,
+          date: item.date,
+          descricao: item.despacho_desc,
+          comentario: item.complement,
+          name: formatStorageName(fullDocumentPath),
+          path: fullDocumentPath,
+          asset: "doc"
+        });
+      }
+      if (drawingsPath) {
+        rows.push({
+          key: `${item.id}-draw`,
+          despacho_code: item.despacho_code,
+          date: item.date,
+          descricao: item.despacho_desc,
+          comentario: item.complement,
+          name: formatStorageName(drawingsPath),
+          path: drawingsPath,
+          asset: "drawings"
+        });
+      }
+      if (firstPagePath) {
+        rows.push({
+          key: `${item.id}-first`,
+          despacho_code: item.despacho_code,
+          date: item.date,
+          descricao: item.despacho_desc,
+          comentario: item.complement,
+          name: formatStorageName(firstPagePath),
+          path: firstPagePath,
+          asset: "first"
+        });
+      }
+    }
+    return rows;
+  }, [detailedData?.publications, fullDocumentPath, drawingsPath, firstPagePath]);
 
   useEffect(() => {
     let active = true;
@@ -328,8 +389,10 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
                             <tr>
                               <th className="px-2 py-1 border-b">RPI</th>
                               <th className="px-2 py-1 border-b">Data</th>
-                              <th className="px-2 py-1 border-b">Despacho</th>
+                              <th className="px-2 py-1 border-b">Código</th>
+                              <th className="px-2 py-1 border-b">Descrição</th>
                               <th className="px-2 py-1 border-b">Complemento</th>
+                              <th className="px-2 py-1 border-b">Elegível Doc</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -338,7 +401,61 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
                                 <td className="px-2 py-1 border-b font-medium">{p.rpi}</td>
                                 <td className="px-2 py-1 border-b">{p.date}</td>
                                 <td className="px-2 py-1 border-b">{p.despacho_code}</td>
+                                <td className="px-2 py-1 border-b">{p.despacho_desc}</td>
                                 <td className="px-2 py-1 border-b">{p.complement}</td>
+                                <td className="px-2 py-1 border-b">{p.eligible_for_doc_download ? "Sim" : "Não"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {availableDocumentRows.length > 0 && (
+                    <div className="space-y-1.5">
+                      <h4 className="text-[10px] font-bold uppercase text-muted-foreground">Documentos Disponíveis (Bucket)</h4>
+                      <div className="rounded border overflow-hidden">
+                        <table className="w-full text-[10px] text-left border-collapse">
+                          <thead className="bg-muted text-muted-foreground">
+                            <tr>
+                              <th className="px-2 py-1 border-b">Código</th>
+                              <th className="px-2 py-1 border-b">Data</th>
+                              <th className="px-2 py-1 border-b">Descrição</th>
+                              <th className="px-2 py-1 border-b">Comentário</th>
+                              <th className="px-2 py-1 border-b">Documento</th>
+                              <th className="px-2 py-1 border-b text-right">Ações</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {availableDocumentRows.map((item) => (
+                              <tr key={item.key} className="hover:bg-muted/50">
+                                <td className="px-2 py-1 border-b">{item.despacho_code || "-"}</td>
+                                <td className="px-2 py-1 border-b">{item.date || "-"}</td>
+                                <td className="px-2 py-1 border-b">{item.descricao || "-"}</td>
+                                <td className="px-2 py-1 border-b">{item.comentario || "-"}</td>
+                                <td className="px-2 py-1 border-b font-mono">{item.name}</td>
+                                <td className="px-2 py-1 border-b text-right">
+                                  <div className="inline-flex gap-1">
+                                    <Button
+                                      size="xs"
+                                      variant="outline"
+                                      onClick={() => {
+                                        setViewerMode(item.asset);
+                                        setPdfUrl(item.path);
+                                      }}
+                                    >
+                                      Visualizar
+                                    </Button>
+                                    <Button
+                                      size="xs"
+                                      variant="secondary"
+                                      onClick={() => window.open(item.path, "_blank", "noopener,noreferrer")}
+                                    >
+                                      Baixar
+                                    </Button>
+                                  </div>
+                                </td>
                               </tr>
                             ))}
                           </tbody>
