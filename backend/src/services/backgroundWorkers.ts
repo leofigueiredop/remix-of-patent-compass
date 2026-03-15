@@ -55,6 +55,27 @@ function errorMessage(error: unknown, fallback: string): string {
     return fallback;
 }
 
+function serializeUnknownError(error: unknown): string {
+    if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        const statusText = normalizeText(error.response?.statusText || '');
+        const responseBody = typeof error.response?.data === 'string'
+            ? error.response?.data
+            : JSON.stringify(error.response?.data || {});
+        return truncateError(`axios message=${error.message} status=${status || 'na'} statusText=${statusText} body=${responseBody}`);
+    }
+    return truncateError(errorMessage(error, 'erro-desconhecido'));
+}
+
+function documentJobLog(entry: Record<string, unknown>) {
+    const payload = JSON.stringify({
+        ts: new Date().toISOString(),
+        worker: 'document',
+        ...entry
+    });
+    console.log(payload);
+}
+
 function isRetryableZipError(message: string): boolean {
     const normalized = (message || '').toLowerCase();
     return normalized.includes('short read')
@@ -1029,25 +1050,31 @@ async function processNextDocumentJob() {
                 where: { cod_pedido: job.patent_id }
             });
             if (!patent) {
+                const errorText = 'DOC_PATENT_NOT_FOUND';
                 await prisma.documentDownloadJob.update({
                     where: { id: job.id },
-                    data: { status: 'not_found', error: 'Patente não encontrada na base', finished_at: new Date() }
+                    data: { status: 'not_found', error: errorText, finished_at: new Date() }
                 });
+                documentJobLog({ jobId: job.id, patentId: job.patent_id, status: 'not_found', code: errorText });
                 return;
             }
             if (isSigiloStatus(patent.status || job.error || undefined)) {
+                const errorText = 'DOC_SKIPPED_SIGILO';
                 await prisma.documentDownloadJob.update({
                     where: { id: job.id },
-                    data: { status: 'skipped_sigilo', error: 'Patente em sigilo', finished_at: new Date() }
+                    data: { status: 'skipped_sigilo', error: errorText, finished_at: new Date() }
                 });
+                documentJobLog({ jobId: job.id, patentId: job.patent_id, publicationNumber: patent.numero_publicacao, status: 'skipped_sigilo', code: errorText });
                 return;
             }
             const publicationNumber = normalizeText(job.publication_number || patent.numero_publicacao || '');
             if (!publicationNumber) {
+                const errorText = 'DOC_PUBLICATION_NUMBER_MISSING';
                 await prisma.documentDownloadJob.update({
                     where: { id: job.id },
-                    data: { status: 'not_found', error: 'Número de publicação ausente', finished_at: new Date() }
+                    data: { status: 'not_found', error: errorText, finished_at: new Date() }
                 });
+                documentJobLog({ jobId: job.id, patentId: job.patent_id, status: 'not_found', code: errorText });
                 return;
             }
             const existingStorageKey = await resolveExistingStorageKey([
@@ -1066,23 +1093,35 @@ async function processNextDocumentJob() {
                         publication_number: publicationNumber
                     }
                 });
+                documentJobLog({
+                    jobId: job.id,
+                    patentId: job.patent_id,
+                    publicationNumber,
+                    status: 'completed',
+                    code: 'DOC_BUCKET_RECOVERED',
+                    storageKey: existingStorageKey
+                });
                 return;
             }
             const docdbId = await resolveDocdbId(publicationNumber);
             if (!docdbId) {
+                const errorText = `DOC_DOCDB_NOT_FOUND publication=${publicationNumber}`;
                 await prisma.documentDownloadJob.update({
                     where: { id: job.id },
-                    data: { status: 'not_found', error: `Sem documento no Espacenet para ${publicationNumber}`, finished_at: new Date() }
+                    data: { status: 'not_found', error: truncateError(errorText), finished_at: new Date() }
                 });
+                documentJobLog({ jobId: job.id, patentId: job.patent_id, publicationNumber, status: 'not_found', code: 'DOC_DOCDB_NOT_FOUND' });
                 return;
             }
             const instances = await fetchDocumentInstances(docdbId);
             const fullDoc = instances.find((item) => item['@desc'] === 'FullDocument' && typeof item['@link'] === 'string');
             if (!fullDoc?.['@link']) {
+                const errorText = `DOC_FULLDOCUMENT_NOT_AVAILABLE docdb=${docdbId}`;
                 await prisma.documentDownloadJob.update({
                     where: { id: job.id },
-                    data: { status: 'not_found', error: 'FullDocument não disponível no Espacenet', finished_at: new Date() }
+                    data: { status: 'not_found', error: truncateError(errorText), finished_at: new Date() }
                 });
+                documentJobLog({ jobId: job.id, patentId: job.patent_id, publicationNumber, docdbId, status: 'not_found', code: 'DOC_FULLDOCUMENT_NOT_AVAILABLE' });
                 return;
             }
             const fullPages = Math.max(1, Number(fullDoc['@number-of-pages'] || '1'));
@@ -1113,8 +1152,10 @@ async function processNextDocumentJob() {
                     publication_number: publicationNumber
                 }
             });
+            documentJobLog({ jobId: job.id, patentId: job.patent_id, publicationNumber, docdbId, status: 'completed', code: 'DOC_DOWNLOADED' });
         } catch (error: unknown) {
-            const message = truncateError(errorMessage(error, 'Erro ao baixar documento'));
+            const raw = serializeUnknownError(error);
+            const message = truncateError(`DOC_RUNTIME_ERROR ${raw}`);
             const lower = message.toLowerCase();
             const notFound = lower.includes('not found') || lower.includes('404') || lower.includes('não encontrado');
             await prisma.documentDownloadJob.update({
@@ -1124,6 +1165,13 @@ async function processNextDocumentJob() {
                     error: message,
                     finished_at: new Date()
                 }
+            });
+            documentJobLog({
+                jobId: job.id,
+                patentId: job.patent_id,
+                status: notFound ? 'not_found' : (nextAttempt >= MAX_DOC_ATTEMPTS ? 'failed_permanent' : 'failed'),
+                code: notFound ? 'DOC_RUNTIME_NOT_FOUND' : 'DOC_RUNTIME_FAILURE',
+                detail: raw
             });
         }
     } finally {
