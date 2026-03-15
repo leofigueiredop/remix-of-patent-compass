@@ -2837,17 +2837,17 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
             },
             take: limit
         }),
-        prisma.opsBibliographicJob.findMany({
+        prismaAny.opsBibliographicJob.findMany({
             where: { status: { in: ['pending', 'running'] } },
             orderBy: { created_at: 'asc' },
             take: limit
         }),
-        prisma.opsBibliographicJob.findMany({
+        prismaAny.opsBibliographicJob.findMany({
             where: { status: 'completed' },
             orderBy: { finished_at: 'desc' },
             take: limit
         }),
-        prisma.opsBibliographicJob.findMany({
+        prismaAny.opsBibliographicJob.findMany({
             where: { status: { in: ['failed', 'failed_permanent', 'not_found'] } },
             orderBy: { finished_at: 'desc' },
             take: limit
@@ -2870,13 +2870,13 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
         prisma.documentDownloadJob.count({
             where: { status: { in: ['failed', 'failed_permanent', 'not_found', 'skipped_sigilo'] } }
         }),
-        prisma.opsBibliographicJob.count({
+        prismaAny.opsBibliographicJob.count({
             where: { status: { in: ['pending', 'running'] } }
         }),
-        prisma.opsBibliographicJob.count({
+        prismaAny.opsBibliographicJob.count({
             where: { status: 'completed' }
         }),
-        prisma.opsBibliographicJob.count({
+        prismaAny.opsBibliographicJob.count({
             where: { status: { in: ['failed', 'failed_permanent', 'not_found'] } }
         })
     ]);
@@ -2971,7 +2971,7 @@ fastify.post('/background-workers/requeue-by-filter', async (request: any, reply
         .split(',')
         .map((item) => normalizeDispatchCode(item))
         .filter(Boolean);
-    const rows = await prisma.inpiPublication.findMany({
+    const rows: any[] = await prismaAny.inpiPublication.findMany({
         where,
         orderBy: [{ created_at: 'desc' }],
         take: safeMaxRows,
@@ -3010,7 +3010,7 @@ fastify.post('/background-workers/requeue-by-filter', async (request: any, reply
             docsQueued++;
         }
         if ((target === 'all' || target === 'ops') && (!docEligible) && row.patent_number) {
-            await prisma.opsBibliographicJob.upsert({
+            await prismaAny.opsBibliographicJob.upsert({
                 where: { patent_number: row.patent_number },
                 update: {
                     status: 'pending',
@@ -3047,7 +3047,7 @@ fastify.post('/background-workers/clear-active-errors', async () => {
                 status: { in: ['pending', 'running', 'failed', 'failed_permanent', 'not_found', 'skipped_sigilo'] }
             }
         }),
-        prisma.opsBibliographicJob.deleteMany({
+        prismaAny.opsBibliographicJob.deleteMany({
             where: {
                 status: { in: ['pending', 'running', 'failed', 'failed_permanent', 'not_found'] }
             }
@@ -3068,7 +3068,7 @@ fastify.post('/background-workers/reprocess-all', async () => {
                 status: { in: ['pending', 'running', 'failed', 'failed_permanent', 'not_found', 'skipped_sigilo'] }
             }
         }),
-        prisma.opsBibliographicJob.deleteMany({
+        prismaAny.opsBibliographicJob.deleteMany({
             where: {
                 status: { in: ['pending', 'running', 'failed', 'failed_permanent', 'not_found'] }
             }
