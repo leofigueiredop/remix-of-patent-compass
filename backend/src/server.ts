@@ -2559,7 +2559,7 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
             take: limit
         }),
         prisma.rpiImportJob.findMany({
-            where: { status: 'failed' },
+            where: { status: { in: ['failed', 'failed_permanent'] } },
             orderBy: { finished_at: 'desc' },
             take: limit
         }),
@@ -2580,7 +2580,7 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
             take: limit
         }),
         prisma.documentDownloadJob.findMany({
-            where: { status: { in: ['failed', 'not_found', 'skipped_sigilo'] } },
+            where: { status: { in: ['failed', 'failed_permanent', 'not_found', 'skipped_sigilo'] } },
             orderBy: { finished_at: 'desc' },
             include: {
                 patent: { select: { numero_publicacao: true, title: true, status: true } }

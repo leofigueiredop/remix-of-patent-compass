@@ -13,6 +13,9 @@ const RPI_BASE_URL = 'https://revistas.inpi.gov.br/txt';
 const RPI_LOOKBACK_ISSUES = Math.max(26, parseInt(process.env.RPI_LOOKBACK_ISSUES || '260', 10));
 const RPI_SCAN_MAX = Math.max(2000, parseInt(process.env.RPI_SCAN_MAX || '4000', 10));
 const RPI_SCAN_MIN = Math.max(1, parseInt(process.env.RPI_SCAN_MIN || '2000', 10));
+const MAX_RPI_ATTEMPTS = Math.max(2, parseInt(process.env.MAX_RPI_ATTEMPTS || '8', 10));
+const MAX_DOC_ATTEMPTS = Math.max(2, parseInt(process.env.MAX_DOC_ATTEMPTS || '6', 10));
+const STALE_JOB_MINUTES = Math.max(5, parseInt(process.env.STALE_JOB_MINUTES || '12', 10));
 const OPS_CONSUMER_KEY = process.env.OPS_CONSUMER_KEY || '';
 const OPS_CONSUMER_SECRET = process.env.OPS_CONSUMER_SECRET || '';
 const S3_ENDPOINT = process.env.S3_ENDPOINT || '';
@@ -47,6 +50,26 @@ function errorMessage(error: unknown, fallback: string): string {
     if (error instanceof Error) return error.message || fallback;
     if (typeof error === 'string') return error;
     return fallback;
+}
+
+function isRetryableZipError(message: string): boolean {
+    const normalized = (message || '').toLowerCase();
+    return normalized.includes('short read')
+        || normalized.includes('end-of-central-directory')
+        || normalized.includes('not a zip archive')
+        || normalized.includes('unexpected end of file')
+        || normalized.includes('invalid zip')
+        || normalized.includes('econnreset')
+        || normalized.includes('socket hang up')
+        || normalized.includes('timeout');
+}
+
+async function sleep(ms: number) {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getStaleDate(): Date {
+    return new Date(Date.now() - (STALE_JOB_MINUTES * 60 * 1000));
 }
 
 function isSigiloStatus(value?: string): boolean {
@@ -199,6 +222,49 @@ async function getXmlFromZip(zipPath: string): Promise<{ xmlFileName: string; xm
     if (!xmlFileName) throw new Error('Nenhum XML encontrado no ZIP da RPI');
     const { stdout: xmlContent } = await execAsync(`unzip -p "${zipPath}" "${xmlFileName}"`, { maxBuffer: 80 * 1024 * 1024 });
     return { xmlFileName, xmlContent };
+}
+
+async function validateZipFile(zipPath: string) {
+    const handle = await fs.open(zipPath, 'r');
+    try {
+        const header = Buffer.alloc(4);
+        await handle.read(header, 0, 4, 0);
+        const signature = header.toString('hex');
+        if (signature !== '504b0304' && signature !== '504b0506' && signature !== '504b0708') {
+            throw new Error(`Arquivo baixado não parece ZIP válido (assinatura=${signature})`);
+        }
+    } finally {
+        await handle.close();
+    }
+    await execAsync(`unzip -t "${zipPath}"`, { maxBuffer: 4 * 1024 * 1024 });
+}
+
+async function downloadRpiZipWithRetry(zipUrl: string, zipPath: string, maxAttempts = 5) {
+    let lastError = 'Falha desconhecida no download do ZIP';
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            const response = await axios.get(zipUrl, {
+                responseType: 'arraybuffer',
+                timeout: 120000,
+                headers: { 'Cache-Control': 'no-cache' },
+                validateStatus: () => true
+            });
+            if (response.status !== 200) {
+                throw new Error(`HTTP ${response.status} ao baixar ${zipUrl}`);
+            }
+            await fs.writeFile(zipPath, response.data);
+            await validateZipFile(zipPath);
+            return;
+        } catch (error: unknown) {
+            const message = errorMessage(error, 'Falha no download/validação do ZIP');
+            lastError = message;
+            const shouldRetry = attempt < maxAttempts && isRetryableZipError(message);
+            if (!shouldRetry) break;
+            await fs.rm(zipPath, { force: true }).catch(() => undefined);
+            await sleep(Math.min(4000, 500 * attempt));
+        }
+    }
+    throw new Error(`Não foi possível baixar ZIP íntegro da RPI após ${maxAttempts} tentativas: ${lastError}`);
 }
 
 function nodeText(node: cheerio.Cheerio, selector: string): string {
@@ -362,12 +428,22 @@ async function processNextRpiImportJob() {
     if (rpiRunning || rpiPaused) return;
     rpiRunning = true;
     try {
-        const job = await prisma.rpiImportJob.findFirst({
-            where: { status: { in: ['pending', 'failed'] } },
+        let job = await prisma.rpiImportJob.findFirst({
+            where: { status: 'pending' },
             orderBy: [{ rpi_number: 'asc' }, { created_at: 'asc' }]
         });
+        if (!job) {
+            job = await prisma.rpiImportJob.findFirst({
+                where: {
+                    status: 'failed',
+                    attempts: { lt: MAX_RPI_ATTEMPTS }
+                },
+                orderBy: [{ attempts: 'asc' }, { updated_at: 'asc' }, { rpi_number: 'asc' }]
+            });
+        }
         if (!job) return;
         const rpiNumber = job.rpi_number;
+        const nextAttempt = job.attempts + 1;
         const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), `rpi-${rpiNumber}-`));
         const zipPath = path.join(tempDir, `P${rpiNumber}.zip`);
         try {
@@ -381,11 +457,7 @@ async function processNextRpiImportJob() {
                 }
             });
             const zipUrl = `${RPI_BASE_URL}/P${rpiNumber}.zip`;
-            const response = await axios.get(zipUrl, {
-                responseType: 'arraybuffer',
-                timeout: 120000
-            });
-            await fs.writeFile(zipPath, response.data);
+            await downloadRpiZipWithRetry(zipUrl, zipPath, 5);
             const { xmlFileName, xmlContent } = await getXmlFromZip(zipPath);
             const imported = await processRpiXmlContent(rpiNumber, xmlContent);
             await prisma.rpiImportJob.update({
@@ -402,7 +474,7 @@ async function processNextRpiImportJob() {
             await prisma.rpiImportJob.update({
                 where: { id: job.id },
                 data: {
-                    status: 'failed',
+                    status: nextAttempt >= MAX_RPI_ATTEMPTS ? 'failed_permanent' : 'failed',
                     error: truncateError(errorMessage(error, 'Erro ao processar RPI')),
                     finished_at: new Date()
                 }
@@ -413,6 +485,38 @@ async function processNextRpiImportJob() {
     } finally {
         rpiRunning = false;
     }
+}
+
+async function recoverStaleRunningJobs() {
+    const staleDate = getStaleDate();
+    await prisma.rpiImportJob.updateMany({
+        where: {
+            status: 'running',
+            OR: [
+                { started_at: { lt: staleDate } },
+                { started_at: null, updated_at: { lt: staleDate } }
+            ]
+        },
+        data: {
+            status: 'failed',
+            finished_at: new Date(),
+            error: `Job reiniciado automaticamente: execução travada por mais de ${STALE_JOB_MINUTES} minutos`
+        }
+    });
+    await prisma.documentDownloadJob.updateMany({
+        where: {
+            status: 'running',
+            OR: [
+                { started_at: { lt: staleDate } },
+                { started_at: null, updated_at: { lt: staleDate } }
+            ]
+        },
+        data: {
+            status: 'failed',
+            finished_at: new Date(),
+            error: `Job reiniciado automaticamente: execução travada por mais de ${STALE_JOB_MINUTES} minutos`
+        }
+    });
 }
 
 async function resolveDocdbId(publicationNumber: string): Promise<string | null> {
@@ -482,11 +586,21 @@ async function processNextDocumentJob() {
     if (docRunning || docsPaused) return;
     docRunning = true;
     try {
-        const job = await prisma.documentDownloadJob.findFirst({
-            where: { status: { in: ['pending', 'failed'] } },
+        let job = await prisma.documentDownloadJob.findFirst({
+            where: { status: 'pending' },
             orderBy: [{ created_at: 'asc' }]
         });
+        if (!job) {
+            job = await prisma.documentDownloadJob.findFirst({
+                where: {
+                    status: 'failed',
+                    attempts: { lt: MAX_DOC_ATTEMPTS }
+                },
+                orderBy: [{ attempts: 'asc' }, { updated_at: 'asc' }, { created_at: 'asc' }]
+            });
+        }
         if (!job) return;
+        const nextAttempt = job.attempts + 1;
         await prisma.documentDownloadJob.update({
             where: { id: job.id },
             data: {
@@ -574,7 +688,7 @@ async function processNextDocumentJob() {
             await prisma.documentDownloadJob.update({
                 where: { id: job.id },
                 data: {
-                    status: notFound ? 'not_found' : 'failed',
+                    status: notFound ? 'not_found' : (nextAttempt >= MAX_DOC_ATTEMPTS ? 'failed_permanent' : 'failed'),
                     error: message,
                     finished_at: new Date()
                 }
@@ -605,6 +719,7 @@ export async function retryRpiJob(jobId: string) {
         where: { id: jobId },
         data: {
             status: 'pending',
+            attempts: 0,
             error: null,
             started_at: null,
             finished_at: null
@@ -619,6 +734,7 @@ export async function retryDocumentJob(jobId: string) {
         where: { id: jobId },
         data: {
             status: 'pending',
+            attempts: 0,
             error: null,
             started_at: null,
             finished_at: null
@@ -631,6 +747,7 @@ export async function retryDocumentJob(jobId: string) {
 export async function startBackgroundWorkers() {
     if (loopsStarted) return;
     loopsStarted = true;
+    recoverStaleRunningJobs().catch(() => undefined);
     enqueueLastFiveYearsRpi().catch(() => undefined);
     processNextRpiImportJob().catch(() => undefined);
     processNextDocumentJob().catch(() => undefined);
@@ -640,6 +757,9 @@ export async function startBackgroundWorkers() {
     setInterval(() => {
         processNextDocumentJob().catch(() => undefined);
     }, 3000);
+    setInterval(() => {
+        recoverStaleRunningJobs().catch(() => undefined);
+    }, 60 * 1000);
     setInterval(() => {
         enqueueLastFiveYearsRpi().catch(() => undefined);
     }, 6 * 60 * 60 * 1000);
