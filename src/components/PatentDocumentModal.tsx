@@ -111,12 +111,15 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
     const normalized = value.startsWith("/") ? value : `/${value}`;
     return `${normalizeApiUrl}${normalized}`;
   };
+  const isStorageAssetUrl = (value?: string | null) => Boolean(value && value.includes("/patent/storage/"));
 
-  const fullDocumentPath = resolveAssetUrl(patent?.storage?.fullDocumentPath || patent?.url || "");
-  const drawingsPath = resolveAssetUrl(patent?.storage?.drawingsPath || "");
-  const firstPagePath = resolveAssetUrl(patent?.storage?.firstPagePath || patent?.figures?.[0] || "");
+  const storageData = detailedData?.storage || patent?.storage;
+  const fullDocumentPath = resolveAssetUrl(storageData?.fullDocumentPath || "");
+  const drawingsPath = resolveAssetUrl(storageData?.drawingsPath || "");
+  const firstPagePath = resolveAssetUrl(storageData?.firstPagePath || "");
+  const externalFigurePath = resolveAssetUrl((detailedData?.figures?.[0] || patent?.figures?.[0] || ""));
   const hasDrawings = Boolean(drawingsPath);
-  const hasFirstPage = Boolean(firstPagePath);
+  const hasFirstPage = Boolean(firstPagePath || externalFigurePath);
   const formatStorageName = (pathValue: string) => pathValue.split("/").pop() || "documento.pdf";
   const normalizeCode = (value?: string) => (value || "").replace(",", ".").replace(/\s+/g, "");
 
@@ -231,7 +234,7 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
         ? fullDocumentPath
         : viewerMode === "drawings"
           ? drawingsPath
-          : firstPagePath;
+          : (firstPagePath || externalFigurePath);
       if (!targetUrl) return;
       setLoadingPdf(true);
       setPdfError("");
@@ -241,7 +244,7 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
       setPdfUrl(null);
 
       try {
-        if (targetUrl.includes("/patent/storage/")) {
+        if (isStorageAssetUrl(targetUrl)) {
           if (!active) return;
           setPdfUrl(targetUrl);
           return;
@@ -273,7 +276,7 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
     return () => {
       active = false;
     };
-  }, [open, patent, viewerMode, fullDocumentPath, drawingsPath, firstPagePath]);
+  }, [open, patent, viewerMode, fullDocumentPath, drawingsPath, firstPagePath, externalFigurePath, isStorageAssetUrl]);
 
   const handleQueueScraping = async () => {
     if (!detailedData?.cod_pedido) return;
@@ -303,7 +306,7 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
 
   const handleDownload = () => {
     if (!pdfUrl || !patent) return;
-    if (/^https?:\/\//i.test(pdfUrl) || pdfUrl.includes("/patent/storage/")) {
+    if (isStorageAssetUrl(pdfUrl)) {
       window.open(pdfUrl, "_blank", "noopener,noreferrer");
       return;
     }
@@ -442,7 +445,7 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
                                       variant="outline"
                                       onClick={() => {
                                         setViewerMode(item.asset);
-                                        setPdfUrl(item.path);
+                                        setPdfUrl(null);
                                       }}
                                     >
                                       Visualizar
