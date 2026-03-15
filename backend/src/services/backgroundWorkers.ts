@@ -572,19 +572,45 @@ async function quarantineInvalidFutureRpiJobs() {
 async function resolveDocdbId(publicationNumber: string): Promise<string | null> {
     const normalized = normalizePublicationNumber(publicationNumber);
     if (!normalized) return null;
-    const digitsOnly = normalized.replace(/[^\d]/g, '');
-    const base7 = digitsOnly.length > 7 ? digitsOnly.slice(0, 7) : digitsOnly;
-    if (!base7) return null;
-    const pnCandidates = [
-        `BRPI${base7}A2`,
-        `BRPI${base7}A8`,
-        `BRPI${base7}B1`,
-        `BRPI${base7}U2`,
-        `BRPI${base7}A`
+    const compact = normalized.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    const alphaPrefix = (compact.match(/^[A-Z]+/)?.[0] || '');
+    const digitsOnly = compact.replace(/[^\d]/g, '');
+    if (!digitsOnly) return null;
+    const pnCandidates = new Set<string>();
+    const apCandidates = new Set<string>();
+    const addKinds = (base: string) => {
+        if (!base) return;
+        pnCandidates.add(`${base}A2`);
+        pnCandidates.add(`${base}A8`);
+        pnCandidates.add(`${base}B1`);
+        pnCandidates.add(`${base}U2`);
+        pnCandidates.add(`${base}A`);
+    };
+
+    if (alphaPrefix === 'BR') {
+        const noCheckDigit = digitsOnly.length > 10 ? digitsOnly.slice(0, -1) : digitsOnly;
+        const variants = Array.from(new Set([noCheckDigit, digitsOnly]));
+        for (const variant of variants) {
+            if (!variant) continue;
+            addKinds(`BR${variant}`);
+            apCandidates.add(variant);
+            apCandidates.add(`BR${variant}`);
+        }
+    } else {
+        const base7 = digitsOnly.length > 7 ? digitsOnly.slice(0, 7) : digitsOnly;
+        const typePrefix = ['PI', 'MU', 'PP', 'DI'].includes(alphaPrefix) ? alphaPrefix : 'PI';
+        addKinds(`BR${typePrefix}${base7}`);
+        addKinds(`${typePrefix}${base7}`);
+        apCandidates.add(`BR${typePrefix}${base7}`);
+        apCandidates.add(`${typePrefix}${base7}`);
+    }
+
+    const queryCandidates = [
+        ...Array.from(pnCandidates).map((pn) => `pn=${pn}`),
+        ...Array.from(apCandidates).map((ap) => `ap=${ap}`)
     ];
     const token = await getOpsToken();
-    for (const pn of pnCandidates) {
-        const query = `pn=${pn}`;
+    for (const query of queryCandidates) {
         const url = `https://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=${encodeURIComponent(query)}`;
         const response = await axios.get(url, {
             headers: {
