@@ -163,7 +163,7 @@ export default function QuickSearch() {
             console.warn("Failed to load detail:", err);
             setDetailErrors(prev => ({
                 ...prev,
-                [codPedido]: "Detalhes do INPI indisponíveis — o registro pode estar protegido ou restrito."
+                [codPedido]: "Detalhes indisponíveis na base local para este registro."
             }));
         } finally {
             if (!(typeof expectedSearchToken === "number" && expectedSearchToken !== searchTokenRef.current)) {
@@ -469,7 +469,7 @@ export default function QuickSearch() {
                         Busca Rápida de Patentes
                     </h1>
                     <p className="text-muted-foreground mt-1">
-                        Pesquise diretamente no INPI por número, titular, inventor ou palavras-chave
+                        Pesquise na base local de patentes importadas por RPI e complemente com Espacenet
                     </p>
                 </div>
 
@@ -578,14 +578,14 @@ export default function QuickSearch() {
                         ) : (
                             <Tabs value={tab} onValueChange={(value) => setTab(value as "inpi" | "espacenet")} className="space-y-3">
                                 <TabsList>
-                                    <TabsTrigger value="inpi">INPI ({totals.inpi})</TabsTrigger>
+                                    <TabsTrigger value="inpi">Base Local ({totals.inpi})</TabsTrigger>
                                     <TabsTrigger value="espacenet">Espacenet ({totals.espacenet})</TabsTrigger>
                                 </TabsList>
 
                                 <TabsContent value="inpi" className="space-y-3 mt-0">
                                     {inpiResults.length === 0 ? (
                                         <div className="bg-card rounded-xl border p-6 text-center text-sm text-muted-foreground">
-                                            Nenhum resultado do INPI para os critérios informados.
+                                            Nenhum resultado da base local para os critérios informados.
                                         </div>
                                     ) : (
                                         <div className="space-y-3">
@@ -652,7 +652,7 @@ export default function QuickSearch() {
                                                                             {patent.publicationNumber}
                                                                         </span>
                                                                         <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-                                                                            INPI
+                                                                            Base Local
                                                                         </span>
                                                                         {isSigilo && (
                                                                             <span className="text-[11px] font-black text-red-700 bg-red-100 border border-red-300 px-2 py-0.5 rounded">
@@ -690,7 +690,7 @@ export default function QuickSearch() {
                                                                     )}
                                                                 </div>
                                                                 <div className="flex items-center gap-1 shrink-0">
-                                                                    {patent.source === "INPI" && (
+                                                                    {patent.source === "INPI" && codPedido && (
                                                                         <Button
                                                                             size="xs"
                                                                             variant={queuedPatents[codPedido || ''] ? "secondary" : "outline"}
@@ -731,7 +731,7 @@ export default function QuickSearch() {
                                                                 {isLoadingThis ? (
                                                                     <div className="flex items-center gap-2 text-sm text-muted-foreground py-4 justify-center">
                                                                         <Loader2 className="w-4 h-4 animate-spin" />
-                                                                        Carregando detalhes do INPI...
+                                                                        Carregando detalhes da base local...
                                                                     </div>
                                                                 ) : detailError ? (
                                                                     <p className="text-sm text-destructive text-center py-2">

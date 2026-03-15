@@ -349,6 +349,144 @@ function mergePatentLists(base: any[], incoming: any[]): any[] {
     return Array.from(merged.values()).map(mapRecordToApiPatent);
 }
 
+type LocalPatentSearchInput = {
+    number?: string;
+    titular?: string;
+    inventor?: string;
+    keywords?: string;
+    ipcCodes?: string[];
+    ignoreSecret?: boolean;
+    page?: number;
+    pageSize?: number;
+};
+
+function buildInpiDetailUrl(codPedido?: string, publicationNumber?: string): string {
+    if (codPedido) {
+        return `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${encodeURIComponent(codPedido)}`;
+    }
+    const fallback = publicationNumber || '';
+    return `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${encodeURIComponent(fallback)}`;
+}
+
+function buildEspacenetUrl(publicationNumber?: string): string {
+    const value = (publicationNumber || '').replace(/\s+/g, '');
+    const query = value ? `pn=${value}` : publicationNumber || '';
+    return `https://worldwide.espacenet.com/patent/search?q=${encodeURIComponent(query)}`;
+}
+
+function parseQueryTokens(value?: string): string[] {
+    return normalizeText(value)
+        .replace(/["'()]/g, ' ')
+        .split(/[^a-z0-9]+/i)
+        .filter((token) => token.length >= 3);
+}
+
+async function searchLocalPatentBase(input: LocalPatentSearchInput): Promise<{
+    results: any[];
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+}> {
+    const requestedPage = typeof input.page === 'number' && input.page > 0 ? Math.floor(input.page) : 1;
+    const requestedPageSize = typeof input.pageSize === 'number' && input.pageSize > 0
+        ? Math.min(Math.max(Math.floor(input.pageSize), 10), 200)
+        : 20;
+    const normalizedNumber = normalizeStringField(input.number);
+    const normalizedTitular = normalizeStringField(input.titular);
+    const normalizedInventor = normalizeStringField(input.inventor);
+    const keywordTokens = parseQueryTokens(input.keywords);
+    const ipcTokens = (input.ipcCodes || [])
+        .map((code) => normalizeStringField(code))
+        .filter((code) => code.length > 0);
+    const andClauses: any[] = [];
+
+    if (normalizedNumber) {
+        andClauses.push({
+            OR: [
+                { numero_publicacao: { contains: normalizedNumber, mode: 'insensitive' } },
+                { cod_pedido: { contains: normalizedNumber, mode: 'insensitive' } }
+            ]
+        });
+    }
+    if (normalizedTitular) {
+        andClauses.push({ applicant: { contains: normalizedTitular, mode: 'insensitive' } });
+    }
+    if (normalizedInventor) {
+        andClauses.push({ inventors: { contains: normalizedInventor, mode: 'insensitive' } });
+    }
+    for (const token of keywordTokens) {
+        andClauses.push({
+            OR: [
+                { title: { contains: token, mode: 'insensitive' } },
+                { abstract: { contains: token, mode: 'insensitive' } },
+                { applicant: { contains: token, mode: 'insensitive' } },
+                { inventors: { contains: token, mode: 'insensitive' } },
+                { numero_publicacao: { contains: token, mode: 'insensitive' } },
+                { cod_pedido: { contains: token, mode: 'insensitive' } },
+                { ipc_codes: { contains: token, mode: 'insensitive' } }
+            ]
+        });
+    }
+    for (const ipc of ipcTokens) {
+        andClauses.push({ ipc_codes: { contains: ipc, mode: 'insensitive' } });
+    }
+    if (input.ignoreSecret) {
+        andClauses.push({
+            OR: [
+                { status: null },
+                { status: { not: { contains: 'sigilo', mode: 'insensitive' } } }
+            ]
+        });
+    }
+
+    const where = andClauses.length > 0 ? { AND: andClauses } : undefined;
+    const [total, patents] = await Promise.all([
+        prismaAny.inpiPatent.count({ where }),
+        prismaAny.inpiPatent.findMany({
+            where,
+            orderBy: { updated_at: 'desc' },
+            skip: (requestedPage - 1) * requestedPageSize,
+            take: requestedPageSize,
+            include: {
+                document_jobs: {
+                    orderBy: { updated_at: 'desc' },
+                    take: 1
+                }
+            }
+        })
+    ]);
+
+    const results = patents.map((patent: any) => {
+        const publicationNumber = patent.numero_publicacao || patent.cod_pedido;
+        const documentJob = Array.isArray(patent.document_jobs) ? patent.document_jobs[0] : null;
+        const downloadable = Boolean(documentJob?.status === 'completed' && documentJob?.storage_key);
+        return {
+            publicationNumber,
+            title: patent.title || 'Sem título',
+            applicant: patent.applicant || '',
+            inventor: patent.inventors || '',
+            date: patent.filing_date || '',
+            abstract: patent.abstract || '',
+            classification: patent.ipc_codes || '',
+            source: 'INPI',
+            url: downloadable
+                ? buildEspacenetUrl(publicationNumber)
+                : buildInpiDetailUrl(patent.cod_pedido, publicationNumber),
+            status: patent.status || '',
+            cod_pedido: patent.cod_pedido
+        };
+    });
+
+    return {
+        results,
+        total,
+        page: requestedPage,
+        pageSize: requestedPageSize,
+        totalPages: Math.max(1, Math.ceil(total / requestedPageSize))
+    };
+}
+
 async function getOpsToken(): Promise<string> {
     if (opsAccessToken && Date.now() < opsTokenExpiration) {
         return opsAccessToken;
@@ -1095,10 +1233,14 @@ fastify.post('/search/inpi', async (request, reply) => {
     if (!keywords?.length) return reply.code(400).send({ error: 'Keywords are required' });
 
     try {
-        let results = await scrapeInpiBuscaWeb(keywords, ipc_codes);
-        if (ignoreSecret) {
-            results = results.filter((r: any) => r.status !== 'Mantido em sigilo');
-        }
+        const local = await searchLocalPatentBase({
+            keywords: keywords.join(' '),
+            ipcCodes: ipc_codes,
+            ignoreSecret,
+            page: 1,
+            pageSize: 200
+        });
+        const results = local.results;
         enqueueSearchResultsPersistence(results);
         return { results, total: results.length };
     } catch (error: any) {
@@ -2170,29 +2312,25 @@ fastify.post('/search/quick', async (request, reply) => {
     let inpiMeta = { total: 0, totalPages: 1, perPage: requestedPageSize, currentPage: requestedPage };
 
     try {
-        const inpi = await inpiQueue.enqueue(() => searchInpiViaCurl({
+        const local = await searchLocalPatentBase({
             number,
             titular,
             inventor,
             keywords,
-            resumo: keywords,
+            ignoreSecret,
             page: requestedPage,
-            pageSize: requestedPageSize,
-            maxPages: 1,
-            enrichDetails: false,
-            ignoreSecret
-        }));
-        // Capture metadata BEFORE spread (custom props on array are lost by push/spread)
+            pageSize: requestedPageSize
+        });
         inpiMeta = {
-            total: (inpi as any).total ?? inpi.length,
-            totalPages: (inpi as any).totalPages ?? 1,
-            perPage: (inpi as any).perPage ?? requestedPageSize,
-            currentPage: (inpi as any).currentPage ?? requestedPage
+            total: local.total,
+            totalPages: local.totalPages,
+            perPage: local.pageSize,
+            currentPage: local.page
         };
-        fetchedInpiResults.push(...inpi);
-        enqueueSearchResultsPersistence(inpi);
+        fetchedInpiResults.push(...local.results);
+        enqueueSearchResultsPersistence(local.results);
     } catch (err: any) {
-        fastify.log.warn(`Quick search INPI failed: ${err.message}`);
+        fastify.log.warn(`Quick search local base failed: ${err.message}`);
     }
 
     if (shouldFetchEspacenet && OPS_CONSUMER_KEY && OPS_CONSUMER_SECRET) {
@@ -2237,25 +2375,12 @@ fastify.post('/search/quick', async (request, reply) => {
     const inpiCurrentPage = Math.max(1, inpiMeta.currentPage ?? requestedPage);
     const inpiPageSize = inpiMeta.perPage ?? requestedPageSize;
     const inpiCurrentCount = inpiResults.length;
-    const inpiRawTotal = inpiMeta.total ?? inpiResults.length;
-    const inpiRawTotalPages = inpiMeta.totalPages
-        ?? Math.max(1, Math.ceil(inpiRawTotal / requestedPageSize));
-    const inpiMinTotalForPage = inpiCurrentCount > 0
-        ? ((inpiCurrentPage - 1) * requestedPageSize) + inpiCurrentCount
-        : 0;
-    const inpiMayHaveNextPage = fetchedInpiResults.length >= requestedPageSize;
-    const inpiTotalPages = Math.max(
-        inpiRawTotalPages,
-        inpiCurrentPage,
-        inpiMayHaveNextPage ? inpiCurrentPage + 1 : inpiCurrentPage
-    );
-    const inpiTotal = Math.max(
-        inpiRawTotal,
-        inpiMinTotalForPage,
-        inpiMayHaveNextPage ? (inpiCurrentPage * requestedPageSize) + 1 : inpiMinTotalForPage
-    );
-    const inpiFrom = inpiTotal > 0 ? ((inpiCurrentPage - 1) * requestedPageSize) + 1 : 0;
+    const inpiTotal = inpiMeta.total ?? inpiResults.length;
+    const inpiTotalPages = inpiMeta.totalPages
+        ?? Math.max(1, Math.ceil(Math.max(inpiTotal, 1) / inpiPageSize));
+    const inpiFrom = inpiTotal > 0 ? ((inpiCurrentPage - 1) * inpiPageSize) + 1 : 0;
     const inpiTo = inpiTotal > 0 ? inpiFrom + Math.max(inpiCurrentCount, 1) - 1 : 0;
+    const inpiHasNext = inpiCurrentPage < inpiTotalPages;
     const espacenetTotal = espacenetResults.length;
     const allTotal = inpiTotal + espacenetTotal;
 
@@ -2276,7 +2401,7 @@ fastify.post('/search/quick', async (request, reply) => {
                 from: inpiFrom,
                 to: inpiTo,
                 hasPrevious: inpiCurrentPage > 1,
-                hasNext: inpiMayHaveNextPage || inpiCurrentPage < inpiTotalPages
+                hasNext: inpiHasNext
             }
         },
         results: [...inpiResults, ...espacenetResults],
@@ -2301,10 +2426,9 @@ fastify.post('/search', async (request, reply) => {
 
     const results: { espacenet: any[]; inpi: any[] } = { espacenet: [], inpi: [] };
 
-    const inpiStr = inpiQuery ? inpiQuery : (keywords?.length ? keywords.join(' ') : '');
+    const localQuery = inpiQuery ? inpiQuery : (keywords?.length ? keywords.join(' ') : '');
 
-    // Run both searches in parallel
-    const [espacenetResult, inpiResult] = await Promise.allSettled([
+    const [espacenetResult, localBaseResult] = await Promise.allSettled([
         cql ? (async () => {
             try {
                 const token = await getOpsToken();
@@ -2320,7 +2444,13 @@ fastify.post('/search', async (request, reply) => {
                 throw err;
             }
         })() : Promise.resolve([]),
-        inpiStr ? scrapeInpiBuscaWeb([inpiStr], ipc_codes || [], inpiQuery).then(res => ignoreSecret ? res.filter((r: any) => r.status !== 'Mantido em sigilo') : res) : Promise.resolve([])
+        localQuery ? searchLocalPatentBase({
+            keywords: localQuery,
+            ipcCodes: ipc_codes || [],
+            ignoreSecret,
+            page: 1,
+            pageSize: 200
+        }).then((res) => res.results) : Promise.resolve([])
     ]);
 
     if (espacenetResult.status === 'fulfilled') {
@@ -2329,11 +2459,11 @@ fastify.post('/search', async (request, reply) => {
     } else {
         fastify.log.error(`Espacenet search FAILED: ${espacenetResult.reason?.message || espacenetResult.reason}`);
     }
-    if (inpiResult.status === 'fulfilled') {
-        results.inpi = inpiResult.value;
+    if (localBaseResult.status === 'fulfilled') {
+        results.inpi = localBaseResult.value;
         enqueueSearchResultsPersistence(results.inpi);
     } else {
-        fastify.log.error(`INPI search FAILED: ${inpiResult.reason?.message || inpiResult.reason}`);
+        fastify.log.error(`Local base search FAILED: ${localBaseResult.reason?.message || localBaseResult.reason}`);
     }
 
     return results;
@@ -2479,8 +2609,7 @@ const start = async () => {
 // ─── UPDATED DETAIL ENDPOINT ──────────────────────────────────
 fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
     const { codPedido } = request.params as { codPedido: string };
-    
-    // Check if we have granular data in DB
+
     const dbData = await prisma.inpiPatent.findUnique({
         where: { cod_pedido: codPedido },
         include: {
@@ -2494,22 +2623,17 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
         }
     });
 
-    if (dbData && dbData.publications.length > 0) {
-        return dbData;
+    if (!dbData) {
+        return reply.code(404).send({
+            error: 'Patent not found in local base',
+            inpiUrl: buildInpiDetailUrl(codPedido)
+        });
     }
-
-    // Fallback: Fetch basic via curl for real-time view
-    const cookieFile = `/tmp/inpi_detail_${randomUUID()}.txt`;
-    try {
-        await initializeInpiSession(cookieFile);
-        const detailUrl = `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${codPedido}`;
-        const basicData = await fetchPatentDetailViaCurl(cookieFile, detailUrl);
-        return { ...basicData, cod_pedido: codPedido, scraping_status: dbData?.scraping_jobs[0]?.status || 'available_for_queue' };
-    } catch (error: any) {
-        return reply.code(500).send({ error: 'Failed to fetch detail', details: error.message });
-    } finally {
-        try { fs.unlinkSync(cookieFile); } catch { }
-    }
+    return {
+        ...dbData,
+        scraping_status: dbData.scraping_jobs[0]?.status || 'available_for_queue',
+        inpiUrl: buildInpiDetailUrl(codPedido, dbData.numero_publicacao || codPedido)
+    };
 });
 
 // ─── Patent Base Endpoints ──────────────────────────────

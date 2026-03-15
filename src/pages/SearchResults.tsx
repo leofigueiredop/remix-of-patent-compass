@@ -54,7 +54,7 @@ export default function SearchResults() {
     date: p.dataDeposito || p.date || "",
     abstract: p.resumo || p.abstract || "",
     score: p.score || 0,
-    source: "INPI",
+    source: "Base Local",
     url: p.url,
     classification: p.classification || "",
   }));
@@ -136,7 +136,7 @@ export default function SearchResults() {
               Espacenet ({espacenetResults.length})
             </TabsTrigger>
             <TabsTrigger value="inpi">
-              INPI ({inpiResults.length})
+              Base Local ({inpiResults.length})
             </TabsTrigger>
           </TabsList>
 
