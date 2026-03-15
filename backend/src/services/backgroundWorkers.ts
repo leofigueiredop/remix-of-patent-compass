@@ -572,35 +572,19 @@ async function quarantineInvalidFutureRpiJobs() {
 async function resolveDocdbId(publicationNumber: string): Promise<string | null> {
     const normalized = normalizePublicationNumber(publicationNumber);
     if (!normalized) return null;
-    const compact = normalized.replace(/[^A-Za-z0-9]/g, '');
-    const upper = compact.toUpperCase();
-    const digitsOnly = upper.replace(/[^\d]/g, '');
+    const digitsOnly = normalized.replace(/[^\d]/g, '');
     const base7 = digitsOnly.length > 7 ? digitsOnly.slice(0, 7) : digitsOnly;
-    const pnCandidates = new Set<string>([normalized, compact, upper]);
-    if (!upper.startsWith('BR')) pnCandidates.add(`BR${upper}`);
-    if (base7) {
-        pnCandidates.add(`BRPI${base7}A`);
-        pnCandidates.add(`BRPI${base7}A2`);
-        pnCandidates.add(`BRPI${base7}A8`);
-        pnCandidates.add(`BRPI${base7}B1`);
-        pnCandidates.add(`BRPI${base7}U2`);
-        pnCandidates.add(`PI${base7}A`);
-        pnCandidates.add(`PI${base7}A2`);
-        pnCandidates.add(`PI${base7}A8`);
-        pnCandidates.add(`PI${base7}B1`);
-        pnCandidates.add(`PI${base7}U2`);
-    }
-    const apCandidates = new Set<string>();
-    if (base7) {
-        apCandidates.add(`BRPI${base7}`);
-        apCandidates.add(`PI${base7}`);
-    }
-    const token = await getOpsToken();
-    const queryCandidates = [
-        ...Array.from(pnCandidates).map((candidate) => `pn=${candidate}`),
-        ...Array.from(apCandidates).map((candidate) => `ap=${candidate}`)
+    if (!base7) return null;
+    const pnCandidates = [
+        `BRPI${base7}A2`,
+        `BRPI${base7}A8`,
+        `BRPI${base7}B1`,
+        `BRPI${base7}U2`,
+        `BRPI${base7}A`
     ];
-    for (const query of queryCandidates) {
+    const token = await getOpsToken();
+    for (const pn of pnCandidates) {
+        const query = `pn=${pn}`;
         const url = `https://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=${encodeURIComponent(query)}`;
         const response = await axios.get(url, {
             headers: {
