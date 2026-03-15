@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, Clock, CheckCircle2, AlertCircle, FileDown, Files } from "lucide-react";
+import { RefreshCw, Clock, CheckCircle2, AlertCircle, FileDown, Files, PauseCircle, PlayCircle } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
@@ -53,6 +53,13 @@ type QueuePayload = {
   };
 };
 
+type WorkerState = {
+  rpiPaused: boolean;
+  docsPaused: boolean;
+  rpiRunning: boolean;
+  docRunning: boolean;
+};
+
 const initialData: QueuePayload = {
   rpi: { processing: [], success: [], errors: [] },
   docs: { processing: [], success: [], errors: [] }
@@ -75,7 +82,7 @@ function statusBadge(status: string) {
   return <Badge variant="secondary">{status}</Badge>;
 }
 
-function RpiTable({ rows }: { rows: RpiJob[] }) {
+function RpiTable({ rows, onRetry }: { rows: RpiJob[]; onRetry?: (id: string) => void }) {
   if (rows.length === 0) {
     return <div className="p-8 text-sm text-muted-foreground">Sem registros.</div>;
   }
@@ -90,6 +97,7 @@ function RpiTable({ rows }: { rows: RpiJob[] }) {
           <TableHead>Início</TableHead>
           <TableHead>Fim</TableHead>
           <TableHead>Log</TableHead>
+          <TableHead className="text-right">Ação</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -102,6 +110,11 @@ function RpiTable({ rows }: { rows: RpiJob[] }) {
             <TableCell className="text-xs text-muted-foreground">{formatDate(row.started_at)}</TableCell>
             <TableCell className="text-xs text-muted-foreground">{formatDate(row.finished_at)}</TableCell>
             <TableCell className="text-xs text-muted-foreground max-w-[360px] truncate" title={row.error || ""}>{row.error || "-"}</TableCell>
+            <TableCell className="text-right">
+              {onRetry && (row.status === "failed") && (
+                <Button size="sm" variant="outline" onClick={() => onRetry(row.id)}>Reprocessar</Button>
+              )}
+            </TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -109,7 +122,7 @@ function RpiTable({ rows }: { rows: RpiJob[] }) {
   );
 }
 
-function DocsTable({ rows }: { rows: DocJob[] }) {
+function DocsTable({ rows, onRetry }: { rows: DocJob[]; onRetry?: (id: string) => void }) {
   if (rows.length === 0) {
     return <div className="p-8 text-sm text-muted-foreground">Sem registros.</div>;
   }
@@ -124,6 +137,7 @@ function DocsTable({ rows }: { rows: DocJob[] }) {
           <TableHead>Storage Key</TableHead>
           <TableHead>Log</TableHead>
           <TableHead>Fim</TableHead>
+          <TableHead className="text-right">Ação</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -136,6 +150,11 @@ function DocsTable({ rows }: { rows: DocJob[] }) {
             <TableCell className="font-mono text-[11px] max-w-[280px] truncate" title={row.storage_key || ""}>{row.storage_key || "-"}</TableCell>
             <TableCell className="text-xs text-muted-foreground max-w-[320px] truncate" title={row.error || ""}>{row.error || "-"}</TableCell>
             <TableCell className="text-xs text-muted-foreground">{formatDate(row.finished_at)}</TableCell>
+            <TableCell className="text-right">
+              {onRetry && (row.status === "failed" || row.status === "not_found") && (
+                <Button size="sm" variant="outline" onClick={() => onRetry(row.id)}>Reprocessar</Button>
+              )}
+            </TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -146,6 +165,12 @@ function DocsTable({ rows }: { rows: DocJob[] }) {
 export default function BackgroundWorkers() {
   const [data, setData] = useState<QueuePayload>(initialData);
   const [loading, setLoading] = useState(false);
+  const [state, setState] = useState<WorkerState>({
+    rpiPaused: false,
+    docsPaused: false,
+    rpiRunning: false,
+    docRunning: false
+  });
   const [mainTab, setMainTab] = useState("rpi");
   const [rpiTab, setRpiTab] = useState("processing");
   const [docsTab, setDocsTab] = useState("processing");
@@ -162,8 +187,12 @@ export default function BackgroundWorkers() {
   const fetchQueues = async () => {
     setLoading(true);
     try {
-      const response = await axios.get(`${API_URL}/background-workers/queues?limit=120`);
-      setData(response.data);
+      const [queues, workerState] = await Promise.all([
+        axios.get(`${API_URL}/background-workers/queues?limit=120`),
+        axios.get(`${API_URL}/background-workers/state`)
+      ]);
+      setData(queues.data);
+      setState(workerState.data);
     } finally {
       setLoading(false);
     }
@@ -177,6 +206,26 @@ export default function BackgroundWorkers() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const controlWorkers = async (queue: "rpi" | "docs" | "all", action: "pause" | "resume") => {
+    setLoading(true);
+    try {
+      await axios.post(`${API_URL}/background-workers/control`, { queue, action });
+      await fetchQueues();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const retryRpiJob = async (id: string) => {
+    await axios.post(`${API_URL}/background-workers/rpi/retry/${id}`);
+    await fetchQueues();
+  };
+
+  const retryDocsJob = async (id: string) => {
+    await axios.post(`${API_URL}/background-workers/docs/retry/${id}`);
+    await fetchQueues();
   };
 
   useEffect(() => {
@@ -196,6 +245,15 @@ export default function BackgroundWorkers() {
             </p>
           </div>
           <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => controlWorkers("all", state.rpiPaused && state.docsPaused ? "resume" : "pause")}
+              disabled={loading}
+              className="gap-2"
+            >
+              {state.rpiPaused && state.docsPaused ? <PlayCircle className="w-4 h-4" /> : <PauseCircle className="w-4 h-4" />}
+              {state.rpiPaused && state.docsPaused ? "Retomar Workers" : "Pausar Workers"}
+            </Button>
             <Button variant="outline" onClick={bootstrapRpi} disabled={loading} className="gap-2">
               <Files className="w-4 h-4" />
               Enfileirar 5 anos de RPI
@@ -254,7 +312,7 @@ export default function BackgroundWorkers() {
                   </TabsList>
                   <TabsContent value="processing"><RpiTable rows={data.rpi.processing} /></TabsContent>
                   <TabsContent value="success"><RpiTable rows={data.rpi.success} /></TabsContent>
-                  <TabsContent value="errors"><RpiTable rows={data.rpi.errors} /></TabsContent>
+                  <TabsContent value="errors"><RpiTable rows={data.rpi.errors} onRetry={retryRpiJob} /></TabsContent>
                 </Tabs>
               </CardContent>
             </Card>
@@ -295,7 +353,7 @@ export default function BackgroundWorkers() {
                   </TabsList>
                   <TabsContent value="processing"><DocsTable rows={data.docs.processing} /></TabsContent>
                   <TabsContent value="success"><DocsTable rows={data.docs.success} /></TabsContent>
-                  <TabsContent value="errors"><DocsTable rows={data.docs.errors} /></TabsContent>
+                  <TabsContent value="errors"><DocsTable rows={data.docs.errors} onRetry={retryDocsJob} /></TabsContent>
                 </Tabs>
               </CardContent>
             </Card>
@@ -305,4 +363,3 @@ export default function BackgroundWorkers() {
     </AppLayout>
   );
 }
-

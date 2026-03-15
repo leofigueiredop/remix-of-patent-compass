@@ -12,7 +12,14 @@ import FormData from 'form-data';
 import * as cheerio from 'cheerio';
 import bcrypt from 'bcryptjs';
 import { prisma } from './db';
-import { enqueueLastFiveYearsRpi, startBackgroundWorkers } from './services/backgroundWorkers';
+import {
+    enqueueLastFiveYearsRpi,
+    getBackgroundWorkerState,
+    retryDocumentJob,
+    retryRpiJob,
+    setBackgroundWorkerPause,
+    startBackgroundWorkers
+} from './services/backgroundWorkers';
 import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
 import { randomUUID } from 'crypto';
@@ -2602,6 +2609,39 @@ fastify.post('/background-workers/rpi/bootstrap', async (request, reply) => {
         return result;
     } catch (error: any) {
         return reply.code(500).send({ error: error.message || 'Falha ao enfileirar RPIs' });
+    }
+});
+
+fastify.get('/background-workers/state', async () => {
+    return getBackgroundWorkerState();
+});
+
+fastify.post('/background-workers/control', async (request: any, reply) => {
+    const { queue, action } = request.body as { queue?: 'rpi' | 'docs' | 'all'; action?: 'pause' | 'resume' };
+    if (!queue || !action) {
+        return reply.code(400).send({ error: 'queue e action são obrigatórios' });
+    }
+    const paused = action === 'pause';
+    return setBackgroundWorkerPause(queue, paused);
+});
+
+fastify.post('/background-workers/rpi/retry/:id', async (request: any, reply) => {
+    const { id } = request.params as { id: string };
+    try {
+        const job = await retryRpiJob(id);
+        return { id: job.id, status: job.status };
+    } catch (error) {
+        return reply.code(404).send({ error: 'Job RPI não encontrado' });
+    }
+});
+
+fastify.post('/background-workers/docs/retry/:id', async (request: any, reply) => {
+    const { id } = request.params as { id: string };
+    try {
+        const job = await retryDocumentJob(id);
+        return { id: job.id, status: job.status };
+    } catch (error) {
+        return reply.code(404).send({ error: 'Job de documento não encontrado' });
     }
 });
 

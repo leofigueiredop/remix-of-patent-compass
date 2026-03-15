@@ -24,14 +24,12 @@ const S3_BUCKET = process.env.S3_BUCKET || 'patents';
 let loopsStarted = false;
 let rpiRunning = false;
 let docRunning = false;
+let rpiPaused = false;
+let docsPaused = false;
 let latestRpiCache: { value: number; expiresAt: number } | null = null;
 let opsAccessToken: string | null = null;
 let opsTokenExpiration = 0;
 let s3BucketReady = false;
-
-function sleep(ms: number) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function normalizeText(value?: string): string {
     return (value || '').replace(/\s+/g, ' ').trim();
@@ -43,6 +41,12 @@ function extractDigits(value?: string): string {
 
 function truncateError(message: string): string {
     return (message || '').slice(0, 1800);
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+    if (error instanceof Error) return error.message || fallback;
+    if (typeof error === 'string') return error;
+    return fallback;
 }
 
 function isSigiloStatus(value?: string): boolean {
@@ -115,15 +119,18 @@ async function uploadPdfToS3(key: string, content: Buffer) {
 
 async function rpiZipExists(rpiNumber: number): Promise<boolean> {
     const url = `${RPI_BASE_URL}/P${rpiNumber}.zip`;
+    let headStatus: number | undefined;
     try {
         const headResponse = await axios.head(url, {
             timeout: 10000,
             validateStatus: () => true
         });
-        if (headResponse.status === 200) return true;
-        if (![403, 405].includes(headResponse.status)) return false;
+        headStatus = headResponse.status;
     } catch {
+        headStatus = undefined;
     }
+    if (headStatus === 200) return true;
+    if (typeof headStatus === 'number' && ![403, 405].includes(headStatus)) return false;
     try {
         const response = await axios.get(url, {
             timeout: 15000,
@@ -188,7 +195,7 @@ async function getXmlFromZip(zipPath: string): Promise<{ xmlFileName: string; xm
     return { xmlFileName, xmlContent };
 }
 
-function nodeText(node: any, selector: string): string {
+function nodeText(node: cheerio.Cheerio, selector: string): string {
     return normalizeText(node.find(selector).first().text());
 }
 
@@ -346,7 +353,7 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
 }
 
 async function processNextRpiImportJob() {
-    if (rpiRunning) return;
+    if (rpiRunning || rpiPaused) return;
     rpiRunning = true;
     try {
         const job = await prisma.rpiImportJob.findFirst({
@@ -385,12 +392,12 @@ async function processNextRpiImportJob() {
                     finished_at: new Date()
                 }
             });
-        } catch (error: any) {
+        } catch (error: unknown) {
             await prisma.rpiImportJob.update({
                 where: { id: job.id },
                 data: {
                     status: 'failed',
-                    error: truncateError(error?.message || 'Erro ao processar RPI'),
+                    error: truncateError(errorMessage(error, 'Erro ao processar RPI')),
                     finished_at: new Date()
                 }
             });
@@ -423,7 +430,13 @@ async function resolveDocdbId(publicationNumber: string): Promise<string | null>
     return `${country}.${docNumber}.${kind}`;
 }
 
-async function fetchDocumentInstances(docdbId: string): Promise<any[]> {
+type OpsDocumentInstance = {
+    '@desc'?: string;
+    '@link'?: string;
+    '@number-of-pages'?: string;
+};
+
+async function fetchDocumentInstances(docdbId: string): Promise<OpsDocumentInstance[]> {
     const token = await getOpsToken();
     const response = await axios.get(
         `https://ops.epo.org/3.2/rest-services/published-data/publication/docdb/${docdbId}/images`,
@@ -440,7 +453,7 @@ async function fetchDocumentInstances(docdbId: string): Promise<any[]> {
         ?.['ops:inquiry-result']
         ?.['ops:document-instance'];
     if (!instances) return [];
-    return Array.isArray(instances) ? instances : [instances];
+    return (Array.isArray(instances) ? instances : [instances]) as OpsDocumentInstance[];
 }
 
 async function downloadOpsPdfByLink(link: string, pages: string): Promise<Buffer> {
@@ -460,7 +473,7 @@ async function downloadOpsPdfByLink(link: string, pages: string): Promise<Buffer
 }
 
 async function processNextDocumentJob() {
-    if (docRunning) return;
+    if (docRunning || docsPaused) return;
     docRunning = true;
     try {
         const job = await prisma.documentDownloadJob.findFirst({
@@ -548,8 +561,8 @@ async function processNextDocumentJob() {
                     publication_number: publicationNumber
                 }
             });
-        } catch (error: any) {
-            const message = truncateError(error?.message || 'Erro ao baixar documento');
+        } catch (error: unknown) {
+            const message = truncateError(errorMessage(error, 'Erro ao baixar documento'));
             const lower = message.toLowerCase();
             const notFound = lower.includes('not found') || lower.includes('404') || lower.includes('não encontrado');
             await prisma.documentDownloadJob.update({
@@ -564,6 +577,49 @@ async function processNextDocumentJob() {
     } finally {
         docRunning = false;
     }
+}
+
+export function getBackgroundWorkerState() {
+    return {
+        rpiPaused,
+        docsPaused,
+        rpiRunning,
+        docRunning
+    };
+}
+
+export function setBackgroundWorkerPause(queue: 'rpi' | 'docs' | 'all', paused: boolean) {
+    if (queue === 'all' || queue === 'rpi') rpiPaused = paused;
+    if (queue === 'all' || queue === 'docs') docsPaused = paused;
+    return getBackgroundWorkerState();
+}
+
+export async function retryRpiJob(jobId: string) {
+    const updated = await prisma.rpiImportJob.update({
+        where: { id: jobId },
+        data: {
+            status: 'pending',
+            error: null,
+            started_at: null,
+            finished_at: null
+        }
+    });
+    processNextRpiImportJob().catch(() => undefined);
+    return updated;
+}
+
+export async function retryDocumentJob(jobId: string) {
+    const updated = await prisma.documentDownloadJob.update({
+        where: { id: jobId },
+        data: {
+            status: 'pending',
+            error: null,
+            started_at: null,
+            finished_at: null
+        }
+    });
+    processNextDocumentJob().catch(() => undefined);
+    return updated;
 }
 
 export async function startBackgroundWorkers() {
