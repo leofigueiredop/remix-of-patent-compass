@@ -45,11 +45,21 @@ type QueuePayload = {
     processing: RpiJob[];
     success: RpiJob[];
     errors: RpiJob[];
+    counts?: {
+      processing: number;
+      success: number;
+      errors: number;
+    };
   };
   docs: {
     processing: DocJob[];
     success: DocJob[];
     errors: DocJob[];
+    counts?: {
+      processing: number;
+      success: number;
+      errors: number;
+    };
   };
 };
 
@@ -176,12 +186,12 @@ export default function BackgroundWorkers() {
   const [docsTab, setDocsTab] = useState("processing");
 
   const counters = useMemo(() => ({
-    rpiProcessing: data.rpi.processing.length,
-    rpiSuccess: data.rpi.success.length,
-    rpiErrors: data.rpi.errors.length,
-    docsProcessing: data.docs.processing.length,
-    docsSuccess: data.docs.success.length,
-    docsErrors: data.docs.errors.length
+    rpiProcessing: data.rpi.counts?.processing ?? data.rpi.processing.length,
+    rpiSuccess: data.rpi.counts?.success ?? data.rpi.success.length,
+    rpiErrors: data.rpi.counts?.errors ?? data.rpi.errors.length,
+    docsProcessing: data.docs.counts?.processing ?? data.docs.processing.length,
+    docsSuccess: data.docs.counts?.success ?? data.docs.success.length,
+    docsErrors: data.docs.counts?.errors ?? data.docs.errors.length
   }), [data]);
 
   const fetchQueues = async () => {

@@ -2768,7 +2768,7 @@ fastify.get('/patents/processed', async (request: any, reply) => {
 
 fastify.get('/background-workers/queues', async (request: any, reply) => {
     const limit = Math.min(200, Math.max(20, parseInt((request.query?.limit || '100') as string, 10)));
-    const [rpiProcessing, rpiSuccess, rpiErrors, docsProcessing, docsSuccess, docsErrors] = await Promise.all([
+    const [rpiProcessing, rpiSuccess, rpiErrors, docsProcessing, docsSuccess, docsErrors, rpiProcessingCount, rpiSuccessCount, rpiErrorsCount, docsProcessingCount, docsSuccessCount, docsErrorsCount] = await Promise.all([
         prisma.rpiImportJob.findMany({
             where: { status: { in: ['pending', 'running'] } },
             orderBy: [{ rpi_number: 'asc' }, { created_at: 'asc' }],
@@ -2807,6 +2807,24 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
                 patent: { select: { numero_publicacao: true, title: true, status: true } }
             },
             take: limit
+        }),
+        prisma.rpiImportJob.count({
+            where: { status: { in: ['pending', 'running'] } }
+        }),
+        prisma.rpiImportJob.count({
+            where: { status: 'completed' }
+        }),
+        prisma.rpiImportJob.count({
+            where: { status: { in: ['failed', 'failed_permanent'] } }
+        }),
+        prisma.documentDownloadJob.count({
+            where: { status: { in: ['pending', 'running'] } }
+        }),
+        prisma.documentDownloadJob.count({
+            where: { status: 'completed' }
+        }),
+        prisma.documentDownloadJob.count({
+            where: { status: { in: ['failed', 'failed_permanent', 'not_found', 'skipped_sigilo'] } }
         })
     ]);
 
@@ -2814,12 +2832,22 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
         rpi: {
             processing: rpiProcessing,
             success: rpiSuccess,
-            errors: rpiErrors
+            errors: rpiErrors,
+            counts: {
+                processing: rpiProcessingCount,
+                success: rpiSuccessCount,
+                errors: rpiErrorsCount
+            }
         },
         docs: {
             processing: docsProcessing,
             success: docsSuccess,
-            errors: docsErrors
+            errors: docsErrors,
+            counts: {
+                processing: docsProcessingCount,
+                success: docsSuccessCount,
+                errors: docsErrorsCount
+            }
         }
     };
 });
