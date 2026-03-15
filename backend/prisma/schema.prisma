@@ -4,6 +4,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 // 1. Authenticated Users (Admins/Consultants)
@@ -107,6 +108,7 @@ model InpiPatent {
   petitions          InpiPetition[]
   annuities         InpiAnnuity[]
   scraping_jobs     ScrapingJob[]
+  document_jobs     DocumentDownloadJob[]
 
   @@map("inpi_patents")
 }
@@ -170,3 +172,40 @@ model ScrapingJob {
   @@index([patent_id, status])
 }
 
+model RpiImportJob {
+  id            String   @id @default(uuid())
+  rpi_number    Int      @unique
+  status        String   @default("pending")
+  attempts      Int      @default(0)
+  imported_count Int     @default(0)
+  source_url    String?
+  xml_file_name String?
+  error         String?
+  started_at    DateTime?
+  finished_at   DateTime?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  @@index([status, created_at])
+  @@index([rpi_number, status])
+}
+
+model DocumentDownloadJob {
+  id                 String    @id @default(uuid())
+  patent_id          String
+  patent             InpiPatent @relation(fields: [patent_id], references: [cod_pedido])
+  rpi_number         Int?
+  publication_number String?
+  status             String    @default("pending")
+  attempts           Int       @default(0)
+  storage_key        String?
+  error              String?
+  started_at         DateTime?
+  finished_at        DateTime?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+
+  @@unique([patent_id])
+  @@index([status, created_at])
+  @@index([rpi_number])
+}

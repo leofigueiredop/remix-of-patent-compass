@@ -12,7 +12,7 @@ import FormData from 'form-data';
 import * as cheerio from 'cheerio';
 import bcrypt from 'bcryptjs';
 import { prisma } from './db';
-import { startJobRunner } from './services/jobRunner';
+import { enqueueLastFiveYearsRpi, startBackgroundWorkers } from './services/backgroundWorkers';
 import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
 import { randomUUID } from 'crypto';
@@ -2460,7 +2460,7 @@ const start = async () => {
                 fastify.log.error(err);
                 process.exit(1);
             }
-            startJobRunner(); // Start the background scraping worker
+            startBackgroundWorkers();
         });
     } catch (err) {
         fastify.log.error(err);
@@ -2536,6 +2536,73 @@ fastify.get('/patents/processed', async (request: any, reply) => {
         pageSize: take,
         totalPages: Math.ceil(total / take)
     };
+});
+
+fastify.get('/background-workers/queues', async (request: any, reply) => {
+    const limit = Math.min(200, Math.max(20, parseInt((request.query?.limit || '100') as string, 10)));
+    const [rpiProcessing, rpiSuccess, rpiErrors, docsProcessing, docsSuccess, docsErrors] = await Promise.all([
+        prisma.rpiImportJob.findMany({
+            where: { status: { in: ['pending', 'running'] } },
+            orderBy: [{ rpi_number: 'asc' }, { created_at: 'asc' }],
+            take: limit
+        }),
+        prisma.rpiImportJob.findMany({
+            where: { status: 'completed' },
+            orderBy: { finished_at: 'desc' },
+            take: limit
+        }),
+        prisma.rpiImportJob.findMany({
+            where: { status: 'failed' },
+            orderBy: { finished_at: 'desc' },
+            take: limit
+        }),
+        prisma.documentDownloadJob.findMany({
+            where: { status: { in: ['pending', 'running'] } },
+            orderBy: { created_at: 'asc' },
+            include: {
+                patent: { select: { numero_publicacao: true, title: true, status: true } }
+            },
+            take: limit
+        }),
+        prisma.documentDownloadJob.findMany({
+            where: { status: 'completed' },
+            orderBy: { finished_at: 'desc' },
+            include: {
+                patent: { select: { numero_publicacao: true, title: true, status: true } }
+            },
+            take: limit
+        }),
+        prisma.documentDownloadJob.findMany({
+            where: { status: { in: ['failed', 'not_found', 'skipped_sigilo'] } },
+            orderBy: { finished_at: 'desc' },
+            include: {
+                patent: { select: { numero_publicacao: true, title: true, status: true } }
+            },
+            take: limit
+        })
+    ]);
+
+    return {
+        rpi: {
+            processing: rpiProcessing,
+            success: rpiSuccess,
+            errors: rpiErrors
+        },
+        docs: {
+            processing: docsProcessing,
+            success: docsSuccess,
+            errors: docsErrors
+        }
+    };
+});
+
+fastify.post('/background-workers/rpi/bootstrap', async (request, reply) => {
+    try {
+        const result = await enqueueLastFiveYearsRpi();
+        return result;
+    } catch (error: any) {
+        return reply.code(500).send({ error: error.message || 'Falha ao enfileirar RPIs' });
+    }
 });
 
 fastify.get('/patents/queue', async (request: any, reply) => {

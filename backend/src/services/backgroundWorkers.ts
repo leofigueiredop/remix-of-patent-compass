@@ -1,0 +1,584 @@
+import axios from 'axios';
+import * as cheerio from 'cheerio';
+import { promisify } from 'util';
+import { exec } from 'child_process';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
+import { CreateBucketCommand, HeadBucketCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { prisma } from '../db';
+
+const execAsync = promisify(exec);
+const RPI_BASE_URL = 'https://revistas.inpi.gov.br/txt';
+const RPI_LOOKBACK_ISSUES = Math.max(26, parseInt(process.env.RPI_LOOKBACK_ISSUES || '260', 10));
+const RPI_SCAN_MAX = Math.max(2000, parseInt(process.env.RPI_SCAN_MAX || '4000', 10));
+const RPI_SCAN_MIN = Math.max(1, parseInt(process.env.RPI_SCAN_MIN || '2000', 10));
+const OPS_CONSUMER_KEY = process.env.OPS_CONSUMER_KEY || '';
+const OPS_CONSUMER_SECRET = process.env.OPS_CONSUMER_SECRET || '';
+const S3_ENDPOINT = process.env.S3_ENDPOINT || '';
+const S3_REGION = process.env.S3_REGION || 'garage';
+const S3_ACCESS_KEY = process.env.S3_ACCESS_KEY || '';
+const S3_SECRET_KEY = process.env.S3_SECRET_KEY || '';
+const S3_BUCKET = process.env.S3_BUCKET || 'patents';
+
+let loopsStarted = false;
+let rpiRunning = false;
+let docRunning = false;
+let latestRpiCache: { value: number; expiresAt: number } | null = null;
+let opsAccessToken: string | null = null;
+let opsTokenExpiration = 0;
+let s3BucketReady = false;
+
+function sleep(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeText(value?: string): string {
+    return (value || '').replace(/\s+/g, ' ').trim();
+}
+
+function extractDigits(value?: string): string {
+    return (value || '').replace(/[^\d]/g, '');
+}
+
+function truncateError(message: string): string {
+    return (message || '').slice(0, 1800);
+}
+
+function isSigiloStatus(value?: string): boolean {
+    const normalized = normalizeText(value).toLowerCase();
+    return /sigil|restrit|proteg/.test(normalized);
+}
+
+function normalizePublicationNumber(value?: string): string {
+    return normalizeText(value).replace(/\s+/g, '');
+}
+
+async function getOpsToken(): Promise<string> {
+    if (opsAccessToken && Date.now() < opsTokenExpiration) return opsAccessToken;
+    if (!OPS_CONSUMER_KEY || !OPS_CONSUMER_SECRET) {
+        throw new Error('Credenciais OPS não configuradas');
+    }
+    const auth = Buffer.from(`${OPS_CONSUMER_KEY}:${OPS_CONSUMER_SECRET}`).toString('base64');
+    const response = await axios.post(
+        'https://ops.epo.org/3.2/auth/accesstoken',
+        'grant_type=client_credentials',
+        {
+            headers: {
+                Authorization: `Basic ${auth}`,
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            timeout: 30000
+        }
+    );
+    opsAccessToken = response.data.access_token;
+    opsTokenExpiration = Date.now() + (parseInt(response.data.expires_in, 10) * 1000) - 60000;
+    return opsAccessToken!;
+}
+
+function getS3Client() {
+    return new S3Client({
+        endpoint: S3_ENDPOINT,
+        region: S3_REGION,
+        credentials: {
+            accessKeyId: S3_ACCESS_KEY,
+            secretAccessKey: S3_SECRET_KEY
+        },
+        forcePathStyle: true
+    });
+}
+
+async function ensureS3Bucket() {
+    if (s3BucketReady) return;
+    if (!S3_ENDPOINT || !S3_ACCESS_KEY || !S3_SECRET_KEY) {
+        throw new Error('Credenciais S3 não configuradas');
+    }
+    const s3 = getS3Client();
+    try {
+        await s3.send(new HeadBucketCommand({ Bucket: S3_BUCKET }));
+    } catch {
+        await s3.send(new CreateBucketCommand({ Bucket: S3_BUCKET }));
+    }
+    s3BucketReady = true;
+}
+
+async function uploadPdfToS3(key: string, content: Buffer) {
+    const s3 = getS3Client();
+    await ensureS3Bucket();
+    await s3.send(new PutObjectCommand({
+        Bucket: S3_BUCKET,
+        Key: key,
+        Body: content,
+        ContentType: 'application/pdf'
+    }));
+}
+
+async function rpiZipExists(rpiNumber: number): Promise<boolean> {
+    const url = `${RPI_BASE_URL}/P${rpiNumber}.zip`;
+    try {
+        const headResponse = await axios.head(url, {
+            timeout: 10000,
+            validateStatus: () => true
+        });
+        if (headResponse.status === 200) return true;
+        if (![403, 405].includes(headResponse.status)) return false;
+    } catch {
+    }
+    try {
+        const response = await axios.get(url, {
+            timeout: 15000,
+            responseType: 'arraybuffer',
+            maxContentLength: 2048,
+            validateStatus: () => true
+        });
+        return response.status === 200;
+    } catch {
+        return false;
+    }
+}
+
+async function detectLatestRpiNumber(): Promise<number | null> {
+    if (latestRpiCache && Date.now() < latestRpiCache.expiresAt) return latestRpiCache.value;
+    let foundBlockTop: number | null = null;
+    for (let probe = RPI_SCAN_MAX; probe >= RPI_SCAN_MIN; probe -= 10) {
+        if (await rpiZipExists(probe)) {
+            foundBlockTop = probe;
+            break;
+        }
+    }
+    if (!foundBlockTop) return null;
+    const refineStart = Math.min(RPI_SCAN_MAX, foundBlockTop + 9);
+    for (let probe = refineStart; probe >= foundBlockTop - 10 && probe >= RPI_SCAN_MIN; probe--) {
+        if (await rpiZipExists(probe)) {
+            latestRpiCache = { value: probe, expiresAt: Date.now() + (6 * 60 * 60 * 1000) };
+            return probe;
+        }
+    }
+    latestRpiCache = { value: foundBlockTop, expiresAt: Date.now() + (6 * 60 * 60 * 1000) };
+    return foundBlockTop;
+}
+
+export async function enqueueLastFiveYearsRpi() {
+    const latest = await detectLatestRpiNumber();
+    if (!latest) throw new Error('Não foi possível detectar a RPI mais recente');
+    const from = Math.max(1, latest - RPI_LOOKBACK_ISSUES + 1);
+    const rows = [];
+    for (let rpi = from; rpi <= latest; rpi++) {
+        rows.push({
+            rpi_number: rpi,
+            status: 'pending' as const,
+            source_url: `${RPI_BASE_URL}/P${rpi}.zip`
+        });
+    }
+    await prisma.rpiImportJob.createMany({
+        data: rows,
+        skipDuplicates: true
+    });
+    return { from, to: latest, count: rows.length };
+}
+
+async function getXmlFromZip(zipPath: string): Promise<{ xmlFileName: string; xmlContent: string }> {
+    const { stdout: listOut } = await execAsync(`unzip -Z1 "${zipPath}"`, { maxBuffer: 2 * 1024 * 1024 });
+    const xmlFileName = listOut
+        .split('\n')
+        .map((line) => line.trim())
+        .find((line) => line.toLowerCase().endsWith('.xml'));
+    if (!xmlFileName) throw new Error('Nenhum XML encontrado no ZIP da RPI');
+    const { stdout: xmlContent } = await execAsync(`unzip -p "${zipPath}" "${xmlFileName}"`, { maxBuffer: 80 * 1024 * 1024 });
+    return { xmlFileName, xmlContent };
+}
+
+function nodeText(node: any, selector: string): string {
+    return normalizeText(node.find(selector).first().text());
+}
+
+async function queueDocumentJobForPatent(params: {
+    patentId: string;
+    rpiNumber: number;
+    publicationNumber?: string;
+    status?: string;
+}) {
+    const existing = await prisma.documentDownloadJob.findUnique({
+        where: { patent_id: params.patentId }
+    });
+    if (isSigiloStatus(params.status)) {
+        if (!existing || existing.status !== 'completed') {
+            await prisma.documentDownloadJob.upsert({
+                where: { patent_id: params.patentId },
+                update: {
+                    status: 'skipped_sigilo',
+                    publication_number: params.publicationNumber || existing?.publication_number || null,
+                    rpi_number: params.rpiNumber,
+                    error: 'Patente marcada como sigilo na RPI',
+                    finished_at: new Date()
+                },
+                create: {
+                    patent_id: params.patentId,
+                    rpi_number: params.rpiNumber,
+                    publication_number: params.publicationNumber || null,
+                    status: 'skipped_sigilo',
+                    error: 'Patente marcada como sigilo na RPI',
+                    finished_at: new Date()
+                }
+            });
+        }
+        return;
+    }
+    if (existing && ['pending', 'running', 'completed'].includes(existing.status)) return;
+    await prisma.documentDownloadJob.upsert({
+        where: { patent_id: params.patentId },
+        update: {
+            status: 'pending',
+            error: null,
+            storage_key: null,
+            publication_number: params.publicationNumber || existing?.publication_number || null,
+            rpi_number: params.rpiNumber,
+            finished_at: null
+        },
+        create: {
+            patent_id: params.patentId,
+            rpi_number: params.rpiNumber,
+            publication_number: params.publicationNumber || null,
+            status: 'pending'
+        }
+    });
+}
+
+async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Promise<number> {
+    const $ = cheerio.load(xmlContent, { xmlMode: true });
+    const revista = $('revista').first();
+    const dataPublicacao = revista.attr('dataPublicacao') || revista.attr('data-publicacao') || '';
+    const despachoNodes = revista.find('despacho').toArray();
+    let imported = 0;
+
+    for (const node of despachoNodes) {
+        const despacho = $(node);
+        const processo = despacho.find('processo-patente').first();
+        if (!processo.length) continue;
+        const numeroRaw = nodeText(processo, 'numero');
+        const codPedido = extractDigits(numeroRaw);
+        if (!codPedido) continue;
+        const dispatchCode = nodeText(despacho, 'codigo') || normalizeText(despacho.attr('codigo') || '');
+        const dispatchTitle = nodeText(despacho, 'titulo') || normalizeText(despacho.attr('titulo') || '');
+        const complement = nodeText(despacho, 'comentario');
+        const title = nodeText(processo, 'titulo') || dispatchTitle;
+        const filingDate = nodeText(processo, 'data-deposito');
+        const applicants = processo
+            .find('titular-lista > titular > nome-completo')
+            .toArray()
+            .map((el) => normalizeText($(el).text()))
+            .filter(Boolean)
+            .join('; ');
+        const inventors = processo
+            .find('inventor-lista > inventor > nome-completo')
+            .toArray()
+            .map((el) => normalizeText($(el).text()))
+            .filter(Boolean)
+            .join('; ');
+        const ipcs = processo
+            .find('classificacao-internacional-lista > classificacao-internacional')
+            .toArray()
+            .map((el) => normalizeText($(el).text()))
+            .filter(Boolean)
+            .join(', ');
+
+        await prisma.inpiPatent.upsert({
+            where: { cod_pedido: codPedido },
+            update: {
+                numero_publicacao: numeroRaw || undefined,
+                title: title || undefined,
+                applicant: applicants || undefined,
+                inventors: inventors || undefined,
+                ipc_codes: ipcs || undefined,
+                filing_date: filingDate || undefined,
+                last_rpi: String(rpiNumber),
+                last_event: dispatchCode || undefined,
+                status: dispatchTitle || undefined
+            },
+            create: {
+                cod_pedido: codPedido,
+                numero_publicacao: numeroRaw || null,
+                title: title || null,
+                applicant: applicants || null,
+                inventors: inventors || null,
+                ipc_codes: ipcs || null,
+                filing_date: filingDate || null,
+                last_rpi: String(rpiNumber),
+                last_event: dispatchCode || null,
+                status: dispatchTitle || null
+            }
+        });
+
+        const publicationExists = await prisma.inpiPublication.findFirst({
+            where: {
+                patent_id: codPedido,
+                rpi: String(rpiNumber),
+                despacho_code: dispatchCode || null,
+                despacho_desc: dispatchTitle || null,
+                complement: complement || null
+            },
+            select: { id: true }
+        });
+
+        if (!publicationExists) {
+            await prisma.inpiPublication.create({
+                data: {
+                    patent_id: codPedido,
+                    rpi: String(rpiNumber),
+                    date: dataPublicacao || null,
+                    despacho_code: dispatchCode || null,
+                    despacho_desc: dispatchTitle || null,
+                    complement: complement || null
+                }
+            });
+        }
+
+        await queueDocumentJobForPatent({
+            patentId: codPedido,
+            rpiNumber,
+            publicationNumber: numeroRaw,
+            status: dispatchTitle
+        });
+
+        imported++;
+    }
+    return imported;
+}
+
+async function processNextRpiImportJob() {
+    if (rpiRunning) return;
+    rpiRunning = true;
+    try {
+        const job = await prisma.rpiImportJob.findFirst({
+            where: { status: { in: ['pending', 'failed'] } },
+            orderBy: [{ rpi_number: 'asc' }, { created_at: 'asc' }]
+        });
+        if (!job) return;
+        const rpiNumber = job.rpi_number;
+        const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), `rpi-${rpiNumber}-`));
+        const zipPath = path.join(tempDir, `P${rpiNumber}.zip`);
+        try {
+            await prisma.rpiImportJob.update({
+                where: { id: job.id },
+                data: {
+                    status: 'running',
+                    started_at: new Date(),
+                    error: null,
+                    attempts: { increment: 1 }
+                }
+            });
+            const zipUrl = `${RPI_BASE_URL}/P${rpiNumber}.zip`;
+            const response = await axios.get(zipUrl, {
+                responseType: 'arraybuffer',
+                timeout: 120000
+            });
+            await fs.writeFile(zipPath, response.data);
+            const { xmlFileName, xmlContent } = await getXmlFromZip(zipPath);
+            const imported = await processRpiXmlContent(rpiNumber, xmlContent);
+            await prisma.rpiImportJob.update({
+                where: { id: job.id },
+                data: {
+                    status: 'completed',
+                    imported_count: imported,
+                    source_url: zipUrl,
+                    xml_file_name: xmlFileName,
+                    finished_at: new Date()
+                }
+            });
+        } catch (error: any) {
+            await prisma.rpiImportJob.update({
+                where: { id: job.id },
+                data: {
+                    status: 'failed',
+                    error: truncateError(error?.message || 'Erro ao processar RPI'),
+                    finished_at: new Date()
+                }
+            });
+        } finally {
+            await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+        }
+    } finally {
+        rpiRunning = false;
+    }
+}
+
+async function resolveDocdbId(publicationNumber: string): Promise<string | null> {
+    const cleaned = normalizePublicationNumber(publicationNumber);
+    if (!cleaned) return null;
+    const token = await getOpsToken();
+    const url = `https://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=${encodeURIComponent(`pn=${cleaned}`)}`;
+    const response = await axios.get(url, {
+        headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/xml'
+        },
+        timeout: 40000
+    });
+    const $ = cheerio.load(response.data, { xmlMode: true });
+    const exchange = $('exchange-document').first();
+    const country = normalizeText(exchange.attr('country') || '');
+    const docNumber = normalizeText(exchange.attr('doc-number') || '');
+    const kind = normalizeText(exchange.attr('kind') || '');
+    if (!country || !docNumber || !kind) return null;
+    return `${country}.${docNumber}.${kind}`;
+}
+
+async function fetchDocumentInstances(docdbId: string): Promise<any[]> {
+    const token = await getOpsToken();
+    const response = await axios.get(
+        `https://ops.epo.org/3.2/rest-services/published-data/publication/docdb/${docdbId}/images`,
+        {
+            headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: 'application/json'
+            },
+            timeout: 40000
+        }
+    );
+    const instances = response.data?.['ops:world-patent-data']
+        ?.['ops:document-inquiry']
+        ?.['ops:inquiry-result']
+        ?.['ops:document-instance'];
+    if (!instances) return [];
+    return Array.isArray(instances) ? instances : [instances];
+}
+
+async function downloadOpsPdfByLink(link: string, pages: string): Promise<Buffer> {
+    const token = await getOpsToken();
+    const response = await axios.get(
+        `https://ops.epo.org/3.2/rest-services/${link}?Range=${encodeURIComponent(pages)}`,
+        {
+            headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: 'application/pdf'
+            },
+            responseType: 'arraybuffer',
+            timeout: 60000
+        }
+    );
+    return Buffer.from(response.data);
+}
+
+async function processNextDocumentJob() {
+    if (docRunning) return;
+    docRunning = true;
+    try {
+        const job = await prisma.documentDownloadJob.findFirst({
+            where: { status: { in: ['pending', 'failed'] } },
+            orderBy: [{ created_at: 'asc' }]
+        });
+        if (!job) return;
+        await prisma.documentDownloadJob.update({
+            where: { id: job.id },
+            data: {
+                status: 'running',
+                started_at: new Date(),
+                attempts: { increment: 1 },
+                error: null
+            }
+        });
+        try {
+            const patent = await prisma.inpiPatent.findUnique({
+                where: { cod_pedido: job.patent_id }
+            });
+            if (!patent) {
+                await prisma.documentDownloadJob.update({
+                    where: { id: job.id },
+                    data: { status: 'not_found', error: 'Patente não encontrada na base', finished_at: new Date() }
+                });
+                return;
+            }
+            if (isSigiloStatus(patent.status || job.error || undefined)) {
+                await prisma.documentDownloadJob.update({
+                    where: { id: job.id },
+                    data: { status: 'skipped_sigilo', error: 'Patente em sigilo', finished_at: new Date() }
+                });
+                return;
+            }
+            const publicationNumber = normalizeText(job.publication_number || patent.numero_publicacao || '');
+            if (!publicationNumber) {
+                await prisma.documentDownloadJob.update({
+                    where: { id: job.id },
+                    data: { status: 'not_found', error: 'Número de publicação ausente', finished_at: new Date() }
+                });
+                return;
+            }
+            const docdbId = await resolveDocdbId(publicationNumber);
+            if (!docdbId) {
+                await prisma.documentDownloadJob.update({
+                    where: { id: job.id },
+                    data: { status: 'not_found', error: 'Documento não encontrado no Espacenet', finished_at: new Date() }
+                });
+                return;
+            }
+            const instances = await fetchDocumentInstances(docdbId);
+            const fullDoc = instances.find((item) => item['@desc'] === 'FullDocument' && typeof item['@link'] === 'string');
+            if (!fullDoc?.['@link']) {
+                await prisma.documentDownloadJob.update({
+                    where: { id: job.id },
+                    data: { status: 'not_found', error: 'FullDocument não disponível no Espacenet', finished_at: new Date() }
+                });
+                return;
+            }
+            const fullPages = Math.max(1, Number(fullDoc['@number-of-pages'] || '1'));
+            const fullPdf = await downloadOpsPdfByLink(fullDoc['@link'], `1-${fullPages}`);
+            const safeBase = publicationNumber.replace(/[^\w.-]/g, '_');
+            const baseKey = `patent-docs/${safeBase}`;
+            const fullKey = `${baseKey}/full_document.pdf`;
+            await uploadPdfToS3(fullKey, fullPdf);
+
+            const drawing = instances.find((item) => item['@desc'] === 'Drawing' && typeof item['@link'] === 'string');
+            if (drawing?.['@link']) {
+                const pages = Math.max(1, Number(drawing['@number-of-pages'] || '1'));
+                const pdf = await downloadOpsPdfByLink(drawing['@link'], `1-${pages}`);
+                await uploadPdfToS3(`${baseKey}/drawings.pdf`, pdf);
+            }
+            const firstPage = instances.find((item) => item['@desc'] === 'FirstPageClipping' && typeof item['@link'] === 'string');
+            if (firstPage?.['@link']) {
+                const pdf = await downloadOpsPdfByLink(firstPage['@link'], '1');
+                await uploadPdfToS3(`${baseKey}/first_page.pdf`, pdf);
+            }
+
+            await prisma.documentDownloadJob.update({
+                where: { id: job.id },
+                data: {
+                    status: 'completed',
+                    storage_key: fullKey,
+                    finished_at: new Date(),
+                    publication_number: publicationNumber
+                }
+            });
+        } catch (error: any) {
+            const message = truncateError(error?.message || 'Erro ao baixar documento');
+            const lower = message.toLowerCase();
+            const notFound = lower.includes('not found') || lower.includes('404') || lower.includes('não encontrado');
+            await prisma.documentDownloadJob.update({
+                where: { id: job.id },
+                data: {
+                    status: notFound ? 'not_found' : 'failed',
+                    error: message,
+                    finished_at: new Date()
+                }
+            });
+        }
+    } finally {
+        docRunning = false;
+    }
+}
+
+export async function startBackgroundWorkers() {
+    if (loopsStarted) return;
+    loopsStarted = true;
+    enqueueLastFiveYearsRpi().catch(() => undefined);
+    processNextRpiImportJob().catch(() => undefined);
+    processNextDocumentJob().catch(() => undefined);
+    setInterval(() => {
+        processNextRpiImportJob().catch(() => undefined);
+    }, 4000);
+    setInterval(() => {
+        processNextDocumentJob().catch(() => undefined);
+    }, 3000);
+    setInterval(() => {
+        enqueueLastFiveYearsRpi().catch(() => undefined);
+    }, 6 * 60 * 60 * 1000);
+}

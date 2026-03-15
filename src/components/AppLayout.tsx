@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   BookOpen,
   SearchCheck,
+  Workflow,
 } from "lucide-react";
 import { authService } from "@/services/auth";
 
@@ -29,6 +30,7 @@ const navigation = [
       { label: "Dashboard", icon: LayoutDashboard, path: "/monitoring/dashboard" },
       { label: "Patentes", icon: ShieldCheck, path: "/monitoring/patents" },
       { label: "Base de Patentes", icon: SearchCheck, path: "/monitoring/base" },
+      { label: "Background Workers", icon: Workflow, path: "/monitoring/background-workers" },
       { label: "Base de Conhecimento", icon: BookOpen, path: "/knowledge-base" },
       { label: "Configurações", icon: Settings, path: "/monitoring/settings" },
     ],

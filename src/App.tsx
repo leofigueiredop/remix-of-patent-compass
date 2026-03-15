@@ -22,6 +22,7 @@ import KnowledgeBase from "./pages/KnowledgeBase";
 import MonitoringSettings from "./pages/MonitoringSettings";
 import QuickSearch from "./pages/QuickSearch";
 import PatentBase from "./pages/PatentBase";
+import BackgroundWorkers from "./pages/BackgroundWorkers";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -52,6 +53,7 @@ const App = () => (
             <Route path="/monitoring/dashboard" element={<MonitoringDashboard />} />
             <Route path="/monitoring/patents" element={<MonitoringPatents />} />
             <Route path="/monitoring/base" element={<PatentBase />} />
+            <Route path="/monitoring/background-workers" element={<BackgroundWorkers />} />
             <Route path="/monitoring/settings" element={<MonitoringSettings />} />
             <Route path="/proposta" element={<Proposal />} />
             <Route path="*" element={<NotFound />} />
