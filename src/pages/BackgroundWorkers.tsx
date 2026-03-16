@@ -369,7 +369,7 @@ export default function BackgroundWorkers() {
     setLoading(true);
     try {
       const ids = data.ops.errors.map((row) => row.id);
-      const response = await axios.post(`${API_URL}/background-workers/ops/retry-errors`, { ids });
+      const response = await axios.post(`${API_URL}/background-workers/ops/retry-errors`, { ids, preferBigQuery: true });
       setActionMessage(`OPS reprocessados: ${response.data?.updated ?? 0}`);
       await fetchQueues();
     } finally {
@@ -690,7 +690,7 @@ export default function BackgroundWorkers() {
                   <TabsContent value="errors" className="space-y-3">
                     <div className="flex justify-end">
                       <Button variant="outline" size="sm" disabled={loading || data.ops.errors.length === 0} onClick={retryAllOpsErrors}>
-                        Reprocessar todos os erros
+                        Reprocessar todos (BigQuery)
                       </Button>
                     </div>
                     <OpsTable rows={data.ops.errors} onRetry={retryOpsJob} />

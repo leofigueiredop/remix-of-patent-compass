@@ -2920,7 +2920,8 @@ fastify.post('/background-workers/docs/retry-errors', async (request: any, reply
 fastify.post('/background-workers/ops/retry-errors', async (request: any, reply) => {
     try {
         const ids = Array.isArray(request.body?.ids) ? request.body.ids.filter((item: any) => typeof item === 'string') : undefined;
-        const result = await retryAllOpsErrorJobs(ids);
+        const preferBigQuery = Boolean(request.body?.preferBigQuery);
+        const result = await retryAllOpsErrorJobs(ids, preferBigQuery);
         return result;
     } catch (error) {
         return reply.code(500).send({ error: 'Falha ao reprocessar erros da fila OPS' });

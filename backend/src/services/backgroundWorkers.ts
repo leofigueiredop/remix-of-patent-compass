@@ -1887,7 +1887,7 @@ export async function retryAllDocumentErrorJobs(ids?: string[]) {
     return { updated: result.count };
 }
 
-export async function retryAllOpsErrorJobs(ids?: string[]) {
+export async function retryAllOpsErrorJobs(ids?: string[], preferBigQuery = false) {
     const where = ids && ids.length > 0
         ? { id: { in: Array.from(new Set(ids)) }, status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing'] } }
         : { status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing'] } };
@@ -1895,7 +1895,7 @@ export async function retryAllOpsErrorJobs(ids?: string[]) {
         where,
         data: {
             status: 'pending',
-            attempts: 0,
+            attempts: preferBigQuery ? 1 : 0,
             error: null,
             started_at: null,
             finished_at: null
