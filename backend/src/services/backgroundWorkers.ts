@@ -31,8 +31,9 @@ const ESPACENET_UI_FALLBACK_ENABLED = (process.env.ESPACENET_UI_FALLBACK_ENABLED
 const INPI_SCRAPE_FALLBACK_ENABLED = (process.env.INPI_SCRAPE_FALLBACK_ENABLED || 'false').toLowerCase() === 'true';
 const BIGQUERY_PROJECT_ID = process.env.BIGQUERY_PROJECT_ID || '';
 const GOOGLE_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '';
+const GOOGLE_SERVICE_ACCOUNT_FILE = process.env.GOOGLE_SERVICE_ACCOUNT_FILE || '';
 const BIGQUERY_BILLING_PROJECT = process.env.BIGQUERY_BILLING_PROJECT || BIGQUERY_PROJECT_ID;
-const BIGQUERY_ENABLED = Boolean(BIGQUERY_BILLING_PROJECT && GOOGLE_SERVICE_ACCOUNT_JSON);
+const BIGQUERY_ENABLED = Boolean(BIGQUERY_BILLING_PROJECT && (GOOGLE_SERVICE_ACCOUNT_JSON || GOOGLE_SERVICE_ACCOUNT_FILE));
 const BIGQUERY_MAX_BYTES_BILLED = Math.max(10_000_000, parseInt(process.env.BIGQUERY_MAX_BYTES_BILLED || '50000000', 10));
 const BIGQUERY_CACHE_TTL_HOURS = Math.max(1, parseInt(process.env.BIGQUERY_CACHE_TTL_HOURS || '720', 10));
 const S3_ENDPOINT = process.env.S3_ENDPOINT || '';
@@ -301,10 +302,15 @@ function parsePublicationNumber(value?: string): ParsedPublicationNumber | null 
     };
 }
 
-function getGoogleServiceAccount(): { client_email: string; private_key: string } | null {
-    if (!GOOGLE_SERVICE_ACCOUNT_JSON) return null;
+async function getGoogleServiceAccount(): Promise<{ client_email: string; private_key: string } | null> {
+    const rawJson = GOOGLE_SERVICE_ACCOUNT_JSON
+        ? GOOGLE_SERVICE_ACCOUNT_JSON
+        : (GOOGLE_SERVICE_ACCOUNT_FILE
+            ? await fs.readFile(GOOGLE_SERVICE_ACCOUNT_FILE, 'utf-8').catch(() => '')
+            : '');
+    if (!rawJson) return null;
     try {
-        const parsed = JSON.parse(GOOGLE_SERVICE_ACCOUNT_JSON);
+        const parsed = JSON.parse(rawJson);
         const clientEmail = normalizeText(parsed?.client_email || '');
         const privateKey = String(parsed?.private_key || '').replace(/\\n/g, '\n');
         if (!clientEmail || !privateKey) return null;
@@ -317,7 +323,7 @@ function getGoogleServiceAccount(): { client_email: string; private_key: string 
 async function getBigQueryToken(): Promise<string | null> {
     if (!BIGQUERY_ENABLED) return null;
     if (bigQueryAccessToken && Date.now() < bigQueryAccessTokenExpiration) return bigQueryAccessToken;
-    const serviceAccount = getGoogleServiceAccount();
+    const serviceAccount = await getGoogleServiceAccount();
     if (!serviceAccount) return null;
     const now = Math.floor(Date.now() / 1000);
     const header = base64UrlEncode(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
