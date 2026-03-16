@@ -24,6 +24,7 @@ const OPS_MIN_INTERVAL_MS = Math.max(300, parseInt(process.env.OPS_MIN_INTERVAL_
 const OPS_RETRY_MAX = Math.max(1, parseInt(process.env.OPS_RETRY_MAX || '4', 10));
 const OPS_BREAKER_THRESHOLD = Math.max(2, parseInt(process.env.OPS_BREAKER_THRESHOLD || '6', 10));
 const OPS_BREAKER_COOLDOWN_MS = Math.max(30_000, parseInt(process.env.OPS_BREAKER_COOLDOWN_MS || '180000', 10));
+const OPS_INDEXING_GRACE_YEARS = Math.max(1, parseInt(process.env.OPS_INDEXING_GRACE_YEARS || '3', 10));
 const S3_ENDPOINT = process.env.S3_ENDPOINT || '';
 const S3_REGION = process.env.S3_REGION || 'garage';
 const S3_ACCESS_KEY = process.env.S3_ACCESS_KEY || '';
@@ -222,6 +223,21 @@ function hasBasicBibliographicData(data: {
         || normalizeText(data.ipc)
         || normalizeText(data.filingDate)
     );
+}
+
+function extractBrazilPatentYear(value?: string): number | null {
+    const compact = normalizePublicationNumber(value).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    const match = compact.match(/^BR(10|11)(\d{4})/);
+    if (!match) return null;
+    const year = Number.parseInt(match[2], 10);
+    return Number.isFinite(year) ? year : null;
+}
+
+function isRecentPatentForIndexing(value?: string): boolean {
+    const year = extractBrazilPatentYear(value);
+    if (!year) return false;
+    const current = new Date().getUTCFullYear();
+    return year >= (current - OPS_INDEXING_GRACE_YEARS + 1);
 }
 
 async function getOpsToken(): Promise<string> {
@@ -1059,19 +1075,25 @@ async function processNextOpsBibliographicJob() {
         try {
             const biblio = await fetchOpsBibliographicData(job.patent_number);
             if (!biblio) {
+                const recentIndexing = isRecentPatentForIndexing(job.patent_number);
+                const status = recentIndexing ? 'waiting_indexing' : 'not_found';
+                const biblioStatus = recentIndexing ? 'pending' : 'not_found';
+                const errorText = recentIndexing
+                    ? `Dados bibliográficos ainda não indexados no OPS para ${job.patent_number}`
+                    : `Dados bibliográficos não encontrados no OPS para ${job.patent_number}`;
                 await prisma.opsBibliographicJob.update({
                     where: { id: job.id },
                     data: {
-                        status: 'not_found',
-                        error: `Dados bibliográficos não encontrados no OPS para ${job.patent_number}`,
+                        status,
+                        error: errorText,
                         finished_at: new Date()
                     }
                 });
                 await prisma.inpiPublication.updateMany({
                     where: { patent_number: job.patent_number },
                     data: {
-                        bibliographic_status: 'not_found',
-                        ops_error: `Sem dados no OPS para ${job.patent_number}`,
+                        bibliographic_status: biblioStatus,
+                        ops_error: errorText,
                         ops_last_sync_at: new Date()
                     }
                 });
@@ -1233,12 +1255,15 @@ async function processNextDocumentJob() {
             }
             const docdbId = await resolveDocdbId(publicationNumber);
             if (!docdbId) {
-                const errorText = `DOC_DOCDB_NOT_FOUND publication=${publicationNumber}`;
+                const recentIndexing = isRecentPatentForIndexing(publicationNumber);
+                const status = recentIndexing ? 'waiting_indexing' : 'not_found';
+                const code = recentIndexing ? 'DOC_DOCDB_PENDING_INDEX' : 'DOC_DOCDB_NOT_FOUND';
+                const errorText = `${code} publication=${publicationNumber}`;
                 await prisma.documentDownloadJob.update({
                     where: { id: job.id },
-                    data: { status: 'not_found', error: truncateError(errorText), finished_at: new Date() }
+                    data: { status, error: truncateError(errorText), finished_at: new Date() }
                 });
-                documentJobLog({ jobId: job.id, patentId: job.patent_id, publicationNumber, status: 'not_found', code: 'DOC_DOCDB_NOT_FOUND' });
+                documentJobLog({ jobId: job.id, patentId: job.patent_id, publicationNumber, status, code });
                 return;
             }
             const instances = await fetchDocumentInstances(docdbId);
