@@ -310,20 +310,15 @@ function parsePublicationNumber(value?: string): ParsedPublicationNumber | null 
     };
 }
 
-function buildBigQueryPublicationCandidates(parsed: ParsedPublicationNumber, normalized: string): string[] {
+function buildBigQueryPublicationCandidates(parsed: ParsedPublicationNumber): string[] {
     const docNoZero = parsed.docNumber.replace(/^0+/, '') || parsed.docNumber;
     const values = new Set<string>([
-        normalized,
-        `${parsed.country}${parsed.docNumber}${parsed.kindCode}`,
-        `${parsed.country}${docNoZero}${parsed.kindCode}`,
-        `${parsed.country}-${parsed.docNumber}-${parsed.kindCode}`,
-        `${parsed.country}-${docNoZero}-${parsed.kindCode}`,
-        `${parsed.country}${parsed.docNumber}`,
-        `${parsed.country}${docNoZero}`,
-        `${parsed.country}-${parsed.docNumber}`,
-        `${parsed.country}-${docNoZero}`,
         parsed.docNumber,
-        docNoZero
+        docNoZero,
+        `${parsed.docNumber}${parsed.kindCode}`,
+        `${docNoZero}${parsed.kindCode}`,
+        `${parsed.docNumber}-${parsed.kindCode}`,
+        `${docNoZero}-${parsed.kindCode}`
     ].map((item) => normalizeText(item).toUpperCase()).filter(Boolean));
     return Array.from(values);
 }
@@ -513,7 +508,7 @@ async function fetchBigQueryBibliographicData(publicationNumber: string): Promis
         }
     }
     const docNoLeadingZeros = parsed.docNumber.replace(/^0+/, '') || parsed.docNumber;
-    const publicationCandidates = buildBigQueryPublicationCandidates(parsed, normalized);
+    const publicationCandidates = buildBigQueryPublicationCandidates(parsed);
     const exactQuery = `
       SELECT
         title_localized,
@@ -527,14 +522,8 @@ async function fetchBigQueryBibliographicData(publicationNumber: string): Promis
         publication_number,
         kind_code
       FROM \`patents-public-data.patents.publications\` t
-      WHERE (
-          UPPER(IFNULL(t.publication_number, '')) IN UNNEST(@publicationCandidates)
-          OR CONCAT(
-              UPPER(IFNULL(t.country_code, '')),
-              UPPER(IFNULL(t.publication_number, '')),
-              UPPER(IFNULL(t.kind_code, ''))
-            ) IN UNNEST(@publicationCandidates)
-      )
+      WHERE UPPER(IFNULL(t.country_code, '')) = @country
+      AND UPPER(IFNULL(t.publication_number, '')) IN UNNEST(@publicationCandidates)
       AND (
           @kindCode = ''
           OR UPPER(IFNULL(t.kind_code, '')) = @kindCode
@@ -556,8 +545,8 @@ async function fetchBigQueryBibliographicData(publicationNumber: string): Promis
       FROM \`patents-public-data.patents.publications\` t
       WHERE UPPER(IFNULL(t.country_code, '')) = @country
         AND (
-          REGEXP_REPLACE(UPPER(IFNULL(t.publication_number, '')), r'[^0-9A-Z]', '') = @docNumber
-          OR REGEXP_REPLACE(UPPER(IFNULL(t.publication_number, '')), r'[^0-9A-Z]', '') = @docNumberNoLeadingZeros
+          REPLACE(REPLACE(REPLACE(UPPER(IFNULL(t.publication_number, '')), '-', ''), ' ', ''), '/', '') = @docNumber
+          OR REPLACE(REPLACE(REPLACE(UPPER(IFNULL(t.publication_number, '')), '-', ''), ' ', ''), '/', '') = @docNumberNoLeadingZeros
         )
         AND (
           @kindCode = ''
@@ -573,6 +562,7 @@ async function fetchBigQueryBibliographicData(publicationNumber: string): Promis
             maximumBytesBilled: String(BIGQUERY_MAX_BYTES_BILLED),
             useQueryCache: true,
             queryParameters: [
+                { name: 'country', parameterType: { type: 'STRING' }, parameterValue: { value: parsed.country } },
                 { name: 'publicationCandidates', parameterType: { type: 'ARRAY', arrayType: { type: 'STRING' } }, parameterValue: { arrayValues: publicationCandidates.map((value) => ({ value })) } },
                 { name: 'kindCode', parameterType: { type: 'STRING' }, parameterValue: { value: parsed.kindCode } }
             ]
@@ -989,10 +979,6 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
 
         const patentNumber = buildPatentNumberKey(numeroPublicacao || numeroRaw || codPedidoFromNumero);
         if (!patentNumber) continue;
-        const bqData = bqCache.has(patentNumber)
-            ? bqCache.get(patentNumber) || null
-            : await fetchBigQueryBibliographicData(numeroPublicacao || patentNumber);
-        if (!bqCache.has(patentNumber)) bqCache.set(patentNumber, bqData);
         const isDocumentEligible = isDocumentEligibleDispatch(dispatchCode);
         const hasXmlBiblio = hasBasicBibliographicData({
             title: inventionTitle || dispatchTitle,
@@ -1001,6 +987,31 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
             ipc: ipcs,
             filingDate
         });
+        const existingBiblio = await prismaAny.inpiPublication.findFirst({
+            where: { patent_number: patentNumber, bibliographic_status: 'completed' },
+            orderBy: { created_at: 'desc' },
+            select: {
+                ops_title: true,
+                ops_applicant: true,
+                ops_inventor: true,
+                ops_ipc: true,
+                ops_publication_date: true
+            }
+        }).catch(() => null);
+        const hasStoredBiblio = hasBasicBibliographicData({
+            title: existingBiblio?.ops_title,
+            applicant: existingBiblio?.ops_applicant,
+            inventor: existingBiblio?.ops_inventor,
+            ipc: existingBiblio?.ops_ipc,
+            filingDate: existingBiblio?.ops_publication_date
+        });
+        const shouldTryBigQuery = !hasXmlBiblio && !hasStoredBiblio;
+        const bqData = shouldTryBigQuery
+            ? (bqCache.has(patentNumber)
+                ? bqCache.get(patentNumber) || null
+                : await fetchBigQueryBibliographicData(numeroPublicacao || patentNumber))
+            : null;
+        if (shouldTryBigQuery && !bqCache.has(patentNumber)) bqCache.set(patentNumber, bqData);
         const hasBigQueryBiblio = hasBasicBibliographicData({
             title: bqData?.title,
             applicant: bqData?.applicant,
@@ -1010,6 +1021,7 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
         });
         const shouldQueueOpsBiblio = !isDocumentEligible
             && !hasXmlBiblio
+            && !hasStoredBiblio
             && !hasBigQueryBiblio
             && BIBLIO_ENRICHMENT_MODE !== 'xml_only';
         const existingPatent = await prisma.inpiPatent.findFirst({
@@ -1791,7 +1803,35 @@ async function processNextDocumentJob() {
             }
             const docdbId = await resolveDocdbId(publicationNumber);
             if (!docdbId) {
-                const bqData = await fetchBigQueryBibliographicData(publicationNumber);
+                const publicationBiblio = await prismaAny.inpiPublication.findFirst({
+                    where: { patent_number: publicationNumber, bibliographic_status: 'completed' },
+                    orderBy: { created_at: 'desc' },
+                    select: {
+                        ops_title: true,
+                        ops_applicant: true,
+                        ops_inventor: true,
+                        ops_ipc: true,
+                        ops_publication_date: true
+                    }
+                }).catch(() => null);
+                const patentBiblio = await prisma.inpiPatent.findUnique({
+                    where: { cod_pedido: job.patent_id },
+                    select: {
+                        title: true,
+                        applicant: true,
+                        inventors: true,
+                        ipc_codes: true,
+                        filing_date: true
+                    }
+                }).catch(() => null);
+                const hasStoredBiblio = hasBasicBibliographicData({
+                    title: publicationBiblio?.ops_title || patentBiblio?.title,
+                    applicant: publicationBiblio?.ops_applicant || patentBiblio?.applicant,
+                    inventor: publicationBiblio?.ops_inventor || patentBiblio?.inventors,
+                    ipc: publicationBiblio?.ops_ipc || patentBiblio?.ipc_codes,
+                    filingDate: publicationBiblio?.ops_publication_date || patentBiblio?.filing_date
+                });
+                const bqData = hasStoredBiblio ? null : await fetchBigQueryBibliographicData(publicationNumber);
                 if (bqData) {
                     await prisma.inpiPatent.update({
                         where: { cod_pedido: job.patent_id },
