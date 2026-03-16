@@ -341,11 +341,11 @@ export default function BackgroundWorkers() {
     await fetchQueues();
   };
 
-  const retryAllRpiErrors = async () => {
+  const retryAllRpiErrors = async (preferBigQuery = false) => {
     setLoading(true);
     try {
       const ids = data.rpi.errors.map((row) => row.id);
-      const response = await axios.post(`${API_URL}/background-workers/rpi/retry-errors`, { ids });
+      const response = await axios.post(`${API_URL}/background-workers/rpi/retry-errors`, { ids, preferBigQuery });
       setActionMessage(`RPI reprocessadas: ${response.data?.updated ?? 0}`);
       await fetchQueues();
     } finally {
@@ -353,11 +353,11 @@ export default function BackgroundWorkers() {
     }
   };
 
-  const retryAllDocsErrors = async () => {
+  const retryAllDocsErrors = async (preferBigQuery = false) => {
     setLoading(true);
     try {
       const ids = data.docs.errors.map((row) => row.id);
-      const response = await axios.post(`${API_URL}/background-workers/docs/retry-errors`, { ids });
+      const response = await axios.post(`${API_URL}/background-workers/docs/retry-errors`, { ids, preferBigQuery });
       setActionMessage(`Docs reprocessados: ${response.data?.updated ?? 0}`);
       await fetchQueues();
     } finally {
@@ -365,11 +365,11 @@ export default function BackgroundWorkers() {
     }
   };
 
-  const retryAllOpsErrors = async () => {
+  const retryAllOpsErrors = async (preferBigQuery = false) => {
     setLoading(true);
     try {
       const ids = data.ops.errors.map((row) => row.id);
-      const response = await axios.post(`${API_URL}/background-workers/ops/retry-errors`, { ids, preferBigQuery: true });
+      const response = await axios.post(`${API_URL}/background-workers/ops/retry-errors`, { ids, preferBigQuery });
       setActionMessage(`OPS reprocessados: ${response.data?.updated ?? 0}`);
       await fetchQueues();
     } finally {
@@ -593,7 +593,7 @@ export default function BackgroundWorkers() {
                   <TabsContent value="success"><RpiTable rows={data.rpi.success} /></TabsContent>
                   <TabsContent value="errors" className="space-y-3">
                     <div className="flex justify-end">
-                      <Button variant="outline" size="sm" disabled={loading || data.rpi.errors.length === 0} onClick={retryAllRpiErrors}>
+                      <Button variant="outline" size="sm" disabled={loading || data.rpi.errors.length === 0} onClick={() => retryAllRpiErrors()}>
                         Reprocessar todos os erros
                       </Button>
                     </div>
@@ -641,7 +641,7 @@ export default function BackgroundWorkers() {
                   <TabsContent value="success"><DocsTable rows={data.docs.success} /></TabsContent>
                   <TabsContent value="errors" className="space-y-3">
                     <div className="flex justify-end">
-                      <Button variant="outline" size="sm" disabled={loading || data.docs.errors.length === 0} onClick={retryAllDocsErrors}>
+                      <Button variant="outline" size="sm" disabled={loading || data.docs.errors.length === 0} onClick={() => retryAllDocsErrors()}>
                         Reprocessar todos os erros
                       </Button>
                     </div>
@@ -689,7 +689,7 @@ export default function BackgroundWorkers() {
                   <TabsContent value="success"><OpsTable rows={data.ops.success} /></TabsContent>
                   <TabsContent value="errors" className="space-y-3">
                     <div className="flex justify-end">
-                      <Button variant="outline" size="sm" disabled={loading || data.ops.errors.length === 0} onClick={retryAllOpsErrors}>
+                      <Button variant="outline" size="sm" disabled={loading || data.ops.errors.length === 0} onClick={() => retryAllOpsErrors(true)}>
                         Reprocessar todos (BigQuery)
                       </Button>
                     </div>

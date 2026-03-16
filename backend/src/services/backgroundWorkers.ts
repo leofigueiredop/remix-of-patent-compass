@@ -9,6 +9,8 @@ import { createSign } from 'crypto';
 import { CreateBucketCommand, HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { prisma } from '../db';
 
+const prismaAny = prisma as any;
+
 const execAsync = promisify(exec);
 const RPI_BASE_URL = 'https://revistas.inpi.gov.br/txt';
 const RPI_LOOKBACK_ISSUES = Math.max(26, parseInt(process.env.RPI_LOOKBACK_ISSUES || '260', 10));
@@ -468,7 +470,6 @@ async function fetchBigQueryBibliographicData(publicationNumber: string): Promis
             };
         }
     }
-    const noKind = trimKindSuffix(normalized);
     const docNoLeadingZeros = parsed.docNumber.replace(/^0+/, '') || parsed.docNumber;
     const query = `
       SELECT
@@ -854,7 +855,7 @@ async function queueOpsBibliographicJob(params: {
     rpiNumber: number;
 }) {
     if (!params.patentNumber) return;
-    await prisma.opsBibliographicJob.upsert({
+    await prismaAny.opsBibliographicJob.upsert({
         where: { patent_number: params.patentNumber },
         update: {
             status: 'pending',
@@ -979,7 +980,7 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
                     status: dispatchTitle || null
                 }
             });
-            await prisma.inpiPublication.updateMany({
+            await prismaAny.inpiPublication.updateMany({
                 where: {
                     patent_number: patentNumber,
                     patent_id: null
@@ -1005,7 +1006,7 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
             }).catch(() => undefined);
         }
 
-        const publicationExists = await prisma.inpiPublication.findFirst({
+        const publicationExists = await prismaAny.inpiPublication.findFirst({
             where: {
                 patent_number: patentNumber,
                 rpi: String(rpiNumber),
@@ -1017,7 +1018,7 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
         });
 
         if (!publicationExists) {
-            await prisma.inpiPublication.create({
+            await prismaAny.inpiPublication.create({
                 data: {
                     patent_id: patentId,
                     patent_number: patentNumber,
@@ -1038,12 +1039,12 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
                 }
             });
         } else if (patentId && !publicationExists.patent_id) {
-            await prisma.inpiPublication.update({
+            await prismaAny.inpiPublication.update({
                 where: { id: publicationExists.id },
                 data: { patent_id: patentId }
             });
         } else if (hasXmlBiblio || hasBigQueryBiblio) {
-            await prisma.inpiPublication.update({
+            await prismaAny.inpiPublication.update({
                 where: { id: publicationExists.id },
                 data: {
                     bibliographic_status: 'completed',
@@ -1173,7 +1174,7 @@ async function recoverStaleRunningJobs() {
             error: `Job reiniciado automaticamente: execução travada por mais de ${STALE_JOB_MINUTES} minutos`
         }
     });
-    await prisma.opsBibliographicJob.updateMany({
+    await prismaAny.opsBibliographicJob.updateMany({
         where: {
             status: 'running',
             OR: [
@@ -1500,12 +1501,12 @@ async function processNextOpsBibliographicJob() {
     if (opsRunning || opsPaused) return;
     opsRunning = true;
     try {
-        let job = await prisma.opsBibliographicJob.findFirst({
+        let job = await prismaAny.opsBibliographicJob.findFirst({
             where: { status: 'pending' },
             orderBy: [{ created_at: 'asc' }]
         });
         if (!job) {
-            job = await prisma.opsBibliographicJob.findFirst({
+            job = await prismaAny.opsBibliographicJob.findFirst({
                 where: {
                     status: 'failed',
                     attempts: { lt: MAX_DOC_ATTEMPTS }
@@ -1515,7 +1516,7 @@ async function processNextOpsBibliographicJob() {
         }
         if (!job) return;
         const nextAttempt = job.attempts + 1;
-        await prisma.opsBibliographicJob.update({
+        await prismaAny.opsBibliographicJob.update({
             where: { id: job.id },
             data: {
                 status: 'running',
@@ -1534,7 +1535,7 @@ async function processNextOpsBibliographicJob() {
                 const errorText = recentIndexing
                     ? `Dados bibliográficos ainda não indexados nas fontes para ${job.patent_number}`
                     : `Dados bibliográficos não encontrados nas fontes para ${job.patent_number}`;
-                await prisma.opsBibliographicJob.update({
+                await prismaAny.opsBibliographicJob.update({
                     where: { id: job.id },
                     data: {
                         status,
@@ -1542,7 +1543,7 @@ async function processNextOpsBibliographicJob() {
                         finished_at: new Date()
                     }
                 });
-                await prisma.inpiPublication.updateMany({
+                await prismaAny.inpiPublication.updateMany({
                     where: { patent_number: job.patent_number },
                     data: {
                         bibliographic_status: biblioStatus,
@@ -1553,7 +1554,7 @@ async function processNextOpsBibliographicJob() {
                 return;
             }
 
-            await prisma.inpiPublication.updateMany({
+            await prismaAny.inpiPublication.updateMany({
                 where: { patent_number: job.patent_number },
                 data: {
                     bibliographic_status: 'completed',
@@ -1588,7 +1589,7 @@ async function processNextOpsBibliographicJob() {
                 });
             }
 
-            await prisma.opsBibliographicJob.update({
+            await prismaAny.opsBibliographicJob.update({
                 where: { id: job.id },
                 data: {
                     status: 'completed',
@@ -1599,7 +1600,7 @@ async function processNextOpsBibliographicJob() {
             });
         } catch (error: unknown) {
             const message = truncateError(errorMessage(error, 'Erro ao consultar bibliografia no OPS'));
-            await prisma.opsBibliographicJob.update({
+            await prismaAny.opsBibliographicJob.update({
                 where: { id: job.id },
                 data: {
                     status: nextAttempt >= MAX_DOC_ATTEMPTS ? 'failed_permanent' : 'failed',
@@ -1607,7 +1608,7 @@ async function processNextOpsBibliographicJob() {
                     finished_at: new Date()
                 }
             });
-            await prisma.inpiPublication.updateMany({
+            await prismaAny.inpiPublication.updateMany({
                 where: { patent_number: job.patent_number },
                 data: {
                     bibliographic_status: 'failed',
@@ -1837,7 +1838,7 @@ export async function retryDocumentJob(jobId: string) {
 }
 
 export async function retryOpsBibliographicJob(jobId: string) {
-    const updated = await prisma.opsBibliographicJob.update({
+    const updated = await prismaAny.opsBibliographicJob.update({
         where: { id: jobId },
         data: {
             status: 'pending',
@@ -1851,7 +1852,7 @@ export async function retryOpsBibliographicJob(jobId: string) {
     return updated;
 }
 
-export async function retryAllRpiErrorJobs(ids?: string[]) {
+export async function retryAllRpiErrorJobs(ids?: string[], preferBigQuery = false) {
     const where = ids && ids.length > 0
         ? { id: { in: Array.from(new Set(ids)) }, status: { in: ['failed', 'failed_permanent'] } }
         : { status: { in: ['failed', 'failed_permanent'] } };
@@ -1859,7 +1860,7 @@ export async function retryAllRpiErrorJobs(ids?: string[]) {
         where,
         data: {
             status: 'pending',
-            attempts: 0,
+            attempts: preferBigQuery ? 1 : 0,
             error: null,
             started_at: null,
             finished_at: null
@@ -1869,7 +1870,7 @@ export async function retryAllRpiErrorJobs(ids?: string[]) {
     return { updated: result.count };
 }
 
-export async function retryAllDocumentErrorJobs(ids?: string[]) {
+export async function retryAllDocumentErrorJobs(ids?: string[], preferBigQuery = false) {
     const where = ids && ids.length > 0
         ? { id: { in: Array.from(new Set(ids)) }, status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing'] } }
         : { status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing'] } };
@@ -1891,7 +1892,7 @@ export async function retryAllOpsErrorJobs(ids?: string[], preferBigQuery = fals
     const where = ids && ids.length > 0
         ? { id: { in: Array.from(new Set(ids)) }, status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing'] } }
         : { status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing'] } };
-    const result = await prisma.opsBibliographicJob.updateMany({
+    const result = await prismaAny.opsBibliographicJob.updateMany({
         where,
         data: {
             status: 'pending',
