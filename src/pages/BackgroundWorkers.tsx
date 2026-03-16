@@ -15,6 +15,7 @@ type RpiJob = {
   id: string;
   rpi_number: number;
   status: string;
+  source?: string | null;
   attempts: number;
   imported_count: number;
   error?: string | null;
@@ -34,6 +35,7 @@ type DocJob = {
   created_at: string;
   started_at?: string | null;
   finished_at?: string | null;
+  source?: string | null;
   patent?: {
     numero_publicacao?: string | null;
     title?: string | null;
@@ -84,6 +86,7 @@ type OpsJob = {
   error?: string | null;
   started_at?: string | null;
   finished_at?: string | null;
+  source?: string | null;
 };
 
 type WorkerState = {
@@ -119,6 +122,17 @@ function statusBadge(status: string) {
   return <Badge variant="secondary">{status}</Badge>;
 }
 
+function sourceLabel(value?: string | null) {
+  if (!value) return "-";
+  if (value === "google_bigquery") return "Google BigQuery";
+  if (value === "google_patents") return "Google Patents";
+  if (value === "ops_api") return "OPS";
+  if (value === "inpi") return "INPI";
+  if (value === "bucket") return "Bucket";
+  if (value === "rpi_xml") return "RPI XML";
+  return value;
+}
+
 function RpiTable({ rows, onRetry }: { rows: RpiJob[]; onRetry?: (id: string) => void }) {
   if (rows.length === 0) {
     return <div className="p-8 text-sm text-muted-foreground">Sem registros.</div>;
@@ -131,6 +145,7 @@ function RpiTable({ rows, onRetry }: { rows: RpiJob[]; onRetry?: (id: string) =>
           <TableHead>Status</TableHead>
           <TableHead>Tentativas</TableHead>
           <TableHead>Importadas</TableHead>
+          <TableHead>Fonte</TableHead>
           <TableHead>Início</TableHead>
           <TableHead>Fim</TableHead>
           <TableHead>Log</TableHead>
@@ -144,6 +159,7 @@ function RpiTable({ rows, onRetry }: { rows: RpiJob[]; onRetry?: (id: string) =>
             <TableCell>{statusBadge(row.status)}</TableCell>
             <TableCell>{row.attempts}</TableCell>
             <TableCell>{row.imported_count}</TableCell>
+            <TableCell className="text-xs text-muted-foreground">{sourceLabel(row.source)}</TableCell>
             <TableCell className="text-xs text-muted-foreground">{formatDate(row.started_at)}</TableCell>
             <TableCell className="text-xs text-muted-foreground">{formatDate(row.finished_at)}</TableCell>
             <TableCell className="text-xs text-muted-foreground max-w-[360px] truncate" title={row.error || ""}>{row.error || "-"}</TableCell>
@@ -172,6 +188,7 @@ function DocsTable({ rows, onRetry }: { rows: DocJob[]; onRetry?: (id: string) =
           <TableHead>Status</TableHead>
           <TableHead>Tentativas</TableHead>
           <TableHead>Storage Key</TableHead>
+          <TableHead>Fonte</TableHead>
           <TableHead>Log</TableHead>
           <TableHead>Fim</TableHead>
           <TableHead className="text-right">Ação</TableHead>
@@ -210,6 +227,7 @@ function OpsTable({ rows, onRetry }: { rows: OpsJob[]; onRetry?: (id: string) =>
           <TableHead>Status</TableHead>
           <TableHead>Tentativas</TableHead>
           <TableHead>DOCDB</TableHead>
+          <TableHead>Fonte</TableHead>
           <TableHead>Log</TableHead>
           <TableHead>Fim</TableHead>
           <TableHead className="text-right">Ação</TableHead>
@@ -223,6 +241,8 @@ function OpsTable({ rows, onRetry }: { rows: OpsJob[]; onRetry?: (id: string) =>
             <TableCell>{statusBadge(row.status)}</TableCell>
             <TableCell>{row.attempts}</TableCell>
             <TableCell className="font-mono text-[11px]">{row.docdb_id || "-"}</TableCell>
+            <TableCell className="text-xs text-muted-foreground">{sourceLabel(row.source)}</TableCell>
+            <TableCell className="text-xs text-muted-foreground max-w-[320px] truncate" title={row.error || ""}>{row.error || "-"}</TableCell>
             <TableCell className="text-xs text-muted-foreground max-w-[320px] truncate" title={row.error || ""}>{row.error || "-"}</TableCell>
             <TableCell className="text-xs text-muted-foreground">{formatDate(row.finished_at)}</TableCell>
             <TableCell className="text-right">
@@ -319,6 +339,42 @@ export default function BackgroundWorkers() {
   const retryOpsJob = async (id: string) => {
     await axios.post(`${API_URL}/background-workers/ops/retry/${id}`);
     await fetchQueues();
+  };
+
+  const retryAllRpiErrors = async () => {
+    setLoading(true);
+    try {
+      const ids = data.rpi.errors.map((row) => row.id);
+      const response = await axios.post(`${API_URL}/background-workers/rpi/retry-errors`, { ids });
+      setActionMessage(`RPI reprocessadas: ${response.data?.updated ?? 0}`);
+      await fetchQueues();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const retryAllDocsErrors = async () => {
+    setLoading(true);
+    try {
+      const ids = data.docs.errors.map((row) => row.id);
+      const response = await axios.post(`${API_URL}/background-workers/docs/retry-errors`, { ids });
+      setActionMessage(`Docs reprocessados: ${response.data?.updated ?? 0}`);
+      await fetchQueues();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const retryAllOpsErrors = async () => {
+    setLoading(true);
+    try {
+      const ids = data.ops.errors.map((row) => row.id);
+      const response = await axios.post(`${API_URL}/background-workers/ops/retry-errors`, { ids });
+      setActionMessage(`OPS reprocessados: ${response.data?.updated ?? 0}`);
+      await fetchQueues();
+    } finally {
+      setLoading(false);
+    }
   };
 
   const enqueueRange = async () => {
@@ -535,7 +591,14 @@ export default function BackgroundWorkers() {
                   </TabsList>
                   <TabsContent value="processing"><RpiTable rows={data.rpi.processing} /></TabsContent>
                   <TabsContent value="success"><RpiTable rows={data.rpi.success} /></TabsContent>
-                  <TabsContent value="errors"><RpiTable rows={data.rpi.errors} onRetry={retryRpiJob} /></TabsContent>
+                  <TabsContent value="errors" className="space-y-3">
+                    <div className="flex justify-end">
+                      <Button variant="outline" size="sm" disabled={loading || data.rpi.errors.length === 0} onClick={retryAllRpiErrors}>
+                        Reprocessar todos os erros
+                      </Button>
+                    </div>
+                    <RpiTable rows={data.rpi.errors} onRetry={retryRpiJob} />
+                  </TabsContent>
                 </Tabs>
               </CardContent>
             </Card>
@@ -576,7 +639,14 @@ export default function BackgroundWorkers() {
                   </TabsList>
                   <TabsContent value="processing"><DocsTable rows={data.docs.processing} /></TabsContent>
                   <TabsContent value="success"><DocsTable rows={data.docs.success} /></TabsContent>
-                  <TabsContent value="errors"><DocsTable rows={data.docs.errors} onRetry={retryDocsJob} /></TabsContent>
+                  <TabsContent value="errors" className="space-y-3">
+                    <div className="flex justify-end">
+                      <Button variant="outline" size="sm" disabled={loading || data.docs.errors.length === 0} onClick={retryAllDocsErrors}>
+                        Reprocessar todos os erros
+                      </Button>
+                    </div>
+                    <DocsTable rows={data.docs.errors} onRetry={retryDocsJob} />
+                  </TabsContent>
                 </Tabs>
               </CardContent>
             </Card>
@@ -617,7 +687,14 @@ export default function BackgroundWorkers() {
                   </TabsList>
                   <TabsContent value="processing"><OpsTable rows={data.ops.processing} /></TabsContent>
                   <TabsContent value="success"><OpsTable rows={data.ops.success} /></TabsContent>
-                  <TabsContent value="errors"><OpsTable rows={data.ops.errors} onRetry={retryOpsJob} /></TabsContent>
+                  <TabsContent value="errors" className="space-y-3">
+                    <div className="flex justify-end">
+                      <Button variant="outline" size="sm" disabled={loading || data.ops.errors.length === 0} onClick={retryAllOpsErrors}>
+                        Reprocessar todos os erros
+                      </Button>
+                    </div>
+                    <OpsTable rows={data.ops.errors} onRetry={retryOpsJob} />
+                  </TabsContent>
                 </Tabs>
               </CardContent>
             </Card>

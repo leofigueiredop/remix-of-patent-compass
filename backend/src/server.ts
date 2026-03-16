@@ -16,6 +16,9 @@ import { prisma } from './db';
 import {
     enqueueLastFiveYearsRpi,
     getBackgroundWorkerState,
+    retryAllDocumentErrorJobs,
+    retryAllOpsErrorJobs,
+    retryAllRpiErrorJobs,
     retryDocumentJob,
     retryOpsBibliographicJob,
     retryRpiJob,
@@ -2625,11 +2628,33 @@ fastify.get('/background-workers/queues', async (request: any) => {
         })
     ]);
 
+    const extractSource = (value?: string | null): string | null => {
+        const text = (value || '').toLowerCase();
+        const match = text.match(/source=([a-z0-9_:-]+)/i);
+        if (match?.[1]) return match[1];
+        if (text.includes('bigquery')) return 'google_bigquery';
+        if (text.includes('google')) return 'google_patents';
+        if (text.includes('espacenet')) return 'ops_api';
+        if (text.includes('inpi')) return 'inpi';
+        if (text.includes('bucket') || text.includes('storage')) return 'bucket';
+        return null;
+    };
+
+    const mapRpi = (rows: any[]) => rows.map((row) => ({ ...row, source: 'rpi_xml' }));
+    const mapDocs = (rows: any[]) => rows.map((row) => ({
+        ...row,
+        source: row.storage_key ? 'bucket' : (extractSource(row.error) || (row.status === 'not_found' ? 'ops_api' : null))
+    }));
+    const mapOps = (rows: any[]) => rows.map((row) => ({
+        ...row,
+        source: extractSource(row.error) || (row.docdb_id ? 'ops_api' : null)
+    }));
+
     return {
         rpi: {
-            processing: rpiProcessing,
-            success: rpiSuccess,
-            errors: rpiErrors,
+            processing: mapRpi(rpiProcessing),
+            success: mapRpi(rpiSuccess),
+            errors: mapRpi(rpiErrors),
             counts: {
                 processing: rpiProcessingCount,
                 success: rpiSuccessCount,
@@ -2637,9 +2662,9 @@ fastify.get('/background-workers/queues', async (request: any) => {
             }
         },
         docs: {
-            processing: docsProcessing,
-            success: docsSuccess,
-            errors: docsErrors,
+            processing: mapDocs(docsProcessing),
+            success: mapDocs(docsSuccess),
+            errors: mapDocs(docsErrors),
             counts: {
                 processing: docsProcessingCount,
                 success: docsSuccessCount,
@@ -2647,9 +2672,9 @@ fastify.get('/background-workers/queues', async (request: any) => {
             }
         },
         ops: {
-            processing: opsProcessing,
-            success: opsSuccess,
-            errors: opsErrors,
+            processing: mapOps(opsProcessing),
+            success: mapOps(opsSuccess),
+            errors: mapOps(opsErrors),
             counts: {
                 processing: opsProcessingCount,
                 success: opsSuccessCount,
@@ -2869,6 +2894,36 @@ fastify.post('/background-workers/ops/retry/:id', async (request: any, reply) =>
         return { id: job.id, status: job.status };
     } catch (error) {
         return reply.code(404).send({ error: 'Job bibliográfico OPS não encontrado' });
+    }
+});
+
+fastify.post('/background-workers/rpi/retry-errors', async (request: any, reply) => {
+    try {
+        const ids = Array.isArray(request.body?.ids) ? request.body.ids.filter((item: any) => typeof item === 'string') : undefined;
+        const result = await retryAllRpiErrorJobs(ids);
+        return result;
+    } catch (error) {
+        return reply.code(500).send({ error: 'Falha ao reprocessar erros da fila RPI' });
+    }
+});
+
+fastify.post('/background-workers/docs/retry-errors', async (request: any, reply) => {
+    try {
+        const ids = Array.isArray(request.body?.ids) ? request.body.ids.filter((item: any) => typeof item === 'string') : undefined;
+        const result = await retryAllDocumentErrorJobs(ids);
+        return result;
+    } catch (error) {
+        return reply.code(500).send({ error: 'Falha ao reprocessar erros da fila de documentos' });
+    }
+});
+
+fastify.post('/background-workers/ops/retry-errors', async (request: any, reply) => {
+    try {
+        const ids = Array.isArray(request.body?.ids) ? request.body.ids.filter((item: any) => typeof item === 'string') : undefined;
+        const result = await retryAllOpsErrorJobs(ids);
+        return result;
+    } catch (error) {
+        return reply.code(500).send({ error: 'Falha ao reprocessar erros da fila OPS' });
     }
 });
 

@@ -377,6 +377,18 @@ type BigQueryBibliographicData = {
     googlePatentsUrl?: string;
 };
 
+function mapBigQueryToBiblio(patentNumber: string, row: BigQueryBibliographicData): OpsBibliographicData {
+    return {
+        docdbId: normalizePublicationForBigQuery(patentNumber),
+        title: row.title,
+        applicant: row.applicant,
+        inventor: row.inventors,
+        ipc: row.ipc,
+        publicationDate: row.publicationDate || row.filingDate,
+        source: 'google_bigquery'
+    };
+}
+
 type ParsedPublicationNumber = {
     country: string;
     docNumber: string;
@@ -1466,9 +1478,15 @@ async function fetchOpsBibliographicData(patentNumber: string): Promise<OpsBibli
     };
 }
 
-async function fetchBibliographicDataWithFallbacks(patentNumber: string): Promise<OpsBibliographicData | null> {
+async function fetchBibliographicDataWithFallbacks(patentNumber: string, attemptNumber = 1): Promise<OpsBibliographicData | null> {
+    if (attemptNumber >= 2) {
+        const fromBigQuery = await fetchBigQueryBibliographicData(patentNumber);
+        if (fromBigQuery) return mapBigQueryToBiblio(patentNumber, fromBigQuery);
+    }
     const fromOps = await fetchOpsBibliographicData(patentNumber);
     if (fromOps) return fromOps;
+    const fromBigQuery = await fetchBigQueryBibliographicData(patentNumber);
+    if (fromBigQuery) return mapBigQueryToBiblio(patentNumber, fromBigQuery);
     const fromGoogle = await fetchGooglePatentsBibliographicData(patentNumber);
     if (fromGoogle) return fromGoogle;
     const fromEspacenetUi = await fetchEspacenetUiBibliographicData(patentNumber);
@@ -1508,7 +1526,7 @@ async function processNextOpsBibliographicJob() {
         });
 
         try {
-            const biblio = await fetchBibliographicDataWithFallbacks(job.patent_number);
+            const biblio = await fetchBibliographicDataWithFallbacks(job.patent_number, nextAttempt);
             if (!biblio) {
                 const recentIndexing = isRecentPatentForIndexing(job.patent_number);
                 const status = recentIndexing ? 'waiting_indexing' : 'not_found';
@@ -1575,6 +1593,7 @@ async function processNextOpsBibliographicJob() {
                 data: {
                     status: 'completed',
                     docdb_id: biblio.docdbId,
+                    error: biblio.source ? `source=${biblio.source}` : null,
                     finished_at: new Date()
                 }
             });
@@ -1830,6 +1849,60 @@ export async function retryOpsBibliographicJob(jobId: string) {
     });
     processNextOpsBibliographicJob().catch(() => undefined);
     return updated;
+}
+
+export async function retryAllRpiErrorJobs(ids?: string[]) {
+    const where = ids && ids.length > 0
+        ? { id: { in: Array.from(new Set(ids)) }, status: { in: ['failed', 'failed_permanent'] } }
+        : { status: { in: ['failed', 'failed_permanent'] } };
+    const result = await prisma.rpiImportJob.updateMany({
+        where,
+        data: {
+            status: 'pending',
+            attempts: 0,
+            error: null,
+            started_at: null,
+            finished_at: null
+        }
+    });
+    processNextRpiImportJob().catch(() => undefined);
+    return { updated: result.count };
+}
+
+export async function retryAllDocumentErrorJobs(ids?: string[]) {
+    const where = ids && ids.length > 0
+        ? { id: { in: Array.from(new Set(ids)) }, status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing'] } }
+        : { status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing'] } };
+    const result = await prisma.documentDownloadJob.updateMany({
+        where,
+        data: {
+            status: 'pending',
+            attempts: 0,
+            error: null,
+            started_at: null,
+            finished_at: null
+        }
+    });
+    processNextDocumentJob().catch(() => undefined);
+    return { updated: result.count };
+}
+
+export async function retryAllOpsErrorJobs(ids?: string[]) {
+    const where = ids && ids.length > 0
+        ? { id: { in: Array.from(new Set(ids)) }, status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing'] } }
+        : { status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing'] } };
+    const result = await prisma.opsBibliographicJob.updateMany({
+        where,
+        data: {
+            status: 'pending',
+            attempts: 0,
+            error: null,
+            started_at: null,
+            finished_at: null
+        }
+    });
+    processNextOpsBibliographicJob().catch(() => undefined);
+    return { updated: result.count };
 }
 
 export async function startBackgroundWorkers() {
