@@ -5,6 +5,7 @@ import { exec } from 'child_process';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { createSign } from 'crypto';
 import { CreateBucketCommand, HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { prisma } from '../db';
 
@@ -28,6 +29,10 @@ const OPS_INDEXING_GRACE_YEARS = Math.max(1, parseInt(process.env.OPS_INDEXING_G
 const GOOGLE_PATENTS_FALLBACK_ENABLED = (process.env.GOOGLE_PATENTS_FALLBACK_ENABLED || 'true').toLowerCase() === 'true';
 const ESPACENET_UI_FALLBACK_ENABLED = (process.env.ESPACENET_UI_FALLBACK_ENABLED || 'false').toLowerCase() === 'true';
 const INPI_SCRAPE_FALLBACK_ENABLED = (process.env.INPI_SCRAPE_FALLBACK_ENABLED || 'false').toLowerCase() === 'true';
+const BIGQUERY_PROJECT_ID = process.env.BIGQUERY_PROJECT_ID || '';
+const GOOGLE_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '';
+const BIGQUERY_BILLING_PROJECT = process.env.BIGQUERY_BILLING_PROJECT || BIGQUERY_PROJECT_ID;
+const BIGQUERY_ENABLED = Boolean(BIGQUERY_BILLING_PROJECT && GOOGLE_SERVICE_ACCOUNT_JSON);
 const S3_ENDPOINT = process.env.S3_ENDPOINT || '';
 const S3_REGION = process.env.S3_REGION || 'garage';
 const S3_ACCESS_KEY = process.env.S3_ACCESS_KEY || '';
@@ -48,6 +53,8 @@ let s3BucketReady = false;
 let lastOpsRequestAt = 0;
 let opsThrottleFailureCount = 0;
 let opsCircuitOpenUntil = 0;
+let bigQueryAccessToken: string | null = null;
+let bigQueryAccessTokenExpiration = 0;
 
 function normalizeText(value?: string): string {
     return (value || '').replace(/\s+/g, ' ').trim();
@@ -263,6 +270,201 @@ async function getOpsToken(): Promise<string> {
     opsAccessToken = response.data.access_token;
     opsTokenExpiration = Date.now() + (parseInt(response.data.expires_in, 10) * 1000) - 60000;
     return opsAccessToken!;
+}
+
+function base64UrlEncode(value: string): string {
+    return Buffer.from(value)
+        .toString('base64')
+        .replace(/=/g, '')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_');
+}
+
+function normalizePublicationForBigQuery(value?: string): string {
+    return normalizeText(value).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+}
+
+function trimKindSuffix(value: string): string {
+    return value.replace(/[A-Z]\d?$/, '');
+}
+
+function getGoogleServiceAccount(): { client_email: string; private_key: string } | null {
+    if (!GOOGLE_SERVICE_ACCOUNT_JSON) return null;
+    try {
+        const parsed = JSON.parse(GOOGLE_SERVICE_ACCOUNT_JSON);
+        const clientEmail = normalizeText(parsed?.client_email || '');
+        const privateKey = String(parsed?.private_key || '').replace(/\\n/g, '\n');
+        if (!clientEmail || !privateKey) return null;
+        return { client_email: clientEmail, private_key: privateKey };
+    } catch {
+        return null;
+    }
+}
+
+async function getBigQueryToken(): Promise<string | null> {
+    if (!BIGQUERY_ENABLED) return null;
+    if (bigQueryAccessToken && Date.now() < bigQueryAccessTokenExpiration) return bigQueryAccessToken;
+    const serviceAccount = getGoogleServiceAccount();
+    if (!serviceAccount) return null;
+    const now = Math.floor(Date.now() / 1000);
+    const header = base64UrlEncode(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+    const payload = base64UrlEncode(JSON.stringify({
+        iss: serviceAccount.client_email,
+        scope: 'https://www.googleapis.com/auth/bigquery',
+        aud: 'https://oauth2.googleapis.com/token',
+        iat: now,
+        exp: now + 3600
+    }));
+    const signer = createSign('RSA-SHA256');
+    signer.update(`${header}.${payload}`);
+    signer.end();
+    const signature = signer.sign(serviceAccount.private_key, 'base64')
+        .replace(/=/g, '')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_');
+    const assertion = `${header}.${payload}.${signature}`;
+    try {
+        const tokenResponse = await axios.post(
+            'https://oauth2.googleapis.com/token',
+            new URLSearchParams({
+                grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+                assertion
+            }).toString(),
+            {
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                timeout: 20000
+            }
+        );
+        const token = normalizeText(tokenResponse.data?.access_token || '');
+        if (!token) return null;
+        const expiresIn = Number.parseInt(String(tokenResponse.data?.expires_in || '3600'), 10);
+        bigQueryAccessToken = token;
+        bigQueryAccessTokenExpiration = Date.now() + (Math.max(300, expiresIn) * 1000) - 60000;
+        return bigQueryAccessToken;
+    } catch {
+        return null;
+    }
+}
+
+type BigQueryBibliographicData = {
+    title?: string;
+    abstract?: string;
+    applicant?: string;
+    inventors?: string;
+    ipc?: string;
+    filingDate?: string;
+    publicationDate?: string;
+    attorney?: string;
+    googlePatentsUrl?: string;
+};
+
+function pickFirstLocalizedText(value: any): string {
+    if (Array.isArray(value)) {
+        for (const item of value) {
+            const text = normalizeText(item?.text || item?.value || item?.name || '');
+            if (text) return text;
+        }
+    }
+    return normalizeText(value?.text || value?.value || value?.name || '');
+}
+
+function joinEntityNames(value: any): string {
+    if (!Array.isArray(value)) return '';
+    return value
+        .map((item) => normalizeText(item?.name || item?.value || item?.text || ''))
+        .filter(Boolean)
+        .join('; ');
+}
+
+function joinIpcCodes(value: any): string {
+    if (!Array.isArray(value)) return '';
+    return value
+        .map((item) => normalizeText(item?.code || item?.value || item?.text || item || ''))
+        .filter(Boolean)
+        .join(', ');
+}
+
+function extractAttorneyFromBigQueryRow(row: any): string {
+    const candidates = [
+        row?.attorney_harmonized,
+        row?.agent_harmonized,
+        row?.representative_harmonized,
+        row?.attorney,
+        row?.agent,
+        row?.representative
+    ];
+    for (const candidate of candidates) {
+        const value = joinEntityNames(candidate) || normalizeText(candidate);
+        if (value) return value;
+    }
+    return '';
+}
+
+async function fetchBigQueryBibliographicData(publicationNumber: string): Promise<BigQueryBibliographicData | null> {
+    const token = await getBigQueryToken();
+    if (!token || !BIGQUERY_BILLING_PROJECT) return null;
+    const normalized = normalizePublicationForBigQuery(publicationNumber);
+    if (!normalized) return null;
+    const noKind = trimKindSuffix(normalized);
+    const query = `
+      SELECT TO_JSON_STRING(t) AS row_json
+      FROM \`patents-public-data.patents.publications\` t
+      WHERE CONCAT(
+        UPPER(IFNULL(t.country_code, '')),
+        REGEXP_REPLACE(UPPER(IFNULL(t.publication_number, '')), r'[^0-9A-Z]', ''),
+        UPPER(IFNULL(t.kind_code, ''))
+      ) = @publicationKey
+      OR CONCAT(
+        UPPER(IFNULL(t.country_code, '')),
+        REGEXP_REPLACE(UPPER(IFNULL(t.publication_number, '')), r'[^0-9A-Z]', '')
+      ) = @publicationNoKind
+      LIMIT 1
+    `;
+    try {
+        const response = await axios.post(
+            `https://bigquery.googleapis.com/bigquery/v2/projects/${encodeURIComponent(BIGQUERY_BILLING_PROJECT)}/queries`,
+            {
+                query,
+                useLegacySql: false,
+                parameterMode: 'NAMED',
+                queryParameters: [
+                    { name: 'publicationKey', parameterType: { type: 'STRING' }, parameterValue: { value: normalized } },
+                    { name: 'publicationNoKind', parameterType: { type: 'STRING' }, parameterValue: { value: noKind } }
+                ]
+            },
+            {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                timeout: 30000
+            }
+        );
+        const rowValue = response.data?.rows?.[0]?.f?.[0]?.v;
+        if (!rowValue) return null;
+        const rowJson = JSON.parse(String(rowValue));
+        const title = pickFirstLocalizedText(rowJson?.title_localized) || normalizeText(rowJson?.title || '');
+        const abstract = pickFirstLocalizedText(rowJson?.abstract_localized) || normalizeText(rowJson?.abstract || '');
+        const applicant = joinEntityNames(rowJson?.assignee_harmonized) || joinEntityNames(rowJson?.assignees);
+        const inventors = joinEntityNames(rowJson?.inventor_harmonized) || joinEntityNames(rowJson?.inventors);
+        const ipc = joinIpcCodes(rowJson?.ipc);
+        const filingDate = normalizeText(rowJson?.filing_date || '');
+        const publicationDate = normalizeText(rowJson?.publication_date || '');
+        const attorney = extractAttorneyFromBigQueryRow(rowJson);
+        return {
+            title: title || undefined,
+            abstract: abstract || undefined,
+            applicant: applicant || undefined,
+            inventors: inventors || undefined,
+            ipc: ipc || undefined,
+            filingDate: filingDate || undefined,
+            publicationDate: publicationDate || undefined,
+            attorney: attorney || undefined,
+            googlePatentsUrl: normalized ? `https://patents.google.com/patent/${normalized}/en` : undefined
+        };
+    } catch {
+        return null;
+    }
 }
 
 function getS3Client() {
@@ -560,6 +762,7 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
     const revista = $('revista').first();
     const dataPublicacao = revista.attr('dataPublicacao') || revista.attr('data-publicacao') || '';
     const despachoNodes = revista.find('despacho').toArray();
+    const bqCache = new Map<string, BigQueryBibliographicData | null>();
     let imported = 0;
 
     for (const node of despachoNodes) {
@@ -596,6 +799,10 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
 
         const patentNumber = buildPatentNumberKey(numeroPublicacao || numeroRaw || codPedidoFromNumero);
         if (!patentNumber) continue;
+        const bqData = bqCache.has(patentNumber)
+            ? bqCache.get(patentNumber) || null
+            : await fetchBigQueryBibliographicData(numeroPublicacao || patentNumber);
+        if (!bqCache.has(patentNumber)) bqCache.set(patentNumber, bqData);
         const isDocumentEligible = isDocumentEligibleDispatch(dispatchCode);
         const hasXmlBiblio = hasBasicBibliographicData({
             title: inventionTitle || dispatchTitle,
@@ -604,8 +811,16 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
             ipc: ipcs,
             filingDate
         });
+        const hasBigQueryBiblio = hasBasicBibliographicData({
+            title: bqData?.title,
+            applicant: bqData?.applicant,
+            inventor: bqData?.inventors,
+            ipc: bqData?.ipc,
+            filingDate: bqData?.filingDate
+        });
         const shouldQueueOpsBiblio = !isDocumentEligible
             && !hasXmlBiblio
+            && !hasBigQueryBiblio
             && BIBLIO_ENRICHMENT_MODE !== 'xml_only';
         const existingPatent = await prisma.inpiPatent.findFirst({
             where: {
@@ -627,11 +842,12 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
                 where: { cod_pedido: patentId },
                 update: {
                     numero_publicacao: numeroPublicacao || numeroRaw || patentNumber,
-                    title: inventionTitle || dispatchTitle || undefined,
-                    applicant: applicants || undefined,
-                    inventors: inventors || undefined,
-                    ipc_codes: ipcs || undefined,
-                    filing_date: filingDate || undefined,
+                    title: bqData?.title || inventionTitle || dispatchTitle || undefined,
+                    abstract: bqData?.abstract || undefined,
+                    applicant: bqData?.applicant || applicants || undefined,
+                    inventors: bqData?.inventors || inventors || undefined,
+                    ipc_codes: bqData?.ipc || ipcs || undefined,
+                    filing_date: bqData?.filingDate || filingDate || undefined,
                     last_rpi: String(rpiNumber),
                     last_event: dispatchCode || undefined,
                     status: dispatchTitle || undefined
@@ -639,11 +855,12 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
                 create: {
                     cod_pedido: patentId,
                     numero_publicacao: numeroPublicacao || numeroRaw || patentNumber,
-                    title: inventionTitle || dispatchTitle || null,
-                    applicant: applicants || null,
-                    inventors: inventors || null,
-                    ipc_codes: ipcs || null,
-                    filing_date: filingDate || null,
+                    title: bqData?.title || inventionTitle || dispatchTitle || null,
+                    abstract: bqData?.abstract || null,
+                    applicant: bqData?.applicant || applicants || null,
+                    inventors: bqData?.inventors || inventors || null,
+                    ipc_codes: bqData?.ipc || ipcs || null,
+                    filing_date: bqData?.filingDate || filingDate || null,
                     last_rpi: String(rpiNumber),
                     last_event: dispatchCode || null,
                     status: dispatchTitle || null
@@ -662,10 +879,12 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
             await prisma.inpiPatent.update({
                 where: { cod_pedido: patentId },
                 data: {
-                    applicant: applicants || undefined,
-                    inventors: inventors || undefined,
-                    ipc_codes: ipcs || undefined,
-                    filing_date: filingDate || undefined,
+                    title: bqData?.title || undefined,
+                    abstract: bqData?.abstract || undefined,
+                    applicant: bqData?.applicant || applicants || undefined,
+                    inventors: bqData?.inventors || inventors || undefined,
+                    ipc_codes: bqData?.ipc || ipcs || undefined,
+                    filing_date: bqData?.filingDate || filingDate || undefined,
                     last_rpi: String(rpiNumber),
                     last_event: dispatchCode || undefined,
                     status: dispatchTitle || undefined
@@ -695,13 +914,14 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
                     despacho_desc: dispatchTitle || null,
                     complement: complement || null,
                     eligible_for_doc_download: isDocumentEligible,
-                    bibliographic_status: isDocumentEligible ? 'queued_document' : (hasXmlBiblio ? 'completed' : 'pending'),
-                    ops_title: inventionTitle || dispatchTitle || null,
-                    ops_applicant: applicants || null,
-                    ops_inventor: inventors || null,
-                    ops_ipc: ipcs || null,
-                    ops_publication_date: filingDate || null,
-                    ops_last_sync_at: hasXmlBiblio ? new Date() : null
+                    bibliographic_status: isDocumentEligible ? 'queued_document' : ((hasXmlBiblio || hasBigQueryBiblio) ? 'completed' : 'pending'),
+                    ops_title: bqData?.title || inventionTitle || dispatchTitle || null,
+                    ops_applicant: bqData?.applicant || applicants || null,
+                    ops_inventor: bqData?.inventors || inventors || null,
+                    ops_ipc: bqData?.ipc || ipcs || null,
+                    ops_publication_date: bqData?.publicationDate || bqData?.filingDate || filingDate || null,
+                    ops_error: bqData ? `source=bigquery${bqData.attorney ? ` attorney=${bqData.attorney}` : ''}` : null,
+                    ops_last_sync_at: (hasXmlBiblio || hasBigQueryBiblio) ? new Date() : null
                 }
             });
         } else if (patentId && !publicationExists.patent_id) {
@@ -709,16 +929,17 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
                 where: { id: publicationExists.id },
                 data: { patent_id: patentId }
             });
-        } else if (hasXmlBiblio) {
+        } else if (hasXmlBiblio || hasBigQueryBiblio) {
             await prisma.inpiPublication.update({
                 where: { id: publicationExists.id },
                 data: {
                     bibliographic_status: 'completed',
-                    ops_title: inventionTitle || dispatchTitle || undefined,
-                    ops_applicant: applicants || undefined,
-                    ops_inventor: inventors || undefined,
-                    ops_ipc: ipcs || undefined,
-                    ops_publication_date: filingDate || undefined,
+                    ops_title: bqData?.title || inventionTitle || dispatchTitle || undefined,
+                    ops_applicant: bqData?.applicant || applicants || undefined,
+                    ops_inventor: bqData?.inventors || inventors || undefined,
+                    ops_ipc: bqData?.ipc || ipcs || undefined,
+                    ops_publication_date: bqData?.publicationDate || bqData?.filingDate || filingDate || undefined,
+                    ops_error: bqData ? `source=bigquery${bqData.attorney ? ` attorney=${bqData.attorney}` : ''}` : undefined,
                     ops_last_sync_at: new Date()
                 }
             }).catch(() => undefined);
