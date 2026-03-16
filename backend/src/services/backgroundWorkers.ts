@@ -36,7 +36,8 @@ const GOOGLE_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '
 const GOOGLE_SERVICE_ACCOUNT_FILE = process.env.GOOGLE_SERVICE_ACCOUNT_FILE || '';
 const BIGQUERY_BILLING_PROJECT = process.env.BIGQUERY_BILLING_PROJECT || BIGQUERY_PROJECT_ID;
 const BIGQUERY_ENABLED = Boolean(BIGQUERY_BILLING_PROJECT && (GOOGLE_SERVICE_ACCOUNT_JSON || GOOGLE_SERVICE_ACCOUNT_FILE));
-const BIGQUERY_MAX_BYTES_BILLED = Math.max(10_000_000, parseInt(process.env.BIGQUERY_MAX_BYTES_BILLED || '50000000', 10));
+const BIGQUERY_FIRST_ENABLED = (process.env.BIGQUERY_FIRST_ENABLED || 'true').toLowerCase() === 'true';
+const BIGQUERY_MAX_BYTES_BILLED = Math.max(10_000_000, parseInt(process.env.BIGQUERY_MAX_BYTES_BILLED || '500000000', 10));
 const BIGQUERY_CACHE_TTL_HOURS = Math.max(1, parseInt(process.env.BIGQUERY_CACHE_TTL_HOURS || '720', 10));
 const S3_ENDPOINT = process.env.S3_ENDPOINT || '';
 const S3_REGION = process.env.S3_REGION || 'garage';
@@ -309,6 +310,24 @@ function parsePublicationNumber(value?: string): ParsedPublicationNumber | null 
     };
 }
 
+function buildBigQueryPublicationCandidates(parsed: ParsedPublicationNumber, normalized: string): string[] {
+    const docNoZero = parsed.docNumber.replace(/^0+/, '') || parsed.docNumber;
+    const values = new Set<string>([
+        normalized,
+        `${parsed.country}${parsed.docNumber}${parsed.kindCode}`,
+        `${parsed.country}${docNoZero}${parsed.kindCode}`,
+        `${parsed.country}-${parsed.docNumber}-${parsed.kindCode}`,
+        `${parsed.country}-${docNoZero}-${parsed.kindCode}`,
+        `${parsed.country}${parsed.docNumber}`,
+        `${parsed.country}${docNoZero}`,
+        `${parsed.country}-${parsed.docNumber}`,
+        `${parsed.country}-${docNoZero}`,
+        parsed.docNumber,
+        docNoZero
+    ].map((item) => normalizeText(item).toUpperCase()).filter(Boolean));
+    return Array.from(values);
+}
+
 async function getGoogleServiceAccount(): Promise<{ client_email: string; private_key: string } | null> {
     const rawJson = GOOGLE_SERVICE_ACCOUNT_JSON
         ? GOOGLE_SERVICE_ACCOUNT_JSON
@@ -370,6 +389,25 @@ async function getBigQueryToken(): Promise<string | null> {
     } catch {
         return null;
     }
+}
+
+async function runBigQueryQuery(payload: any): Promise<any> {
+    const token = await getBigQueryToken();
+    if (!token || !BIGQUERY_BILLING_PROJECT) {
+        throw new Error('BIGQUERY_DISABLED_OR_MISSING_CREDENTIALS');
+    }
+    const response = await axios.post(
+        `https://bigquery.googleapis.com/bigquery/v2/projects/${encodeURIComponent(BIGQUERY_BILLING_PROJECT)}/queries`,
+        payload,
+        {
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            timeout: 30000
+        }
+    );
+    return response.data;
 }
 
 type BigQueryBibliographicData = {
@@ -445,8 +483,7 @@ function extractAttorneyFromBigQueryRow(row: any): string {
 }
 
 async function fetchBigQueryBibliographicData(publicationNumber: string): Promise<BigQueryBibliographicData | null> {
-    const token = await getBigQueryToken();
-    if (!token || !BIGQUERY_BILLING_PROJECT) return null;
+    if (!BIGQUERY_BILLING_PROJECT) return null;
     const normalized = normalizePublicationForBigQuery(publicationNumber);
     if (!normalized) return null;
     const parsed = parsePublicationNumber(normalized);
@@ -476,7 +513,35 @@ async function fetchBigQueryBibliographicData(publicationNumber: string): Promis
         }
     }
     const docNoLeadingZeros = parsed.docNumber.replace(/^0+/, '') || parsed.docNumber;
-    const query = `
+    const publicationCandidates = buildBigQueryPublicationCandidates(parsed, normalized);
+    const exactQuery = `
+      SELECT
+        title_localized,
+        abstract_localized,
+        assignee_harmonized,
+        inventor_harmonized,
+        ipc,
+        filing_date,
+        publication_date,
+        country_code,
+        publication_number,
+        kind_code
+      FROM \`patents-public-data.patents.publications\` t
+      WHERE (
+          UPPER(IFNULL(t.publication_number, '')) IN UNNEST(@publicationCandidates)
+          OR CONCAT(
+              UPPER(IFNULL(t.country_code, '')),
+              UPPER(IFNULL(t.publication_number, '')),
+              UPPER(IFNULL(t.kind_code, ''))
+            ) IN UNNEST(@publicationCandidates)
+      )
+      AND (
+          @kindCode = ''
+          OR UPPER(IFNULL(t.kind_code, '')) = @kindCode
+      )
+      LIMIT 1
+    `;
+    const fallbackQuery = `
       SELECT
         title_localized,
         abstract_localized,
@@ -501,10 +566,22 @@ async function fetchBigQueryBibliographicData(publicationNumber: string): Promis
       LIMIT 1
     `;
     try {
-        const response = await axios.post(
-            `https://bigquery.googleapis.com/bigquery/v2/projects/${encodeURIComponent(BIGQUERY_BILLING_PROJECT)}/queries`,
-            {
-                query,
+        let response = await runBigQueryQuery({
+            query: exactQuery,
+            useLegacySql: false,
+            parameterMode: 'NAMED',
+            maximumBytesBilled: String(BIGQUERY_MAX_BYTES_BILLED),
+            useQueryCache: true,
+            queryParameters: [
+                { name: 'publicationCandidates', parameterType: { type: 'ARRAY', arrayType: { type: 'STRING' } }, parameterValue: { arrayValues: publicationCandidates.map((value) => ({ value })) } },
+                { name: 'kindCode', parameterType: { type: 'STRING' }, parameterValue: { value: parsed.kindCode } }
+            ]
+        });
+        let schemaFields = response?.schema?.fields || [];
+        let rowFields = response?.rows?.[0]?.f || [];
+        if (!schemaFields.length || !rowFields.length) {
+            response = await runBigQueryQuery({
+                query: fallbackQuery,
                 useLegacySql: false,
                 parameterMode: 'NAMED',
                 maximumBytesBilled: String(BIGQUERY_MAX_BYTES_BILLED),
@@ -515,17 +592,10 @@ async function fetchBigQueryBibliographicData(publicationNumber: string): Promis
                     { name: 'docNumberNoLeadingZeros', parameterType: { type: 'STRING' }, parameterValue: { value: docNoLeadingZeros } },
                     { name: 'kindCode', parameterType: { type: 'STRING' }, parameterValue: { value: parsed.kindCode } }
                 ]
-            },
-            {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                timeout: 30000
-            }
-        );
-        const schemaFields = response.data?.schema?.fields || [];
-        const rowFields = response.data?.rows?.[0]?.f || [];
+            });
+            schemaFields = response?.schema?.fields || [];
+            rowFields = response?.rows?.[0]?.f || [];
+        }
         if (!schemaFields.length || !rowFields.length) return null;
         const rowJson: Record<string, any> = {};
         for (let i = 0; i < schemaFields.length; i++) {
@@ -581,7 +651,8 @@ async function fetchBigQueryBibliographicData(publicationNumber: string): Promis
             }
         }).catch(() => undefined);
         return result;
-    } catch {
+    } catch (error) {
+        opsJobLog({ status: 'bigquery_lookup_error', publicationNumber, error: serializeUnknownError(error) });
         return null;
     }
 }
@@ -1485,14 +1556,16 @@ async function fetchOpsBibliographicData(patentNumber: string): Promise<OpsBibli
 }
 
 async function fetchBibliographicDataWithFallbacks(patentNumber: string, attemptNumber = 1): Promise<OpsBibliographicData | null> {
-    if (attemptNumber >= 2) {
+    if (BIGQUERY_FIRST_ENABLED || attemptNumber >= 2) {
         const fromBigQuery = await fetchBigQueryBibliographicData(patentNumber);
         if (fromBigQuery) return mapBigQueryToBiblio(patentNumber, fromBigQuery);
     }
     const fromOps = await fetchOpsBibliographicData(patentNumber);
     if (fromOps) return fromOps;
-    const fromBigQuery = await fetchBigQueryBibliographicData(patentNumber);
-    if (fromBigQuery) return mapBigQueryToBiblio(patentNumber, fromBigQuery);
+    if (!BIGQUERY_FIRST_ENABLED) {
+        const fromBigQuery = await fetchBigQueryBibliographicData(patentNumber);
+        if (fromBigQuery) return mapBigQueryToBiblio(patentNumber, fromBigQuery);
+    }
     const fromGoogle = await fetchGooglePatentsBibliographicData(patentNumber);
     if (fromGoogle) return fromGoogle;
     const fromEspacenetUi = await fetchEspacenetUiBibliographicData(patentNumber);
@@ -1834,18 +1907,54 @@ export function getBackgroundWorkerState() {
         opsCircuitOpen: opsCircuitOpenUntil > Date.now(),
         opsCircuitOpenUntil: opsCircuitOpenUntil > Date.now() ? new Date(opsCircuitOpenUntil).toISOString() : null,
         bigQueryEnabled: BIGQUERY_ENABLED,
-        bigQueryProject: BIGQUERY_BILLING_PROJECT || null
+        bigQueryProject: BIGQUERY_BILLING_PROJECT || null,
+        bigQueryFirstEnabled: BIGQUERY_FIRST_ENABLED
     };
 }
 
 export async function debugBigQueryLookup(publicationNumber: string) {
     const normalized = normalizePublicationForBigQuery(publicationNumber);
+    const parsed = parsePublicationNumber(normalized);
+    const diagnostics: Record<string, unknown> = {};
+    try {
+        const ping = await runBigQueryQuery({ query: 'SELECT 1 AS ok', useLegacySql: false });
+        diagnostics.ping = Boolean(ping?.rows?.length);
+    } catch (error) {
+        diagnostics.pingError = serializeUnknownError(error);
+    }
+    if (parsed?.country && parsed?.docNumber) {
+        try {
+            const probe = await runBigQueryQuery({
+                query: `
+                  SELECT
+                    COUNT(1) AS exact_hits,
+                    COUNTIF(UPPER(IFNULL(kind_code, '')) = @kindCode) AS same_kind_hits
+                  FROM \`patents-public-data.patents.publications\`
+                  WHERE UPPER(IFNULL(country_code, '')) = @country
+                    AND REGEXP_REPLACE(UPPER(IFNULL(publication_number, '')), r'[^0-9A-Z]', '') IN (@docNumber, @docNoZero)
+                `,
+                useLegacySql: false,
+                parameterMode: 'NAMED',
+                queryParameters: [
+                    { name: 'country', parameterType: { type: 'STRING' }, parameterValue: { value: parsed.country } },
+                    { name: 'docNumber', parameterType: { type: 'STRING' }, parameterValue: { value: parsed.docNumber } },
+                    { name: 'docNoZero', parameterType: { type: 'STRING' }, parameterValue: { value: parsed.docNumber.replace(/^0+/, '') || parsed.docNumber } },
+                    { name: 'kindCode', parameterType: { type: 'STRING' }, parameterValue: { value: parsed.kindCode || '' } }
+                ]
+            });
+            diagnostics.probeRows = probe?.rows || [];
+        } catch (error) {
+            diagnostics.probeError = serializeUnknownError(error);
+        }
+    }
     const result = normalized ? await fetchBigQueryBibliographicData(normalized) : null;
     return {
         enabled: BIGQUERY_ENABLED,
         project: BIGQUERY_BILLING_PROJECT || null,
         publicationNumber,
         normalized,
+        parsed,
+        diagnostics,
         found: Boolean(result),
         result
     };
