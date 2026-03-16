@@ -14,6 +14,7 @@ import * as cheerio from 'cheerio';
 import bcrypt from 'bcryptjs';
 import { prisma } from './db';
 import {
+    debugBigQueryLookup,
     enqueueLastFiveYearsRpi,
     getBackgroundWorkerState,
     retryAllDocumentErrorJobs,
@@ -2858,6 +2859,15 @@ fastify.get('/background-workers/state', async () => {
     return getBackgroundWorkerState();
 });
 
+fastify.get('/background-workers/bigquery/test', async (request: any, reply) => {
+    const publication = String(request.query?.publication || '').trim();
+    if (!publication) {
+        return reply.code(400).send({ error: 'publication é obrigatório' });
+    }
+    const result = await debugBigQueryLookup(publication);
+    return result;
+});
+
 fastify.post('/background-workers/control', async (request: any, reply) => {
     const { queue, action } = request.body as { queue?: 'rpi' | 'docs' | 'ops' | 'all'; action?: 'pause' | 'resume' };
     if (!queue || !action) {
@@ -2927,6 +2937,92 @@ fastify.post('/background-workers/ops/retry-errors', async (request: any, reply)
     } catch (error) {
         return reply.code(500).send({ error: 'Falha ao reprocessar erros da fila OPS' });
     }
+});
+
+fastify.get('/monitoring/dashboard-summary', async () => {
+    const criticalCodes = ['6.1', '7.1'];
+    const parseBrDate = (value?: string | null): Date | null => {
+        const text = String(value || '').trim();
+        if (!text) return null;
+        const brMatch = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (brMatch) {
+            const dt = new Date(Date.UTC(Number(brMatch[3]), Number(brMatch[2]) - 1, Number(brMatch[1])));
+            return Number.isNaN(dt.getTime()) ? null : dt;
+        }
+        const iso = new Date(text);
+        return Number.isNaN(iso.getTime()) ? null : iso;
+    };
+    const addDays = (date: Date, days: number) => new Date(date.getTime() + (days * 24 * 60 * 60 * 1000));
+    const now = new Date();
+    const sevenDaysAgo = addDays(now, -7);
+
+    const [monitoredPatents, unreadAlerts, exigenciesRaw, communicationsRaw] = await Promise.all([
+        prismaAny.patent.count({ where: { status: 'active' } }).catch(() => 0),
+        prismaAny.collisionAlert.count({ where: { is_read: false } }).catch(() => 0),
+        prismaAny.inpiPublication.findMany({
+            where: { despacho_code: { in: criticalCodes } },
+            orderBy: { created_at: 'desc' },
+            take: 100
+        }).catch(() => []),
+        prismaAny.inpiPublication.findMany({
+            where: { despacho_code: { not: null } },
+            orderBy: { created_at: 'desc' },
+            take: 120
+        }).catch(() => [])
+    ]);
+
+    const exigencies = exigenciesRaw
+        .map((row: any) => {
+            const eventDate = parseBrDate(row?.date) || row?.created_at || null;
+            const deadline = eventDate ? addDays(new Date(eventDate), 60) : null;
+            return {
+                id: row?.id,
+                patentNumber: row?.patent_number || '-',
+                rpi: row?.rpi || '-',
+                code: row?.despacho_code || '-',
+                description: row?.despacho_desc || '',
+                date: eventDate ? new Date(eventDate).toISOString() : null,
+                deadline: deadline ? deadline.toISOString() : null,
+                daysLeft: deadline ? Math.ceil((deadline.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)) : null
+            };
+        })
+        .sort((a: any, b: any) => (a.daysLeft ?? 99999) - (b.daysLeft ?? 99999))
+        .slice(0, 20);
+
+    const communications = communicationsRaw.map((row: any) => ({
+        id: row?.id,
+        patentNumber: row?.patent_number || '-',
+        rpi: row?.rpi || '-',
+        code: row?.despacho_code || '-',
+        description: row?.despacho_desc || '',
+        complement: row?.complement || '',
+        date: row?.date || null,
+        source: row?.ops_error?.includes('source=') ? String(row.ops_error).split('source=')[1]?.split(' ')[0] : null
+    }));
+
+    const grantsLast30d = communications.filter((row: any) => /concess/i.test(row.description || '')).length;
+    const communicationsLast7d = communicationsRaw.filter((row: any) => {
+        const dt = parseBrDate(row?.date) || row?.created_at;
+        return dt ? new Date(dt).getTime() >= sevenDaysAgo.getTime() : false;
+    }).length;
+
+    const deadlines = exigencies
+        .filter((item: any) => item.deadline)
+        .map((item: any) => ({ patentNumber: item.patentNumber, code: item.code, deadline: item.deadline, daysLeft: item.daysLeft }))
+        .slice(0, 20);
+
+    return {
+        kpis: {
+            monitoredPatents,
+            unreadAlerts,
+            exigencyAlerts: exigencies.length,
+            grantsLast30d,
+            communicationsLast7d
+        },
+        exigencies,
+        communications: communications.slice(0, 40),
+        deadlines
+    };
 });
 
 fastify.get('/patents/queue', async () => {

@@ -25,14 +25,19 @@ const navigation = [
     ],
   },
   {
-    group: "Monitoramento de Colidência",
+    group: "Monitoramento Jurídico",
     items: [
-      { label: "Dashboard", icon: LayoutDashboard, path: "/monitoring/dashboard" },
+      { label: "Dashboard de Alertas", icon: LayoutDashboard, path: "/monitoring/dashboard" },
       { label: "Patentes", icon: ShieldCheck, path: "/monitoring/patents" },
       { label: "Base de Patentes", icon: SearchCheck, path: "/monitoring/base" },
-      { label: "Background Workers", icon: Workflow, path: "/monitoring/background-workers" },
       { label: "Base de Conhecimento", icon: BookOpen, path: "/knowledge-base" },
       { label: "Configurações", icon: Settings, path: "/monitoring/settings" },
+    ],
+  },
+  {
+    group: "Operação de Dados",
+    items: [
+      { label: "Background Workers", icon: Workflow, path: "/monitoring/background-workers" },
     ],
   },
 ];

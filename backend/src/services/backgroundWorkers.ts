@@ -100,6 +100,15 @@ function documentJobLog(entry: Record<string, unknown>) {
     console.log(payload);
 }
 
+function opsJobLog(entry: Record<string, unknown>) {
+    const payload = JSON.stringify({
+        ts: new Date().toISOString(),
+        worker: 'ops',
+        ...entry
+    });
+    console.log(payload);
+}
+
 function isRetryableZipError(message: string): boolean {
     const normalized = (message || '').toLowerCase();
     return normalized.includes('short read')
@@ -287,10 +296,6 @@ function base64UrlEncode(value: string): string {
 
 function normalizePublicationForBigQuery(value?: string): string {
     return normalizeText(value).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-}
-
-function trimKindSuffix(value: string): string {
-    return value.replace(/[A-Z]\d?$/, '');
 }
 
 function parsePublicationNumber(value?: string): ParsedPublicationNumber | null {
@@ -1551,6 +1556,7 @@ async function processNextOpsBibliographicJob() {
                         ops_last_sync_at: new Date()
                     }
                 });
+                opsJobLog({ jobId: job.id, patentNumber: job.patent_number, status, code: biblioStatus === 'pending' ? 'OPS_BIBLIO_PENDING_INDEX' : 'OPS_BIBLIO_NOT_FOUND', source: 'none' });
                 return;
             }
 
@@ -1598,6 +1604,7 @@ async function processNextOpsBibliographicJob() {
                     finished_at: new Date()
                 }
             });
+            opsJobLog({ jobId: job.id, patentNumber: job.patent_number, status: 'completed', source: biblio.source || 'unknown', docdbId: biblio.docdbId || null });
         } catch (error: unknown) {
             const message = truncateError(errorMessage(error, 'Erro ao consultar bibliografia no OPS'));
             await prismaAny.opsBibliographicJob.update({
@@ -1616,6 +1623,7 @@ async function processNextOpsBibliographicJob() {
                     ops_last_sync_at: new Date()
                 }
             });
+            opsJobLog({ jobId: job.id, patentNumber: job.patent_number, status: nextAttempt >= MAX_DOC_ATTEMPTS ? 'failed_permanent' : 'failed', source: 'error', error: message });
         }
     } finally {
         opsRunning = false;
@@ -1710,9 +1718,37 @@ async function processNextDocumentJob() {
             }
             const docdbId = await resolveDocdbId(publicationNumber);
             if (!docdbId) {
+                const bqData = await fetchBigQueryBibliographicData(publicationNumber);
+                if (bqData) {
+                    await prisma.inpiPatent.update({
+                        where: { cod_pedido: job.patent_id },
+                        data: {
+                            title: bqData.title || undefined,
+                            abstract: bqData.abstract || undefined,
+                            applicant: bqData.applicant || undefined,
+                            inventors: bqData.inventors || undefined,
+                            ipc_codes: bqData.ipc || undefined
+                        }
+                    }).catch(() => undefined);
+                    await prismaAny.inpiPublication.updateMany({
+                        where: { patent_number: publicationNumber },
+                        data: {
+                            bibliographic_status: 'completed',
+                            ops_title: bqData.title || null,
+                            ops_applicant: bqData.applicant || null,
+                            ops_inventor: bqData.inventors || null,
+                            ops_ipc: bqData.ipc || null,
+                            ops_publication_date: bqData.publicationDate || bqData.filingDate || null,
+                            ops_error: 'source=google_bigquery',
+                            ops_last_sync_at: new Date()
+                        }
+                    }).catch(() => undefined);
+                }
                 const recentIndexing = isRecentPatentForIndexing(publicationNumber);
                 const status = recentIndexing ? 'waiting_indexing' : 'not_found';
-                const code = recentIndexing ? 'DOC_DOCDB_PENDING_INDEX' : 'DOC_DOCDB_NOT_FOUND';
+                const code = recentIndexing
+                    ? (bqData ? 'DOC_DOCDB_PENDING_INDEX_BQ_ENRICHED' : 'DOC_DOCDB_PENDING_INDEX')
+                    : (bqData ? 'DOC_DOCDB_NOT_FOUND_BQ_ENRICHED' : 'DOC_DOCDB_NOT_FOUND');
                 const errorText = `${code} publication=${publicationNumber}`;
                 await prisma.documentDownloadJob.update({
                     where: { id: job.id },
@@ -1796,7 +1832,22 @@ export function getBackgroundWorkerState() {
         docRunning,
         opsRunning,
         opsCircuitOpen: opsCircuitOpenUntil > Date.now(),
-        opsCircuitOpenUntil: opsCircuitOpenUntil > Date.now() ? new Date(opsCircuitOpenUntil).toISOString() : null
+        opsCircuitOpenUntil: opsCircuitOpenUntil > Date.now() ? new Date(opsCircuitOpenUntil).toISOString() : null,
+        bigQueryEnabled: BIGQUERY_ENABLED,
+        bigQueryProject: BIGQUERY_BILLING_PROJECT || null
+    };
+}
+
+export async function debugBigQueryLookup(publicationNumber: string) {
+    const normalized = normalizePublicationForBigQuery(publicationNumber);
+    const result = normalized ? await fetchBigQueryBibliographicData(normalized) : null;
+    return {
+        enabled: BIGQUERY_ENABLED,
+        project: BIGQUERY_BILLING_PROJECT || null,
+        publicationNumber,
+        normalized,
+        found: Boolean(result),
+        result
     };
 }
 

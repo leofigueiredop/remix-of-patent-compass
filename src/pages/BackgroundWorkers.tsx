@@ -96,6 +96,8 @@ type WorkerState = {
   rpiRunning: boolean;
   docRunning: boolean;
   opsRunning: boolean;
+  bigQueryEnabled?: boolean;
+  bigQueryProject?: string | null;
 };
 
 const initialData: QueuePayload = {
@@ -202,6 +204,7 @@ function DocsTable({ rows, onRetry }: { rows: DocJob[]; onRetry?: (id: string) =
             <TableCell>{statusBadge(row.status)}</TableCell>
             <TableCell>{row.attempts}</TableCell>
             <TableCell className="font-mono text-[11px] max-w-[280px] truncate" title={row.storage_key || ""}>{row.storage_key || "-"}</TableCell>
+            <TableCell className="text-xs text-muted-foreground">{sourceLabel(row.source)}</TableCell>
             <TableCell className="text-xs text-muted-foreground max-w-[320px] truncate" title={row.error || ""}>{row.error || "-"}</TableCell>
             <TableCell className="text-xs text-muted-foreground">{formatDate(row.finished_at)}</TableCell>
             <TableCell className="text-right">
@@ -243,7 +246,6 @@ function OpsTable({ rows, onRetry }: { rows: OpsJob[]; onRetry?: (id: string) =>
             <TableCell className="font-mono text-[11px]">{row.docdb_id || "-"}</TableCell>
             <TableCell className="text-xs text-muted-foreground">{sourceLabel(row.source)}</TableCell>
             <TableCell className="text-xs text-muted-foreground max-w-[320px] truncate" title={row.error || ""}>{row.error || "-"}</TableCell>
-            <TableCell className="text-xs text-muted-foreground max-w-[320px] truncate" title={row.error || ""}>{row.error || "-"}</TableCell>
             <TableCell className="text-xs text-muted-foreground">{formatDate(row.finished_at)}</TableCell>
             <TableCell className="text-right">
               {onRetry && (row.status === "failed" || row.status === "not_found") && (
@@ -279,6 +281,7 @@ export default function BackgroundWorkers() {
   const [filterCodes, setFilterCodes] = useState("");
   const [filterTarget, setFilterTarget] = useState<"all" | "docs" | "ops">("all");
   const [actionMessage, setActionMessage] = useState("");
+  const [bigQueryProbe, setBigQueryProbe] = useState("BR112022008189A2");
 
   const counters = useMemo(() => ({
     rpiProcessing: data.rpi.counts?.processing ?? data.rpi.processing.length,
@@ -377,6 +380,21 @@ export default function BackgroundWorkers() {
     }
   };
 
+  const testBigQueryLookup = async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`${API_URL}/background-workers/bigquery/test`, {
+        params: { publication: bigQueryProbe }
+      });
+      const found = Boolean(response.data?.found);
+      setActionMessage(found ? `BigQuery OK para ${bigQueryProbe}` : `BigQuery sem resultado para ${bigQueryProbe}`);
+    } catch (error: any) {
+      setActionMessage(error?.response?.data?.error || "Falha no teste BigQuery");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const enqueueRange = async () => {
     const from = Number.parseInt(enqueueFrom, 10);
     const to = Number.parseInt(enqueueTo, 10);
@@ -457,7 +475,7 @@ export default function BackgroundWorkers() {
               Controle da fila de importação de RPI e da fila de download de documentos via Espacenet.
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
               onClick={() => controlWorkers("all", state.rpiPaused && state.docsPaused && state.opsPaused ? "resume" : "pause")}
@@ -481,6 +499,13 @@ export default function BackgroundWorkers() {
               <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
               Atualizar
             </Button>
+            <Input value={bigQueryProbe} onChange={(event) => setBigQueryProbe(event.target.value)} className="w-[220px]" />
+            <Button variant="outline" onClick={testBigQueryLookup} disabled={loading || !bigQueryProbe.trim()}>
+              Testar BigQuery
+            </Button>
+            <Badge variant={state.bigQueryEnabled ? "default" : "destructive"}>
+              BQ {state.bigQueryEnabled ? `ON ${state.bigQueryProject || ""}` : "OFF"}
+            </Badge>
           </div>
         </div>
 
