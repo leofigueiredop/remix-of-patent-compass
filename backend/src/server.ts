@@ -29,7 +29,6 @@ import pdfParse from 'pdf-parse';
 
 const execAsync = promisify(exec);
 
-import { GoogleGenAI } from '@google/genai';
 
 const fastify = Fastify({ logger: true });
 // const prisma = new PrismaClient(); // Removed, already imported from './db' oben.
@@ -39,7 +38,6 @@ fastify.register(multipart);
 fastify.register(jwt, { secret: process.env.JWT_SECRET || 'patent-scope-secret-change-me' });
 
 // ─── Environment ───────────────────────────────────────────────
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 const WHISPER_BASE_URL = process.env.WHISPER_BASE_URL || 'http://whisper:8000';
 const OPS_CONSUMER_KEY = process.env.OPS_CONSUMER_KEY || '';
@@ -119,9 +117,6 @@ async function execInpiCurlWithRetry(command: string, attempts = 3, timeout = 30
     }
     throw lastError;
 }
-
-// Inicializa SDK do Gemini somente se configurado
-const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
 // ─── OPS Token Cache ───────────────────────────────────────────
 let opsAccessToken: string | null = null;
@@ -613,42 +608,11 @@ async function generateWithGroq(prompt: string, expectJson = true, customSystemM
     return text;
 }
 
-// ─── Gemini Helper (fallback) ──────────────────────────────────
-async function generateWithGeminiDirect(prompt: string, expectJson = true): Promise<string> {
-    if (!ai) {
-        throw new Error('Gemini não configurado no servidor.');
-    }
-
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
-            temperature: 0.2,
-            responseMimeType: expectJson ? "application/json" : "text/plain"
-        }
-    });
-
-    if (!response.text) throw new Error("Gemini retornou uma resposta vazia.");
-    return response.text;
-}
-
-// ─── Unified LLM Helper: Groq first, Gemini fallback ──────────
 async function generateWithGemini(prompt: string, expectJson = true, customSystemMessage?: string): Promise<string> {
-    if (GROQ_API_KEY) {
-        try {
-            return await generateWithGroq(prompt, expectJson, customSystemMessage);
-        } catch (error: any) {
-            if (ai) {
-                fastify.log.warn(`Groq falhou, usando fallback Gemini: ${error.message}`);
-            } else {
-                fastify.log.warn(`Groq falhou e Gemini não está configurado: ${error.message}`);
-            }
-        }
-    }
-    if (!GROQ_API_KEY && !ai) {
+    if (!GROQ_API_KEY) {
         throw new Error('Nenhum provedor LLM configurado. Configure GROQ_API_KEY.');
     }
-    return await generateWithGeminiDirect(prompt, expectJson);
+    return await generateWithGroq(prompt, expectJson, customSystemMessage);
 }
 
 // ─── POST /auth/register ───────────────────────────────────────
@@ -710,7 +674,7 @@ fastify.get('/auth/me', async (request, reply) => {
 fastify.get('/health', async () => {
     return {
         status: 'ok',
-        services: { groq: GROQ_API_KEY ? 'configured' : 'missing', gemini: GEMINI_API_KEY ? 'configured' : 'missing', whisper: WHISPER_BASE_URL },
+        services: { groq: GROQ_API_KEY ? 'configured' : 'missing', whisper: WHISPER_BASE_URL },
         ops: OPS_CONSUMER_KEY ? 'configured' : 'missing',
         inpi_mode: INPI_MODE
     };
