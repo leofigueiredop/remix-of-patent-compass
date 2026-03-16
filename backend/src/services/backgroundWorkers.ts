@@ -20,6 +20,10 @@ const STALE_JOB_MINUTES = Math.max(5, parseInt(process.env.STALE_JOB_MINUTES || 
 const OPS_CONSUMER_KEY = process.env.OPS_CONSUMER_KEY || '';
 const OPS_CONSUMER_SECRET = process.env.OPS_CONSUMER_SECRET || '';
 const BIBLIO_ENRICHMENT_MODE = (process.env.BIBLIO_ENRICHMENT_MODE || 'xml_first').toLowerCase();
+const OPS_MIN_INTERVAL_MS = Math.max(300, parseInt(process.env.OPS_MIN_INTERVAL_MS || '1400', 10));
+const OPS_RETRY_MAX = Math.max(1, parseInt(process.env.OPS_RETRY_MAX || '4', 10));
+const OPS_BREAKER_THRESHOLD = Math.max(2, parseInt(process.env.OPS_BREAKER_THRESHOLD || '6', 10));
+const OPS_BREAKER_COOLDOWN_MS = Math.max(30_000, parseInt(process.env.OPS_BREAKER_COOLDOWN_MS || '180000', 10));
 const S3_ENDPOINT = process.env.S3_ENDPOINT || '';
 const S3_REGION = process.env.S3_REGION || 'garage';
 const S3_ACCESS_KEY = process.env.S3_ACCESS_KEY || '';
@@ -37,6 +41,9 @@ let latestRpiCache: { value: number; expiresAt: number } | null = null;
 let opsAccessToken: string | null = null;
 let opsTokenExpiration = 0;
 let s3BucketReady = false;
+let lastOpsRequestAt = 0;
+let opsThrottleFailureCount = 0;
+let opsCircuitOpenUntil = 0;
 
 function normalizeText(value?: string): string {
     return (value || '').replace(/\s+/g, ' ').trim();
@@ -91,6 +98,81 @@ function isRetryableZipError(message: string): boolean {
 
 async function sleep(ms: number) {
     await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseRetryAfterMs(value?: string): number | null {
+    if (!value) return null;
+    const asNumber = Number.parseInt(value, 10);
+    if (Number.isFinite(asNumber) && asNumber > 0) return asNumber * 1000;
+    const asDate = new Date(value).getTime();
+    if (Number.isFinite(asDate)) {
+        const delta = asDate - Date.now();
+        return delta > 0 ? delta : null;
+    }
+    return null;
+}
+
+async function waitOpsThrottle() {
+    const elapsed = Date.now() - lastOpsRequestAt;
+    const waitMs = OPS_MIN_INTERVAL_MS - elapsed;
+    if (waitMs > 0) {
+        await sleep(waitMs);
+    }
+}
+
+async function waitOpsCircuitIfOpen() {
+    const now = Date.now();
+    if (opsCircuitOpenUntil > now) {
+        await sleep(opsCircuitOpenUntil - now);
+    }
+}
+
+function registerOpsThrottleFailure(status?: number) {
+    if (status !== 429 && status !== 502 && status !== 503 && status !== 504) return;
+    opsThrottleFailureCount += 1;
+    if (opsThrottleFailureCount >= OPS_BREAKER_THRESHOLD) {
+        opsCircuitOpenUntil = Date.now() + OPS_BREAKER_COOLDOWN_MS;
+        opsThrottleFailureCount = 0;
+        console.warn(JSON.stringify({
+            ts: new Date().toISOString(),
+            worker: 'ops',
+            code: 'OPS_CIRCUIT_OPEN',
+            cooldownMs: OPS_BREAKER_COOLDOWN_MS,
+            until: new Date(opsCircuitOpenUntil).toISOString(),
+            status
+        }));
+    }
+}
+
+function registerOpsSuccess() {
+    opsThrottleFailureCount = 0;
+}
+
+async function opsGetWithThrottle<T = any>(url: string, config: any): Promise<T> {
+    let attempt = 0;
+    while (attempt < OPS_RETRY_MAX) {
+        attempt += 1;
+        await waitOpsCircuitIfOpen();
+        await waitOpsThrottle();
+        try {
+            const response = await axios.get(url, config);
+            lastOpsRequestAt = Date.now();
+            registerOpsSuccess();
+            return response as T;
+        } catch (error: unknown) {
+            lastOpsRequestAt = Date.now();
+            if (!axios.isAxiosError(error)) throw error;
+            const status = error.response?.status;
+            registerOpsThrottleFailure(status);
+            const retryAfterHeader = error.response?.headers?.['retry-after'];
+            const retryAfterMs = parseRetryAfterMs(Array.isArray(retryAfterHeader) ? retryAfterHeader[0] : retryAfterHeader);
+            const shouldRetry = status === 429 || status === 503 || status === 502 || status === 504;
+            if (!shouldRetry || attempt >= OPS_RETRY_MAX) throw error;
+            const backoff = retryAfterMs || (OPS_MIN_INTERVAL_MS * (attempt + 1));
+            await sleep(backoff);
+        }
+    }
+    throw new Error('Falha OPS após retries');
 }
 
 function getStaleDate(): Date {
@@ -814,7 +896,7 @@ async function resolveDocdbId(publicationNumber: string): Promise<string | null>
     const token = await getOpsToken();
     for (const query of queryCandidates) {
         const url = `https://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=${encodeURIComponent(query)}`;
-        const response = await axios.get(url, {
+        const response = await opsGetWithThrottle(url, {
             headers: {
                 Authorization: `Bearer ${token}`,
                 Accept: 'application/xml'
@@ -859,7 +941,7 @@ type OpsDocumentInstance = {
 
 async function fetchDocumentInstances(docdbId: string): Promise<OpsDocumentInstance[]> {
     const token = await getOpsToken();
-    const response = await axios.get(
+    const response = await opsGetWithThrottle(
         `https://ops.epo.org/3.2/rest-services/published-data/publication/docdb/${docdbId}/images`,
         {
             headers: {
@@ -879,7 +961,7 @@ async function fetchDocumentInstances(docdbId: string): Promise<OpsDocumentInsta
 
 async function downloadOpsPdfByLink(link: string, pages: string): Promise<Buffer> {
     const token = await getOpsToken();
-    const response = await axios.get(
+    const response = await opsGetWithThrottle(
         `https://ops.epo.org/3.2/rest-services/${link}?Range=${encodeURIComponent(pages)}`,
         {
             headers: {
@@ -906,7 +988,7 @@ async function fetchOpsBibliographicData(patentNumber: string): Promise<OpsBibli
     const docdbId = await resolveDocdbId(patentNumber);
     if (!docdbId) return null;
     const token = await getOpsToken();
-    const response = await axios.get(
+    const response = await opsGetWithThrottle(
         `https://ops.epo.org/3.2/rest-services/published-data/publication/docdb/${docdbId}/biblio`,
         {
             headers: {
@@ -1232,7 +1314,9 @@ export function getBackgroundWorkerState() {
         opsPaused,
         rpiRunning,
         docRunning,
-        opsRunning
+        opsRunning,
+        opsCircuitOpen: opsCircuitOpenUntil > Date.now(),
+        opsCircuitOpenUntil: opsCircuitOpenUntil > Date.now() ? new Date(opsCircuitOpenUntil).toISOString() : null
     };
 }
 
