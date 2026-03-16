@@ -1870,7 +1870,7 @@ export async function retryAllRpiErrorJobs(ids?: string[], preferBigQuery = fals
     return { updated: result.count };
 }
 
-export async function retryAllDocumentErrorJobs(ids?: string[], preferBigQuery = false) {
+export async function retryAllDocumentErrorJobs(ids?: string[]) {
     const where = ids && ids.length > 0
         ? { id: { in: Array.from(new Set(ids)) }, status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing'] } }
         : { status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing'] } };

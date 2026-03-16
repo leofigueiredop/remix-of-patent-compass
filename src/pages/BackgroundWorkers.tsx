@@ -353,11 +353,11 @@ export default function BackgroundWorkers() {
     }
   };
 
-  const retryAllDocsErrors = async (preferBigQuery = false) => {
+  const retryAllDocsErrors = async () => {
     setLoading(true);
     try {
       const ids = data.docs.errors.map((row) => row.id);
-      const response = await axios.post(`${API_URL}/background-workers/docs/retry-errors`, { ids, preferBigQuery });
+      const response = await axios.post(`${API_URL}/background-workers/docs/retry-errors`, { ids });
       setActionMessage(`Docs reprocessados: ${response.data?.updated ?? 0}`);
       await fetchQueues();
     } finally {
