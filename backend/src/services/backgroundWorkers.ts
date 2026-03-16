@@ -33,6 +33,8 @@ const BIGQUERY_PROJECT_ID = process.env.BIGQUERY_PROJECT_ID || '';
 const GOOGLE_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '';
 const BIGQUERY_BILLING_PROJECT = process.env.BIGQUERY_BILLING_PROJECT || BIGQUERY_PROJECT_ID;
 const BIGQUERY_ENABLED = Boolean(BIGQUERY_BILLING_PROJECT && GOOGLE_SERVICE_ACCOUNT_JSON);
+const BIGQUERY_MAX_BYTES_BILLED = Math.max(10_000_000, parseInt(process.env.BIGQUERY_MAX_BYTES_BILLED || '50000000', 10));
+const BIGQUERY_CACHE_TTL_HOURS = Math.max(1, parseInt(process.env.BIGQUERY_CACHE_TTL_HOURS || '720', 10));
 const S3_ENDPOINT = process.env.S3_ENDPOINT || '';
 const S3_REGION = process.env.S3_REGION || 'garage';
 const S3_ACCESS_KEY = process.env.S3_ACCESS_KEY || '';
@@ -288,6 +290,17 @@ function trimKindSuffix(value: string): string {
     return value.replace(/[A-Z]\d?$/, '');
 }
 
+function parsePublicationNumber(value?: string): ParsedPublicationNumber | null {
+    const normalized = normalizePublicationForBigQuery(value);
+    const match = normalized.match(/^([A-Z]{2})([0-9A-Z]+?)([A-Z]\d?)?$/);
+    if (!match) return null;
+    return {
+        country: match[1],
+        docNumber: match[2] || '',
+        kindCode: match[3] || ''
+    };
+}
+
 function getGoogleServiceAccount(): { client_email: string; private_key: string } | null {
     if (!GOOGLE_SERVICE_ACCOUNT_JSON) return null;
     try {
@@ -358,6 +371,12 @@ type BigQueryBibliographicData = {
     googlePatentsUrl?: string;
 };
 
+type ParsedPublicationNumber = {
+    country: string;
+    docNumber: string;
+    kindCode: string;
+};
+
 function pickFirstLocalizedText(value: any): string {
     if (Array.isArray(value)) {
         for (const item of value) {
@@ -405,19 +424,56 @@ async function fetchBigQueryBibliographicData(publicationNumber: string): Promis
     if (!token || !BIGQUERY_BILLING_PROJECT) return null;
     const normalized = normalizePublicationForBigQuery(publicationNumber);
     if (!normalized) return null;
+    const parsed = parsePublicationNumber(normalized);
+    if (!parsed?.country || !parsed?.docNumber) return null;
+    const cacheKey = normalized;
+    const cached = await prisma.searchResultCache.findUnique({
+        where: {
+            source_publication_number: {
+                source: 'google_bigquery',
+                publication_number: cacheKey
+            }
+        }
+    }).catch(() => null);
+    if (cached && cached.updated_at) {
+        const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+        if (ageMs <= BIGQUERY_CACHE_TTL_HOURS * 60 * 60 * 1000) {
+            return {
+                title: cached.title || undefined,
+                abstract: cached.abstract || undefined,
+                applicant: cached.applicant || undefined,
+                inventors: cached.inventor || undefined,
+                ipc: cached.classification || undefined,
+                filingDate: cached.patent_date || undefined,
+                publicationDate: cached.patent_date || undefined,
+                googlePatentsUrl: cached.url || `https://patents.google.com/patent/${cacheKey}/en`
+            };
+        }
+    }
     const noKind = trimKindSuffix(normalized);
+    const docNoLeadingZeros = parsed.docNumber.replace(/^0+/, '') || parsed.docNumber;
     const query = `
-      SELECT TO_JSON_STRING(t) AS row_json
+      SELECT
+        title_localized,
+        abstract_localized,
+        assignee_harmonized,
+        inventor_harmonized,
+        ipc,
+        filing_date,
+        publication_date,
+        country_code,
+        publication_number,
+        kind_code
       FROM \`patents-public-data.patents.publications\` t
-      WHERE CONCAT(
-        UPPER(IFNULL(t.country_code, '')),
-        REGEXP_REPLACE(UPPER(IFNULL(t.publication_number, '')), r'[^0-9A-Z]', ''),
-        UPPER(IFNULL(t.kind_code, ''))
-      ) = @publicationKey
-      OR CONCAT(
-        UPPER(IFNULL(t.country_code, '')),
-        REGEXP_REPLACE(UPPER(IFNULL(t.publication_number, '')), r'[^0-9A-Z]', '')
-      ) = @publicationNoKind
+      WHERE UPPER(IFNULL(t.country_code, '')) = @country
+        AND (
+          REGEXP_REPLACE(UPPER(IFNULL(t.publication_number, '')), r'[^0-9A-Z]', '') = @docNumber
+          OR REGEXP_REPLACE(UPPER(IFNULL(t.publication_number, '')), r'[^0-9A-Z]', '') = @docNumberNoLeadingZeros
+        )
+        AND (
+          @kindCode = ''
+          OR UPPER(IFNULL(t.kind_code, '')) = @kindCode
+        )
       LIMIT 1
     `;
     try {
@@ -427,9 +483,13 @@ async function fetchBigQueryBibliographicData(publicationNumber: string): Promis
                 query,
                 useLegacySql: false,
                 parameterMode: 'NAMED',
+                maximumBytesBilled: String(BIGQUERY_MAX_BYTES_BILLED),
+                useQueryCache: true,
                 queryParameters: [
-                    { name: 'publicationKey', parameterType: { type: 'STRING' }, parameterValue: { value: normalized } },
-                    { name: 'publicationNoKind', parameterType: { type: 'STRING' }, parameterValue: { value: noKind } }
+                    { name: 'country', parameterType: { type: 'STRING' }, parameterValue: { value: parsed.country } },
+                    { name: 'docNumber', parameterType: { type: 'STRING' }, parameterValue: { value: parsed.docNumber } },
+                    { name: 'docNumberNoLeadingZeros', parameterType: { type: 'STRING' }, parameterValue: { value: docNoLeadingZeros } },
+                    { name: 'kindCode', parameterType: { type: 'STRING' }, parameterValue: { value: parsed.kindCode } }
                 ]
             },
             {
@@ -440,18 +500,22 @@ async function fetchBigQueryBibliographicData(publicationNumber: string): Promis
                 timeout: 30000
             }
         );
-        const rowValue = response.data?.rows?.[0]?.f?.[0]?.v;
-        if (!rowValue) return null;
-        const rowJson = JSON.parse(String(rowValue));
-        const title = pickFirstLocalizedText(rowJson?.title_localized) || normalizeText(rowJson?.title || '');
-        const abstract = pickFirstLocalizedText(rowJson?.abstract_localized) || normalizeText(rowJson?.abstract || '');
-        const applicant = joinEntityNames(rowJson?.assignee_harmonized) || joinEntityNames(rowJson?.assignees);
-        const inventors = joinEntityNames(rowJson?.inventor_harmonized) || joinEntityNames(rowJson?.inventors);
-        const ipc = joinIpcCodes(rowJson?.ipc);
-        const filingDate = normalizeText(rowJson?.filing_date || '');
-        const publicationDate = normalizeText(rowJson?.publication_date || '');
+        const schemaFields = response.data?.schema?.fields || [];
+        const rowFields = response.data?.rows?.[0]?.f || [];
+        if (!schemaFields.length || !rowFields.length) return null;
+        const rowJson: Record<string, any> = {};
+        for (let i = 0; i < schemaFields.length; i++) {
+            rowJson[schemaFields[i]?.name] = rowFields[i]?.v;
+        }
+        const title = pickFirstLocalizedText(rowJson.title_localized);
+        const abstract = pickFirstLocalizedText(rowJson.abstract_localized);
+        const applicant = joinEntityNames(rowJson.assignee_harmonized);
+        const inventors = joinEntityNames(rowJson.inventor_harmonized);
+        const ipc = joinIpcCodes(rowJson.ipc);
+        const filingDate = normalizeText(rowJson.filing_date || '');
+        const publicationDate = normalizeText(rowJson.publication_date || '');
         const attorney = extractAttorneyFromBigQueryRow(rowJson);
-        return {
+        const result = {
             title: title || undefined,
             abstract: abstract || undefined,
             applicant: applicant || undefined,
@@ -462,6 +526,37 @@ async function fetchBigQueryBibliographicData(publicationNumber: string): Promis
             attorney: attorney || undefined,
             googlePatentsUrl: normalized ? `https://patents.google.com/patent/${normalized}/en` : undefined
         };
+        await prisma.searchResultCache.upsert({
+            where: {
+                source_publication_number: {
+                    source: 'google_bigquery',
+                    publication_number: cacheKey
+                }
+            },
+            update: {
+                title: result.title || null,
+                abstract: result.abstract || null,
+                applicant: result.applicant || null,
+                inventor: result.inventors || null,
+                patent_date: result.publicationDate || result.filingDate || null,
+                classification: result.ipc || null,
+                url: result.googlePatentsUrl || null,
+                status: 'completed'
+            },
+            create: {
+                source: 'google_bigquery',
+                publication_number: cacheKey,
+                title: result.title || null,
+                abstract: result.abstract || null,
+                applicant: result.applicant || null,
+                inventor: result.inventors || null,
+                patent_date: result.publicationDate || result.filingDate || null,
+                classification: result.ipc || null,
+                url: result.googlePatentsUrl || null,
+                status: 'completed'
+            }
+        }).catch(() => undefined);
+        return result;
     } catch {
         return null;
     }
