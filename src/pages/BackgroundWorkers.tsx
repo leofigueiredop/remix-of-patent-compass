@@ -337,7 +337,7 @@ export default function BackgroundWorkers() {
   };
 
   const retryOpsJob = async (id: string) => {
-    await axios.post(`${API_URL}/background-workers/ops/retry/${id}`);
+    await axios.post(`${API_URL}/background-workers/ops/retry/${id}`, { preferBigQuery: true });
     await fetchQueues();
   };
 

@@ -1837,12 +1837,12 @@ export async function retryDocumentJob(jobId: string) {
     return updated;
 }
 
-export async function retryOpsBibliographicJob(jobId: string) {
+export async function retryOpsBibliographicJob(jobId: string, preferBigQuery = true) {
     const updated = await prismaAny.opsBibliographicJob.update({
         where: { id: jobId },
         data: {
             status: 'pending',
-            attempts: 0,
+            attempts: preferBigQuery ? 1 : 0,
             error: null,
             started_at: null,
             finished_at: null

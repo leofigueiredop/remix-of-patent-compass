@@ -2890,7 +2890,8 @@ fastify.post('/background-workers/docs/retry/:id', async (request: any, reply) =
 fastify.post('/background-workers/ops/retry/:id', async (request: any, reply) => {
     const { id } = request.params as { id: string };
     try {
-        const job = await retryOpsBibliographicJob(id);
+        const preferBigQuery = request.body?.preferBigQuery === undefined ? true : Boolean(request.body?.preferBigQuery);
+        const job = await retryOpsBibliographicJob(id, preferBigQuery);
         return { id: job.id, status: job.status };
     } catch (error) {
         return reply.code(404).send({ error: 'Job bibliográfico OPS não encontrado' });
