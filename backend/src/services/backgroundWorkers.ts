@@ -25,6 +25,9 @@ const OPS_RETRY_MAX = Math.max(1, parseInt(process.env.OPS_RETRY_MAX || '4', 10)
 const OPS_BREAKER_THRESHOLD = Math.max(2, parseInt(process.env.OPS_BREAKER_THRESHOLD || '6', 10));
 const OPS_BREAKER_COOLDOWN_MS = Math.max(30_000, parseInt(process.env.OPS_BREAKER_COOLDOWN_MS || '180000', 10));
 const OPS_INDEXING_GRACE_YEARS = Math.max(1, parseInt(process.env.OPS_INDEXING_GRACE_YEARS || '3', 10));
+const GOOGLE_PATENTS_FALLBACK_ENABLED = (process.env.GOOGLE_PATENTS_FALLBACK_ENABLED || 'true').toLowerCase() === 'true';
+const ESPACENET_UI_FALLBACK_ENABLED = (process.env.ESPACENET_UI_FALLBACK_ENABLED || 'false').toLowerCase() === 'true';
+const INPI_SCRAPE_FALLBACK_ENABLED = (process.env.INPI_SCRAPE_FALLBACK_ENABLED || 'false').toLowerCase() === 'true';
 const S3_ENDPOINT = process.env.S3_ENDPOINT || '';
 const S3_REGION = process.env.S3_REGION || 'garage';
 const S3_ACCESS_KEY = process.env.S3_ACCESS_KEY || '';
@@ -998,7 +1001,104 @@ type OpsBibliographicData = {
     inventor?: string;
     ipc?: string;
     publicationDate?: string;
+    source?: string;
 };
+
+function extractGooglePatentNumberCandidate(patentNumber: string): string {
+    return normalizePublicationNumber(patentNumber).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+}
+
+async function fetchGooglePatentsBibliographicData(patentNumber: string): Promise<OpsBibliographicData | null> {
+    if (!GOOGLE_PATENTS_FALLBACK_ENABLED) return null;
+    const candidate = extractGooglePatentNumberCandidate(patentNumber);
+    if (!candidate) return null;
+    const url = `https://patents.google.com/patent/${candidate}/en`;
+    const response = await axios.get(url, {
+        timeout: 30000,
+        validateStatus: () => true,
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+        }
+    });
+    if (response.status < 200 || response.status >= 300) return null;
+    const html = typeof response.data === 'string' ? response.data : '';
+    if (!html || /security verification|just a moment/i.test(html)) return null;
+    const $ = cheerio.load(html);
+    const title = normalizeText($('meta[name="DC.title"]').attr('content') || $('title').text());
+    const applicant = normalizeText($('meta[scheme="assignee"]').attr('content') || $('dd[itemprop="assigneeOriginal"] span[itemprop="name"]').first().text());
+    const inventor = normalizeText($('meta[scheme="inventor"]').attr('content') || $('dd[itemprop="inventor"] span[itemprop="name"]').first().text());
+    const publicationDate = normalizeText($('meta[scheme="publication-date"]').attr('content') || $('time[itemprop="publicationDate"]').attr('datetime') || '');
+    const ipc = $('span[itemprop="Code"], td[itemprop="Code"]')
+        .toArray()
+        .map((el) => normalizeText($(el).text()))
+        .filter(Boolean)
+        .slice(0, 20)
+        .join(', ');
+    if (!title && !applicant && !inventor && !ipc) return null;
+    return {
+        docdbId: candidate,
+        title: title || undefined,
+        applicant: applicant || undefined,
+        inventor: inventor || undefined,
+        ipc: ipc || undefined,
+        publicationDate: publicationDate || undefined,
+        source: 'google_patents'
+    };
+}
+
+async function fetchEspacenetUiBibliographicData(patentNumber: string): Promise<OpsBibliographicData | null> {
+    if (!ESPACENET_UI_FALLBACK_ENABLED) return null;
+    const candidate = extractGooglePatentNumberCandidate(patentNumber);
+    if (!candidate) return null;
+    const url = `https://worldwide.espacenet.com/patent/search/publication/${candidate}`;
+    const response = await axios.get(url, { timeout: 30000, validateStatus: () => true });
+    if (response.status < 200 || response.status >= 300) return null;
+    const html = typeof response.data === 'string' ? response.data : '';
+    if (!html || /security verification|just a moment|performing security verification/i.test(html)) return null;
+    const $ = cheerio.load(html);
+    const title = normalizeText($('meta[property="og:title"]').attr('content') || $('title').text());
+    if (!title) return null;
+    return {
+        docdbId: candidate,
+        title,
+        source: 'espacenet_ui'
+    };
+}
+
+async function fetchInpiScrapeBibliographicData(patentNumber: string): Promise<OpsBibliographicData | null> {
+    if (!INPI_SCRAPE_FALLBACK_ENABLED) return null;
+    const digits = extractDigits(patentNumber);
+    if (!digits) return null;
+    const codPedido = digits.length > 12 ? digits.slice(0, 12) : digits;
+    try {
+        const module = await import('./inpiScraper');
+        if (!module?.scrapeInpiPatent) return null;
+        await module.scrapeInpiPatent(codPedido);
+        const scraped = await prisma.inpiPatent.findUnique({
+            where: { cod_pedido: codPedido },
+            select: {
+                title: true,
+                applicant: true,
+                inventors: true,
+                ipc_codes: true,
+                filing_date: true
+            }
+        });
+        if (!scraped) return null;
+        if (!scraped.title && !scraped.applicant && !scraped.inventors && !scraped.ipc_codes) return null;
+        return {
+            docdbId: codPedido,
+            title: scraped.title || undefined,
+            applicant: scraped.applicant || undefined,
+            inventor: scraped.inventors || undefined,
+            ipc: scraped.ipc_codes || undefined,
+            publicationDate: scraped.filing_date || undefined,
+            source: 'inpi_scrape'
+        };
+    } catch {
+        return null;
+    }
+}
 
 async function fetchOpsBibliographicData(patentNumber: string): Promise<OpsBibliographicData | null> {
     const docdbId = await resolveDocdbId(patentNumber);
@@ -1039,8 +1139,21 @@ async function fetchOpsBibliographicData(patentNumber: string): Promise<OpsBibli
         applicant: applicants || undefined,
         inventor: inventors || undefined,
         ipc: ipcs || undefined,
-        publicationDate: publicationDate || undefined
+        publicationDate: publicationDate || undefined,
+        source: 'ops_api'
     };
+}
+
+async function fetchBibliographicDataWithFallbacks(patentNumber: string): Promise<OpsBibliographicData | null> {
+    const fromOps = await fetchOpsBibliographicData(patentNumber);
+    if (fromOps) return fromOps;
+    const fromGoogle = await fetchGooglePatentsBibliographicData(patentNumber);
+    if (fromGoogle) return fromGoogle;
+    const fromEspacenetUi = await fetchEspacenetUiBibliographicData(patentNumber);
+    if (fromEspacenetUi) return fromEspacenetUi;
+    const fromInpiScrape = await fetchInpiScrapeBibliographicData(patentNumber);
+    if (fromInpiScrape) return fromInpiScrape;
+    return null;
 }
 
 async function processNextOpsBibliographicJob() {
@@ -1073,14 +1186,14 @@ async function processNextOpsBibliographicJob() {
         });
 
         try {
-            const biblio = await fetchOpsBibliographicData(job.patent_number);
+            const biblio = await fetchBibliographicDataWithFallbacks(job.patent_number);
             if (!biblio) {
                 const recentIndexing = isRecentPatentForIndexing(job.patent_number);
                 const status = recentIndexing ? 'waiting_indexing' : 'not_found';
                 const biblioStatus = recentIndexing ? 'pending' : 'not_found';
                 const errorText = recentIndexing
-                    ? `Dados bibliográficos ainda não indexados no OPS para ${job.patent_number}`
-                    : `Dados bibliográficos não encontrados no OPS para ${job.patent_number}`;
+                    ? `Dados bibliográficos ainda não indexados nas fontes para ${job.patent_number}`
+                    : `Dados bibliográficos não encontrados nas fontes para ${job.patent_number}`;
                 await prisma.opsBibliographicJob.update({
                     where: { id: job.id },
                     data: {
@@ -1110,7 +1223,7 @@ async function processNextOpsBibliographicJob() {
                     ops_inventor: biblio.inventor || null,
                     ops_ipc: biblio.ipc || null,
                     ops_publication_date: biblio.publicationDate || null,
-                    ops_error: null,
+                    ops_error: biblio.source ? `source=${biblio.source}` : null,
                     ops_last_sync_at: new Date()
                 }
             });

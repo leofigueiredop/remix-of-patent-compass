@@ -114,6 +114,7 @@ function statusBadge(status: string) {
   if (status === "completed") return <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20">Sucesso</Badge>;
   if (status === "skipped_sigilo") return <Badge variant="outline">Sigilo</Badge>;
   if (status === "not_found") return <Badge variant="destructive">Sem Documento</Badge>;
+  if (status === "waiting_indexing") return <Badge variant="outline">Aguardando Indexação</Badge>;
   if (status === "failed") return <Badge variant="destructive">Erro</Badge>;
   return <Badge variant="secondary">{status}</Badge>;
 }

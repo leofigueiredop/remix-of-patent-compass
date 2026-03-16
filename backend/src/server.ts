@@ -432,6 +432,20 @@ function buildStorageAssets(publicationNumber: string) {
     };
 }
 
+function normalizePatentForWeb(publicationNumber?: string): string {
+    return (publicationNumber || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+}
+
+function buildGooglePatentsUrl(publicationNumber?: string): string {
+    const normalized = normalizePatentForWeb(publicationNumber);
+    return normalized ? `https://patents.google.com/patent/${normalized}/en` : '';
+}
+
+function buildEspacenetUiUrl(publicationNumber?: string): string {
+    const normalized = normalizePatentForWeb(publicationNumber);
+    return normalized ? `https://worldwide.espacenet.com/patent/search/publication/${normalized}` : '';
+}
+
 async function searchLocalPatentBase(input: LocalPatentSearchInput): Promise<{
     results: any[];
     total: number;
@@ -527,6 +541,8 @@ async function searchLocalPatentBase(input: LocalPatentSearchInput): Promise<{
             status: patent.status || '',
             cod_pedido: patent.cod_pedido,
             inpiUrl: buildInpiDetailUrl(patent.cod_pedido, publicationNumber),
+            googlePatentsUrl: buildGooglePatentsUrl(publicationNumber),
+            espacenetUrl: buildEspacenetUiUrl(publicationNumber),
             figures: downloadable ? [buildStorageAssetPath(publicationNumber, 'first'), buildStorageAssetPath(publicationNumber, 'drawings')] : [],
             storage: {
                 hasStoredDocument: downloadable,
@@ -2483,6 +2499,8 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
         publications,
         scraping_status: dbData.scraping_jobs[0]?.status || 'available_for_queue',
         inpiUrl: buildInpiDetailUrl(codPedido, publicationNumber),
+        googlePatentsUrl: buildGooglePatentsUrl(publicationNumber),
+        espacenetUrl: buildEspacenetUiUrl(publicationNumber),
         figures: hasStoredDocument ? [buildStorageAssetPath(publicationNumber, 'first'), buildStorageAssetPath(publicationNumber, 'drawings')] : [],
         storage: hasStoredDocument
             ? {

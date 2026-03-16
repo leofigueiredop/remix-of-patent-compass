@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { Loader2, Download, ExternalLink, FileX } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -48,6 +48,8 @@ export interface PatentDocumentData {
   status?: string;
   figures?: string[];
   inpiUrl?: string;
+  googlePatentsUrl?: string;
+  espacenetUrl?: string;
   storage?: {
     hasStoredDocument?: boolean;
     fullDocumentPath?: string;
@@ -73,6 +75,7 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
   const [loadingTranslation, setLoadingTranslation] = useState(false);
   const [translatedText, setTranslatedText] = useState("");
   const [translationError, setTranslationError] = useState("");
+  const detailsRequestKeyRef = useRef("");
 
   useEffect(() => {
     return () => {
@@ -87,6 +90,7 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
       setTranslatedText("");
       setTranslationError("");
       setLoadingTranslation(false);
+      detailsRequestKeyRef.current = "";
       return;
     }
     setTranslatedText("");
@@ -183,23 +187,21 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
 
   useEffect(() => {
     let active = true;
-
     const loadDetails = async () => {
       if (!open || !patent) return;
-      if (patent.source !== "INPI") {
+      if (patent.source !== "INPI" || patent.storage?.hasStoredDocument) {
         setDetailedData(patent);
         return;
       }
-
+      const codPedidoMatch = patent.url.match(/CodPedido=(\d+)/);
+      const codPedido = patent.cod_pedido || (codPedidoMatch ? codPedidoMatch[1] : patent.publicationNumber);
+      const requestKey = `${codPedido}-${patent.publicationNumber}`;
+      if (detailsRequestKeyRef.current === requestKey) return;
+      detailsRequestKeyRef.current = requestKey;
       setLoadingDetails(true);
       try {
-        const codPedidoMatch = patent.url.match(/CodPedido=(\d+)/);
-        const codPedido = codPedidoMatch ? codPedidoMatch[1] : patent.publicationNumber;
-        
-        const response = await axios.get(`${API_URL}/search/inpi/detail/${codPedido}`);
+        const response = await axios.get(`${API_URL}/search/inpi/detail/${encodeURIComponent(codPedido)}`);
         if (!active) return;
-        
-        // Map backend fields to frontend interface
         const data = response.data;
         setDetailedData({
           ...patent,
@@ -212,6 +214,8 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
           status: data.status || patent.status,
           figures: Array.isArray(data.figures) ? data.figures : patent.figures,
           inpiUrl: data.inpiUrl || patent.inpiUrl,
+          googlePatentsUrl: data.googlePatentsUrl || patent.googlePatentsUrl,
+          espacenetUrl: data.espacenetUrl || patent.espacenetUrl,
           storage: data.storage || patent.storage,
           publications: data.publications,
           petitions: data.petitions,
@@ -220,14 +224,19 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
         });
       } catch (err) {
         console.error("Failed to load details:", err);
-        setDetailedData(patent);
+        if (active) setDetailedData(patent);
       } finally {
         if (active) setLoadingDetails(false);
       }
     };
-
     void loadDetails();
+    return () => {
+      active = false;
+    };
+  }, [open, patent]);
 
+  useEffect(() => {
+    let active = true;
     const loadPdf = async () => {
       if (!open) return;
       const targetUrl = viewerMode === "doc"
@@ -573,6 +582,30 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
                   <ExternalLink className="w-3.5 h-3.5" />
                   Fonte original
                 </Button>
+                {(detailedData?.googlePatentsUrl || patent.googlePatentsUrl) && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => window.open(detailedData?.googlePatentsUrl || patent.googlePatentsUrl, "_blank", "noopener,noreferrer")}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Google Patents
+                  </Button>
+                )}
+                {(detailedData?.espacenetUrl || patent.espacenetUrl) && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => window.open(detailedData?.espacenetUrl || patent.espacenetUrl, "_blank", "noopener,noreferrer")}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Espacenet
+                  </Button>
+                )}
                 {patent.source !== "INPI" && (
                   <Button
                     type="button"
