@@ -38,7 +38,24 @@ const execAsync = promisify(exec);
 const fastify = Fastify({ logger: true });
 // const prisma = new PrismaClient(); // Removed, already imported from './db' oben.
 
-fastify.register(cors, { origin: '*' });
+const corsAllowedOrigins = new Set(
+    (process.env.CORS_ORIGINS || 'https://patent-scope.seafeetlabs.tech,http://localhost:8080,http://localhost:5173')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+);
+
+fastify.register(cors, {
+    origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        if (corsAllowedOrigins.has(origin)) return callback(null, true);
+        return callback(new Error('Origin not allowed by CORS'), false);
+    },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+    maxAge: 86400
+});
 fastify.register(multipart);
 fastify.register(jwt, { secret: process.env.JWT_SECRET || 'patent-scope-secret-change-me' });
 
@@ -147,16 +164,16 @@ const dbWriteQueue = new AsyncQueue(120);
 const prismaAny = prisma as any;
 
 async function ensureMonitoringTables() {
-    await prisma.$executeRawUnsafe(`
-        create table if not exists monitoring_attorneys (
+    const statements = [
+        `create table if not exists monitoring_attorneys (
             id text primary key,
             name text not null unique,
             active boolean not null default true,
             created_at timestamptz not null default now(),
             updated_at timestamptz not null default now()
-        );
-        create index if not exists idx_monitoring_attorneys_active on monitoring_attorneys(active);
-        create table if not exists monitored_inpi_patents (
+        )`,
+        `create index if not exists idx_monitoring_attorneys_active on monitoring_attorneys(active)`,
+        `create table if not exists monitored_inpi_patents (
             id text primary key,
             patent_number text not null unique,
             patent_id text null,
@@ -167,10 +184,10 @@ async function ensureMonitoringTables() {
             created_at timestamptz not null default now(),
             updated_at timestamptz not null default now(),
             last_seen_at timestamptz null
-        );
-        create index if not exists idx_monitored_inpi_patents_active on monitored_inpi_patents(active);
-        create index if not exists idx_monitored_inpi_patents_patent_number on monitored_inpi_patents(patent_number);
-        create table if not exists monitoring_alerts (
+        )`,
+        `create index if not exists idx_monitored_inpi_patents_active on monitored_inpi_patents(active)`,
+        `create index if not exists idx_monitored_inpi_patents_patent_number on monitored_inpi_patents(patent_number)`,
+        `create table if not exists monitoring_alerts (
             id text primary key,
             monitored_patent_id text not null references monitored_inpi_patents(id) on delete cascade,
             alert_key text not null unique,
@@ -185,10 +202,13 @@ async function ensureMonitoringTables() {
             is_read boolean not null default false,
             created_at timestamptz not null default now(),
             updated_at timestamptz not null default now()
-        );
-        create index if not exists idx_monitoring_alerts_unread on monitoring_alerts(is_read);
-        create index if not exists idx_monitoring_alerts_monitored_patent on monitoring_alerts(monitored_patent_id);
-    `);
+        )`,
+        `create index if not exists idx_monitoring_alerts_unread on monitoring_alerts(is_read)`,
+        `create index if not exists idx_monitoring_alerts_monitored_patent on monitoring_alerts(monitored_patent_id)`
+    ];
+    for (const sql of statements) {
+        await prisma.$executeRawUnsafe(sql);
+    }
 }
 
 function normalizeText(value?: string): string {
@@ -2451,48 +2471,7 @@ const start = async () => {
     try {
         const startupLog = `/tmp/server_startup.log`;
         fs.writeFileSync(startupLog, `Server starting at ${new Date().toISOString()} with PID ${process.pid}\n`);
-        await prisma.$executeRawUnsafe(`
-            create table if not exists monitoring_attorneys (
-                id text primary key,
-                name text not null unique,
-                active boolean not null default true,
-                created_at timestamptz not null default now(),
-                updated_at timestamptz not null default now()
-            );
-            create index if not exists idx_monitoring_attorneys_active on monitoring_attorneys(active);
-            create table if not exists monitored_inpi_patents (
-                id text primary key,
-                patent_number text not null unique,
-                patent_id text null,
-                source text not null default 'manual',
-                matched_attorney text null,
-                active boolean not null default true,
-                blocked_by_user boolean not null default false,
-                created_at timestamptz not null default now(),
-                updated_at timestamptz not null default now(),
-                last_seen_at timestamptz null
-            );
-            create index if not exists idx_monitored_inpi_patents_active on monitored_inpi_patents(active);
-            create index if not exists idx_monitored_inpi_patents_patent_number on monitored_inpi_patents(patent_number);
-            create table if not exists monitoring_alerts (
-                id text primary key,
-                monitored_patent_id text not null references monitored_inpi_patents(id) on delete cascade,
-                alert_key text not null unique,
-                patent_number text not null,
-                rpi_number text not null,
-                rpi_date timestamptz not null,
-                despacho_code text null,
-                title text null,
-                complement text null,
-                severity text not null default 'low',
-                deadline timestamptz null,
-                is_read boolean not null default false,
-                created_at timestamptz not null default now(),
-                updated_at timestamptz not null default now()
-            );
-            create index if not exists idx_monitoring_alerts_unread on monitoring_alerts(is_read);
-            create index if not exists idx_monitoring_alerts_monitored_patent on monitoring_alerts(monitored_patent_id);
-        `);
+        await ensureMonitoringTables();
 
         // ─── STARTUP ──────────────────────────────────────────────────
         await fastify.listen({ port: parseInt(process.env.PORT || '3001'), host: '0.0.0.0' });
