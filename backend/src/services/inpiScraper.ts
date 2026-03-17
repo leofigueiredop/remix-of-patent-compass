@@ -114,6 +114,66 @@ async function ensureSessionPage(): Promise<Page> {
     return sharedPage;
 }
 
+async function searchAndOpenPatentDetail(page: Page, codPedido: string) {
+    const searchUrl = 'https://busca.inpi.gov.br/pePI/jsp/patentes/PatenteSearchBasico.jsp';
+    await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+    const normalized = codPedido.toUpperCase().replace(/[^0-9A-Z]/g, '');
+    const searchPrepared = await page.evaluate((target) => {
+        const normalize = (value: string) => value.toUpperCase().replace(/[^0-9A-Z]/g, '');
+        const inputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type])')) as HTMLInputElement[];
+        const input = inputs.find((item) => {
+            const key = `${item.name || ''} ${(item.id || '')} ${(item.placeholder || '')}`.toLowerCase();
+            return key.includes('pedido') || key.includes('patente') || key.includes('processo') || key.includes('numero');
+        }) || inputs[0];
+        if (!input) return { ok: false, selector: null };
+        input.focus();
+        input.value = target;
+        const form = input.form || (document.querySelector('form') as HTMLFormElement | null);
+        if (!form) return { ok: false, selector: input.name || input.id || '(anon)' };
+        const submit = form.querySelector('input[type="submit"], button[type="submit"], input[name="botao"]') as HTMLElement | null;
+        if (submit) {
+            submit.click();
+        } else {
+            form.submit();
+        }
+        return { ok: true, selector: input.name || input.id || '(anon)' };
+    }, codPedido);
+
+    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }).catch(() => undefined);
+
+    const resultLink = await page.evaluate((target) => {
+        const normalize = (value: string) => value.toUpperCase().replace(/[^0-9A-Z]/g, '');
+        const links = Array.from(document.querySelectorAll('a')) as HTMLAnchorElement[];
+        const ranked = links
+            .map((link) => {
+                const href = link.getAttribute('href') || '';
+                const text = (link.textContent || '').trim();
+                const hrefNorm = normalize(href);
+                const textNorm = normalize(text);
+                const score = (href.includes('CodPedido=') ? 2 : 0)
+                    + (hrefNorm.includes(target) ? 4 : 0)
+                    + (textNorm.includes(target) ? 3 : 0);
+                return { href, text, score };
+            })
+            .filter((item) => item.score > 0)
+            .sort((a, b) => b.score - a.score);
+        if (!ranked.length) return null;
+        const picked = ranked[0];
+        const hit = links.find((link) => (link.getAttribute('href') || '') === picked.href && (link.textContent || '').trim() === picked.text);
+        if (hit) hit.click();
+        return picked;
+    }, normalized);
+
+    if (resultLink) {
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }).catch(() => undefined);
+        return { searchPrepared, resultLinkClicked: true, resultLink };
+    }
+
+    const detailUrl = `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${codPedido}`;
+    await page.goto(detailUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+    return { searchPrepared, resultLinkClicked: false, resultLink: null };
+}
+
 async function navigatePatentSearch(page: Page, codPedido: string) {
     await page.goto('https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login', { waitUntil: 'networkidle2', timeout: 60000 });
     await page.evaluate(() => {
@@ -125,23 +185,7 @@ async function navigatePatentSearch(page: Page, codPedido: string) {
         if (patenteLink) (patenteLink as HTMLAnchorElement).click();
     });
     await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }).catch(() => undefined);
-    const hasSearchInput = await page.evaluate(() => {
-        const input = document.querySelector('input[name*="Pedido"], input[name*="pedido"], input[name*="numero"], input[type="text"]') as HTMLInputElement | null;
-        if (!input) return false;
-        input.focus();
-        input.value = '';
-        input.value = '';
-        return true;
-    });
-    if (hasSearchInput) {
-        await page.keyboard.type(codPedido);
-        await Promise.all([
-            page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => undefined),
-            page.keyboard.press('Enter')
-        ]);
-    }
-    const detailUrl = `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${codPedido}`;
-    await page.goto(detailUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+    await searchAndOpenPatentDetail(page, codPedido);
 }
 
 export async function debugInpiScrapeSteps(codPedido: string) {
@@ -182,8 +226,8 @@ export async function debugInpiScrapeSteps(codPedido: string) {
             push('submit_login', { url: page.url(), title: await page.title() });
         }
 
-        const detailUrl = `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${codPedido}`;
-        await page.goto(detailUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+        const searchResult = await searchAndOpenPatentDetail(page, codPedido);
+        push('search_and_click_result', searchResult as Record<string, unknown>);
         push('open_detail', { url: page.url(), title: await page.title() });
 
         const html = await page.content();
