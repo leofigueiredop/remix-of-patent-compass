@@ -84,29 +84,33 @@ export async function scrapeInpiPatent(codPedido: string) {
         const filing_date = extractValue('Data do Depósito:');
         const ipc_codes = extractValue('Classificação IPC:');
         const status = extractValue('Situação:') || extractValue('Despacho:');
+        const hasBibliographicData = Boolean(title || applicant || inventors || ipc_codes || filing_date);
+        if (!hasBibliographicData) {
+            throw new Error(`INPI bibliographic data not found for ${codPedido}`);
+        }
 
         // Upsert Main Patent Record
         await prisma.inpiPatent.upsert({
             where: { cod_pedido: codPedido },
             update: {
-                title,
-                abstract,
-                applicant,
-                inventors,
-                filing_date,
-                ipc_codes,
-                status,
+                title: title || undefined,
+                abstract: abstract || undefined,
+                applicant: applicant || undefined,
+                inventors: inventors || undefined,
+                filing_date: filing_date || undefined,
+                ipc_codes: ipc_codes || undefined,
+                status: status || undefined,
                 updated_at: new Date()
             },
             create: {
                 cod_pedido: codPedido,
-                title,
-                abstract,
-                applicant,
-                inventors,
-                filing_date,
-                ipc_codes,
-                status
+                title: title || '',
+                abstract: abstract || '',
+                applicant: applicant || '',
+                inventors: inventors || '',
+                filing_date: filing_date || '',
+                ipc_codes: ipc_codes || '',
+                status: status || ''
             }
         });
 
