@@ -1528,7 +1528,11 @@ async function fetchInpiScrapeBibliographicData(patentNumber: string): Promise<O
             source: 'inpi_scrape'
         };
     } catch (error) {
-        opsJobLog({ status: 'inpi_scrape_error', patentNumber, error: serializeUnknownError(error) });
+        const message = serializeUnknownError(error);
+        if (message.includes('INPI_MAINTENANCE')) {
+            throw new Error('INPI_MAINTENANCE');
+        }
+        opsJobLog({ status: 'inpi_scrape_error', patentNumber, error: message });
         return null;
     }
 }
@@ -1578,12 +1582,19 @@ async function fetchOpsBibliographicData(patentNumber: string): Promise<OpsBibli
 }
 
 async function fetchBibliographicDataWithFallbacks(patentNumber: string, attemptNumber = 1): Promise<OpsBibliographicData | null> {
+    let inpiMaintenance = false;
     if (BIGQUERY_FIRST_ENABLED || attemptNumber >= 2) {
         const fromBigQuery = await fetchBigQueryBibliographicData(patentNumber);
         if (fromBigQuery) return mapBigQueryToBiblio(patentNumber, fromBigQuery);
     }
     if (INPI_SCRAPE_FIRST_ENABLED && patentNumber.startsWith('BR')) {
-        const fromInpiScrape = await fetchInpiScrapeBibliographicData(patentNumber);
+        let fromInpiScrape: OpsBibliographicData | null = null;
+        try {
+            fromInpiScrape = await fetchInpiScrapeBibliographicData(patentNumber);
+        } catch (error) {
+            if (serializeUnknownError(error).includes('INPI_MAINTENANCE')) inpiMaintenance = true;
+            else throw error;
+        }
         if (fromInpiScrape) return fromInpiScrape;
     }
     const fromOps = await fetchOpsBibliographicData(patentNumber);
@@ -1597,8 +1608,17 @@ async function fetchBibliographicDataWithFallbacks(patentNumber: string, attempt
     const fromEspacenetUi = await fetchEspacenetUiBibliographicData(patentNumber);
     if (fromEspacenetUi) return fromEspacenetUi;
     if (!INPI_SCRAPE_FIRST_ENABLED || !patentNumber.startsWith('BR')) {
-        const fromInpiScrape = await fetchInpiScrapeBibliographicData(patentNumber);
+        let fromInpiScrape: OpsBibliographicData | null = null;
+        try {
+            fromInpiScrape = await fetchInpiScrapeBibliographicData(patentNumber);
+        } catch (error) {
+            if (serializeUnknownError(error).includes('INPI_MAINTENANCE')) inpiMaintenance = true;
+            else throw error;
+        }
         if (fromInpiScrape) return fromInpiScrape;
+    }
+    if (inpiMaintenance) {
+        throw new Error('INPI_MAINTENANCE');
     }
     return null;
 }

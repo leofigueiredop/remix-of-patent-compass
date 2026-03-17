@@ -24,6 +24,46 @@ if (!fs.existsSync(DOWNLOAD_DIR)) {
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
+function normalizeFlat(value?: string) {
+    return (value || '').replace(/\s+/g, ' ').trim();
+}
+
+function parseBrDate(value?: string): Date | null {
+    const text = normalizeFlat(value);
+    const match = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (!match) return null;
+    const dt = new Date(Date.UTC(Number(match[3]), Number(match[2]) - 1, Number(match[1])));
+    return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function classifyPatentStatus(despachoCode?: string, complement?: string) {
+    const code = normalizeFlat(despachoCode).toLowerCase();
+    const text = normalizeFlat(complement).toLowerCase();
+    const merged = `${code} ${text}`;
+    if (merged.includes('indefer')) return 'indeferida';
+    if (merged.includes('conced')) return 'concedida';
+    if (merged.includes('arquivad')) return 'arquivada';
+    if (merged.includes('exig')) return 'com_exigencia';
+    if (merged.includes('defer')) return 'deferida';
+    return 'em_andamento';
+}
+
+function rankPublicationEvent(item: { rpi?: string; date?: string }) {
+    const dateWeight = parseBrDate(item.date)?.getTime() || 0;
+    const rpiWeight = Number((item.rpi || '').replace(/[^\d]/g, '')) || 0;
+    return dateWeight * 100000 + rpiWeight;
+}
+
+function isInpiMaintenancePage(html?: string, title?: string) {
+    const text = normalizeFlat(`${title || ''} ${html || ''}`).toLowerCase();
+    if (!text) return false;
+    return text.includes('manutenção')
+        || text.includes('manutencao')
+        || text.includes('temporariamente indispon')
+        || text.includes('serviço indispon')
+        || text.includes('servico indispon');
+}
+
 async function initBrowser() {
     return await puppeteer.launch({
         headless: true,
@@ -231,6 +271,10 @@ export async function debugInpiScrapeSteps(codPedido: string) {
         push('open_detail', { url: page.url(), title: await page.title() });
 
         const html = await page.content();
+        if (isInpiMaintenancePage(html, await page.title())) {
+            push('maintenance_detected', { url: page.url() });
+            return { ok: false, codPedido, maintenance: true, steps };
+        }
         const $ = cheerio.load(html);
         const extractValue = (label: string) => {
             const td = $(`font:contains("${label}")`).closest('td').next('td');
@@ -238,17 +282,31 @@ export async function debugInpiScrapeSteps(codPedido: string) {
         };
 
         const fields = {
+            pedido: extractValue('Nº do Pedido:'),
+            publicationDate: extractValue('Data da Publicação:'),
+            concessionDate: extractValue('Data da Concessão:'),
+            attorney: extractValue('Nome do Procurador:') || extractValue('Procurador:'),
             title: extractValue('Título:'),
             abstract: extractValue('Resumo:'),
             applicant: extractValue('Depositante:'),
             inventor: extractValue('Inventor:'),
             filingDate: extractValue('Data do Depósito:'),
             ipc: extractValue('Classificação IPC:'),
+            cpc: extractValue('Classificação CPC:'),
+            originalNumber: extractValue('Número Original:'),
             status: extractValue('Situação:') || extractValue('Despacho:')
         };
         push('extract_fields', {
             lengths: Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, (value || '').length])),
             hasAny: Object.values(fields).some(Boolean),
+            preview: {
+                pedido: fields.pedido,
+                filingDate: fields.filingDate,
+                publicationDate: fields.publicationDate,
+                attorney: fields.attorney,
+                title: fields.title ? fields.title.slice(0, 120) : '',
+                applicant: fields.applicant
+            },
             labelsPresent: {
                 titulo: html.includes('Título:'),
                 resumo: html.includes('Resumo:'),
@@ -273,47 +331,62 @@ export async function scrapeInpiPatent(codPedido: string) {
         const page = await ensureSessionPage();
         await navigatePatentSearch(page, codPedido);
         const html = await page.content();
+        if (isInpiMaintenancePage(html, await page.title())) {
+            throw new Error('INPI_MAINTENANCE');
+        }
         const $ = cheerio.load(html);
 
         // Extract Header Data
         const extractValue = (label: string) => {
             const td = $(`font:contains("${label}")`).closest('td').next('td');
-            return td.text().replace(/\s+/g, ' ').trim();
+            return normalizeFlat(td.text());
         };
 
+        const numero_publicacao = extractValue('Nº do Pedido:');
+        const publication_date = extractValue('Data da Publicação:');
+        const concession_date = extractValue('Data da Concessão:');
+        const attorney_name = extractValue('Nome do Procurador:') || extractValue('Procurador:');
         const title = extractValue('Título:');
         const abstract = extractValue('Resumo:');
         const applicant = extractValue('Depositante:');
         const inventors = extractValue('Inventor:');
         const filing_date = extractValue('Data do Depósito:');
         const ipc_codes = extractValue('Classificação IPC:');
+        const cpc_codes = extractValue('Classificação CPC:');
+        const original_number = extractValue('Número Original:');
         const status = extractValue('Situação:') || extractValue('Despacho:');
-        const hasBibliographicData = Boolean(title || applicant || inventors || ipc_codes || filing_date);
+        const hasBibliographicData = Boolean(title || applicant || inventors || ipc_codes || cpc_codes || filing_date || numero_publicacao || attorney_name);
         if (!hasBibliographicData) {
             throw new Error(`INPI bibliographic data not found for ${codPedido}`);
         }
 
+        const mergedClassifications = [ipc_codes, cpc_codes ? `CPC ${cpc_codes}` : ''].filter(Boolean).join(' | ');
+
         await prisma.inpiPatent.upsert({
             where: { cod_pedido: codPedido },
             update: {
+                numero_publicacao: numero_publicacao || undefined,
                 title: title || undefined,
                 abstract: abstract || undefined,
                 applicant: applicant || undefined,
                 inventors: inventors || undefined,
                 filing_date: filing_date || undefined,
-                ipc_codes: ipc_codes || undefined,
+                ipc_codes: mergedClassifications || undefined,
                 status: status || undefined,
+                last_event: [publication_date, concession_date, original_number, attorney_name ? `PROCURADOR ${attorney_name}` : ''].filter(Boolean).join(' | ') || undefined,
                 updated_at: new Date()
             },
             create: {
                 cod_pedido: codPedido,
+                numero_publicacao: numero_publicacao || '',
                 title: title || '',
                 abstract: abstract || '',
                 applicant: applicant || '',
                 inventors: inventors || '',
                 filing_date: filing_date || '',
-                ipc_codes: ipc_codes || '',
-                status: status || ''
+                ipc_codes: mergedClassifications || '',
+                status: status || '',
+                last_event: [publication_date, concession_date, original_number, attorney_name ? `PROCURADOR ${attorney_name}` : ''].filter(Boolean).join(' | ') || ''
             }
         });
 
@@ -363,30 +436,67 @@ export async function scrapeInpiPatent(codPedido: string) {
         }
 
         const publicationsTable = $('font:contains("Publicações")').closest('table').next('table');
+        const publicationEvents: Array<{ rpi: string; date: string; despacho_code: string; complement: string }> = [];
         if (publicationsTable.length) {
             const rows = publicationsTable.find('tr').slice(1);
             for (let i = 0; i < rows.length; i++) {
                 const cols = $(rows[i]).find('td');
                 if (cols.length >= 3) {
-                    const rpi = $(cols[0]).text().trim();
-                    const date = $(cols[1]).text().trim();
-                    const despacho_code = $(cols[2]).text().trim();
-                    const complement = $(cols[4]).text().trim();
-                    
+                    const rpi = normalizeFlat($(cols[0]).text());
+                    const date = normalizeFlat($(cols[1]).text());
+                    const despacho_code = normalizeFlat($(cols[2]).text());
+                    const complement = normalizeFlat($(cols[4]).text());
                     const pdfLink = $(cols[3]).find('a').attr('href');
-                    
-                    await prisma.inpiPublication.create({
-                        data: {
-                            patent_id: codPedido,
-                            rpi,
-                            date,
-                            despacho_code,
-                            complement,
-                            rpi_url: pdfLink
-                        }
+                    if (!rpi) continue;
+                    const existing = await prisma.inpiPublication.findFirst({
+                        where: { patent_id: codPedido, rpi, despacho_code, date, complement }
                     });
+                    const despacho_desc = classifyPatentStatus(despacho_code, complement);
+                    if (existing) {
+                        await prisma.inpiPublication.update({
+                            where: { id: existing.id },
+                            data: {
+                                despacho_desc,
+                                rpi_url: pdfLink || existing.rpi_url || undefined,
+                                patent_number: numero_publicacao || existing.patent_number || undefined,
+                                eligible_for_doc_download: Boolean(pdfLink)
+                            }
+                        });
+                    } else {
+                        await prisma.inpiPublication.create({
+                            data: {
+                                patent_id: codPedido,
+                                patent_number: numero_publicacao || null,
+                                rpi,
+                                date,
+                                despacho_code,
+                                despacho_desc,
+                                complement,
+                                eligible_for_doc_download: Boolean(pdfLink),
+                                rpi_url: pdfLink
+                            }
+                        });
+                    }
+                    publicationEvents.push({ rpi, date, despacho_code, complement });
                 }
             }
+        }
+
+        const latestPublication = publicationEvents.sort((a, b) => rankPublicationEvent(b) - rankPublicationEvent(a))[0];
+        if (latestPublication) {
+            const finalStatus = classifyPatentStatus(latestPublication.despacho_code, latestPublication.complement);
+            const lastEvent = [latestPublication.rpi, latestPublication.date, latestPublication.despacho_code, latestPublication.complement]
+                .filter(Boolean)
+                .join(' | ')
+                .slice(0, 1500);
+            await prisma.inpiPatent.update({
+                where: { cod_pedido: codPedido },
+                data: {
+                    status: finalStatus,
+                    last_rpi: latestPublication.rpi || undefined,
+                    last_event: [lastEvent, attorney_name ? `PROCURADOR ${attorney_name}` : ''].filter(Boolean).join(' | ').slice(0, 1800) || undefined
+                }
+            });
         }
 
         console.log(`Scrape completed for ${codPedido}`);
