@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RefreshCw, Clock, CheckCircle2, AlertCircle, FileDown, Files, PauseCircle, PlayCircle } from "lucide-react";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000").replace(/\/+$/, "");
 
 type RpiJob = {
   id: string;
@@ -98,6 +98,7 @@ type WorkerState = {
   opsRunning: boolean;
   bigQueryEnabled?: boolean;
   bigQueryProject?: string | null;
+  bigQueryFirstEnabled?: boolean;
 };
 
 const initialData: QueuePayload = {
@@ -504,7 +505,7 @@ export default function BackgroundWorkers() {
               Testar BigQuery
             </Button>
             <Badge variant={state.bigQueryEnabled ? "default" : "destructive"}>
-              BQ {state.bigQueryEnabled ? `ON ${state.bigQueryProject || ""}` : "OFF"}
+              BQ {state.bigQueryEnabled ? `ON ${state.bigQueryProject || ""} ${state.bigQueryFirstEnabled ? "(PRIORIDADE)" : ""}` : "OFF"}
             </Badge>
           </div>
         </div>

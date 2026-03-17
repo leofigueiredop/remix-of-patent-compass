@@ -5,7 +5,7 @@ import { exec } from 'child_process';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { createSign } from 'crypto';
+import { createSign, randomUUID } from 'crypto';
 import { CreateBucketCommand, HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { prisma } from '../db';
 
@@ -78,6 +78,31 @@ function normalizeInpiCodPedido(value?: string): string {
     const digits = extractDigits(text);
     if (digits.length >= 12) return `BR${digits}`;
     return text;
+}
+
+function normalizeMonitoringPatentKey(value?: string): string {
+    return String(value || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+}
+
+function parseBrDateToIso(value?: string): Date | null {
+    const text = normalizeText(value);
+    const match = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (!match) return null;
+    const dt = new Date(Date.UTC(Number(match[3]), Number(match[2]) - 1, Number(match[1]), 12, 0, 0));
+    return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function classifyMonitoringSeverity(dispatchCode?: string, title?: string, complement?: string): 'critical' | 'high' | 'medium' | 'low' {
+    const code = normalizeDispatchCode(dispatchCode);
+    if (code === '6.1' || code === '7.1') return 'critical';
+    const merged = `${normalizeText(title)} ${normalizeText(complement)}`.toLowerCase();
+    if (merged.includes('indefer') || merged.includes('arquivad') || merged.includes('caduc')) return 'high';
+    if (merged.includes('exig') || merged.includes('cumprimento')) return 'medium';
+    return 'low';
+}
+
+function buildMonitoringAlertKey(parts: Array<string | null | undefined>): string {
+    return parts.map((part) => normalizeText(part || '').toLowerCase().slice(0, 180)).join('|');
 }
 
 function truncateError(message: string): string {
@@ -953,6 +978,12 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
     const dataPublicacao = revista.attr('dataPublicacao') || revista.attr('data-publicacao') || '';
     const despachoNodes = revista.find('despacho').toArray();
     const bqCache = new Map<string, BigQueryBibliographicData | null>();
+    const monitoredAttorneyRows = await prisma.$queryRawUnsafe<any[]>(
+        `select name from monitoring_attorneys where active=true`
+    ).catch(() => []);
+    const monitoredAttorneys = (monitoredAttorneyRows || [])
+        .map((row: any) => normalizeText(row?.name).toLowerCase())
+        .filter(Boolean);
     let imported = 0;
 
     for (const node of despachoNodes) {
@@ -989,6 +1020,50 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
 
         const patentNumber = buildPatentNumberKey(numeroPublicacao || numeroRaw || codPedidoFromNumero);
         if (!patentNumber) continue;
+        const inferredPatentId = codPedidoFromNumero || patentNumber || null;
+        if (monitoredAttorneys.length > 0) {
+            const mergedAttorneyText = `${dispatchTitle || ''} ${complement || ''}`.toLowerCase();
+            const matchedAttorney = monitoredAttorneys.find((name) => mergedAttorneyText.includes(name));
+            if (matchedAttorney) {
+                const monitoringNumber = patentNumber || numeroPublicacao || codPedidoFromNumero || numeroRaw;
+                const monitoringId = normalizeMonitoringPatentKey(monitoringNumber);
+                if (monitoringId) {
+                    const currentRows = await prisma.$queryRawUnsafe<any[]>(
+                        `select id, blocked_by_user from monitored_inpi_patents where patent_number=$1 limit 1`,
+                        monitoringId
+                    ).catch(() => []);
+                    const existing = currentRows?.[0];
+                    if (existing?.id) {
+                        if (!existing.blocked_by_user) {
+                            await prisma.$executeRawUnsafe(
+                                `update monitored_inpi_patents
+                                 set active=true,
+                                     source='attorney_auto',
+                                     matched_attorney=$2,
+                                     patent_id=coalesce($3, patent_id),
+                                     updated_at=now(),
+                                     last_seen_at=now()
+                                 where id=$1`,
+                                existing.id,
+                                matchedAttorney,
+                                inferredPatentId
+                            ).catch(() => undefined);
+                        }
+                    } else {
+                        await prisma.$executeRawUnsafe(
+                            `insert into monitored_inpi_patents
+                             (id, patent_number, patent_id, source, matched_attorney, active, blocked_by_user, created_at, updated_at, last_seen_at)
+                             values ($1,$2,$3,'attorney_auto',$4,true,false,now(),now(),now())
+                             on conflict (patent_number) do nothing`,
+                            monitoringId,
+                            monitoringId,
+                            inferredPatentId,
+                            matchedAttorney
+                        ).catch(() => undefined);
+                    }
+                }
+            }
+        }
         const isDocumentEligible = isDocumentEligibleDispatch(dispatchCode);
         const hasXmlBiblio = hasBasicBibliographicData({
             title: inventionTitle || dispatchTitle,
@@ -1155,6 +1230,51 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
                     ops_last_sync_at: new Date()
                 }
             }).catch(() => undefined);
+        }
+
+        const monitoringRows = await prisma.$queryRawUnsafe<any[]>(
+            `select id, active
+             from monitored_inpi_patents
+             where patent_number=$1
+             limit 1`,
+            normalizeMonitoringPatentKey(patentNumber)
+        ).catch(() => []);
+        const monitored = monitoringRows?.[0];
+        if (monitored?.id && monitored?.active) {
+            const severity = classifyMonitoringSeverity(dispatchCode, dispatchTitle, complement);
+            const rpiDate = parseBrDateToIso(dataPublicacao) || new Date();
+            const deadline = severity === 'critical'
+                ? new Date(rpiDate.getTime() + (60 * 24 * 60 * 60 * 1000))
+                : null;
+            const alertKey = buildMonitoringAlertKey([
+                monitored.id,
+                String(rpiNumber),
+                dispatchCode,
+                dataPublicacao,
+                complement
+            ]);
+            await prisma.$executeRawUnsafe(
+                `insert into monitoring_alerts
+                 (id, monitored_patent_id, alert_key, patent_number, rpi_number, rpi_date, despacho_code, title, complement, severity, deadline, is_read, created_at, updated_at)
+                 values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false,now(),now())
+                 on conflict (alert_key) do update
+                 set severity=excluded.severity,
+                     deadline=excluded.deadline,
+                     title=excluded.title,
+                     complement=excluded.complement,
+                     updated_at=now()`,
+                randomUUID(),
+                monitored.id,
+                alertKey,
+                normalizeMonitoringPatentKey(patentNumber),
+                String(rpiNumber),
+                rpiDate,
+                dispatchCode || null,
+                dispatchTitle || null,
+                complement || null,
+                severity,
+                deadline
+            ).catch(() => undefined);
         }
 
         if (isDocumentEligible && patentId) {
@@ -1837,6 +1957,49 @@ async function processNextDocumentJob() {
                 });
                 return;
             }
+
+            const tryEspacenetPuppeteerFallback = async (reasonCode: string): Promise<boolean> => {
+                try {
+                    const module = await import('./espacenetScraper');
+                    if (!module?.downloadEspacenetOriginalDocument) return false;
+                    const pdf = await module.downloadEspacenetOriginalDocument(publicationNumber);
+                    if (!pdf || pdf.length < 1024) return false;
+                    const safeBase = publicationNumber.replace(/[^\w.-]/g, '_');
+                    const baseKey = `patent-docs/${safeBase}`;
+                    const fullKey = `${baseKey}/full_document.pdf`;
+                    await uploadPdfToS3(fullKey, pdf);
+                    await prisma.documentDownloadJob.update({
+                        where: { id: job.id },
+                        data: {
+                            status: 'completed',
+                            storage_key: fullKey,
+                            finished_at: new Date(),
+                            publication_number: publicationNumber,
+                            error: truncateError(`${reasonCode} source=espacenet_puppeteer`)
+                        }
+                    });
+                    documentJobLog({
+                        jobId: job.id,
+                        patentId: job.patent_id,
+                        publicationNumber,
+                        status: 'completed',
+                        code: `${reasonCode}_ESPACENET_PUPPETEER`,
+                        storageKey: fullKey
+                    });
+                    return true;
+                } catch (error) {
+                    documentJobLog({
+                        jobId: job.id,
+                        patentId: job.patent_id,
+                        publicationNumber,
+                        status: 'failed',
+                        code: `${reasonCode}_ESPACENET_PUPPETEER_FAILED`,
+                        detail: serializeUnknownError(error)
+                    });
+                    return false;
+                }
+            };
+
             const docdbId = await resolveDocdbId(publicationNumber);
             if (!docdbId) {
                 const publicationBiblio = await prismaAny.inpiPublication.findFirst({
@@ -1893,6 +2056,8 @@ async function processNextDocumentJob() {
                         }
                     }).catch(() => undefined);
                 }
+                const espacenetRecovered = await tryEspacenetPuppeteerFallback('DOC_DOCDB_MISSING');
+                if (espacenetRecovered) return;
                 const recentIndexing = isRecentPatentForIndexing(publicationNumber);
                 const status = recentIndexing ? 'waiting_indexing' : 'not_found';
                 const code = recentIndexing
@@ -1909,6 +2074,8 @@ async function processNextDocumentJob() {
             const instances = await fetchDocumentInstances(docdbId);
             const fullDoc = instances.find((item) => item['@desc'] === 'FullDocument' && typeof item['@link'] === 'string');
             if (!fullDoc?.['@link']) {
+                const espacenetRecovered = await tryEspacenetPuppeteerFallback('DOC_FULLDOCUMENT_MISSING');
+                if (espacenetRecovered) return;
                 const errorText = `DOC_FULLDOCUMENT_NOT_AVAILABLE docdb=${docdbId}`;
                 await prisma.documentDownloadJob.update({
                     where: { id: job.id },

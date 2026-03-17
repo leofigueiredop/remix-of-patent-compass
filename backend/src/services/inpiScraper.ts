@@ -12,6 +12,10 @@ const INPI_PASSWORD = process.env.INPI_PASSWORD || '';
 const DOWNLOAD_DIR = '/tmp/inpi_pdfs';
 const COOKIE_PATH = '/tmp/inpi_session_cookies.json';
 const INPI_SESSION_TTL_MS = Math.max(5 * 60_000, parseInt(process.env.INPI_SESSION_TTL_MINUTES || '30', 10) * 60_000);
+const INPI_HUMANIZE_MIN_MS = Math.max(400, parseInt(process.env.INPI_HUMANIZE_MIN_MS || '900', 10));
+const INPI_HUMANIZE_MAX_MS = Math.max(INPI_HUMANIZE_MIN_MS + 150, parseInt(process.env.INPI_HUMANIZE_MAX_MS || '2600', 10));
+const INPI_HUMANIZE_TYPING_DELAY_MIN = Math.max(12, parseInt(process.env.INPI_HUMANIZE_TYPING_DELAY_MIN || '24', 10));
+const INPI_HUMANIZE_TYPING_DELAY_MAX = Math.max(INPI_HUMANIZE_TYPING_DELAY_MIN, parseInt(process.env.INPI_HUMANIZE_TYPING_DELAY_MAX || '72', 10));
 
 let sharedBrowser: Browser | null = null;
 let sharedPage: Page | null = null;
@@ -23,6 +27,24 @@ if (!fs.existsSync(DOWNLOAD_DIR)) {
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+function randomInt(min: number, max: number) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+async function humanPause(multiplier = 1) {
+    const waitMs = Math.round(randomInt(INPI_HUMANIZE_MIN_MS, INPI_HUMANIZE_MAX_MS) * multiplier);
+    await sleep(waitMs);
+}
+
+function humanTypingDelay() {
+    return randomInt(INPI_HUMANIZE_TYPING_DELAY_MIN, INPI_HUMANIZE_TYPING_DELAY_MAX);
+}
+
+async function humanScroll(page: Page) {
+    await page.evaluate((delta) => window.scrollBy(0, delta), randomInt(180, 520));
+    await humanPause(0.45);
+}
 
 function normalizeFlat(value?: string) {
     return (value || '').replace(/\s+/g, ' ').trim();
@@ -105,6 +127,7 @@ async function persistCookies(page: Page) {
 
 async function ensureLoggedIn(page: Page) {
     await page.goto('https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login', { waitUntil: 'networkidle2', timeout: 60000 });
+    await humanPause(0.8);
     let hasLoginInput = await page.$('input[name="T_Login"]');
     if (!hasLoginInput) {
         await page.evaluate(() => {
@@ -113,16 +136,21 @@ async function ensureLoggedIn(page: Page) {
             if (loginLink) (loginLink as HTMLAnchorElement).click();
         });
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => undefined);
+        await humanPause(0.9);
         hasLoginInput = await page.$('input[name="T_Login"]');
     }
     if (hasLoginInput && INPI_USER && INPI_PASSWORD) {
         console.log(`Logging in as ${INPI_USER}...`);
-        await page.type('input[name="T_Login"]', INPI_USER, { delay: 20 });
-        await page.type('input[name="T_Senha"]', INPI_PASSWORD, { delay: 20 });
+        await humanPause(0.5);
+        await page.type('input[name="T_Login"]', INPI_USER, { delay: humanTypingDelay() });
+        await humanPause(0.35);
+        await page.type('input[name="T_Senha"]', INPI_PASSWORD, { delay: humanTypingDelay() });
+        await humanPause(0.65);
         await Promise.all([
             page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }),
             page.click('input[type="submit"]')
         ]);
+        await humanPause(1.2);
     } else if (hasLoginInput) {
         await page.evaluate(() => {
             const links = Array.from(document.querySelectorAll('a'));
@@ -130,6 +158,7 @@ async function ensureLoggedIn(page: Page) {
             if (continuarLink) (continuarLink as HTMLAnchorElement).click();
         });
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }).catch(() => undefined);
+        await humanPause(1.1);
     }
     await persistCookies(page).catch(() => undefined);
 }
@@ -157,6 +186,8 @@ async function ensureSessionPage(): Promise<Page> {
 async function searchAndOpenPatentDetail(page: Page, codPedido: string) {
     const searchUrl = 'https://busca.inpi.gov.br/pePI/jsp/patentes/PatenteSearchBasico.jsp';
     await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+    await humanPause(1.2);
+    await humanScroll(page);
     const normalized = codPedido.toUpperCase().replace(/[^0-9A-Z]/g, '');
     const searchPrepared = await page.evaluate((target) => {
         const normalize = (value: string) => value.toUpperCase().replace(/[^0-9A-Z]/g, '');
@@ -180,6 +211,8 @@ async function searchAndOpenPatentDetail(page: Page, codPedido: string) {
     }, codPedido);
 
     await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }).catch(() => undefined);
+    await humanPause(1.3);
+    await humanScroll(page);
 
     const resultLink = await page.evaluate((target) => {
         const normalize = (value: string) => value.toUpperCase().replace(/[^0-9A-Z]/g, '');
@@ -206,11 +239,14 @@ async function searchAndOpenPatentDetail(page: Page, codPedido: string) {
 
     if (resultLink) {
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }).catch(() => undefined);
+        await humanPause(1.15);
+        await humanScroll(page);
         return { searchPrepared, resultLinkClicked: true, resultLink };
     }
 
     const detailUrl = `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${codPedido}`;
     await page.goto(detailUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+    await humanPause(1.2);
     return { searchPrepared, resultLinkClicked: false, resultLink: null };
 }
 

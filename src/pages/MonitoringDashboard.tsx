@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Calendar } from "@/components/ui/calendar";
 import { AlertCircle, BellRing, CalendarClock, RefreshCw, ShieldAlert } from "lucide-react";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000").replace(/\/+$/, "");
 
 type DashboardSummary = {
   kpis: {
@@ -108,6 +108,13 @@ export default function MonitoringDashboard() {
           <Card><CardHeader className="pb-2"><CardDescription>Concessões (30 dias)</CardDescription><CardTitle>{summary.kpis.grantsLast30d}</CardTitle></CardHeader></Card>
           <Card><CardHeader className="pb-2"><CardDescription>Comunicados (7 dias)</CardDescription><CardTitle>{summary.kpis.communicationsLast7d}</CardTitle></CardHeader></Card>
         </div>
+        {summary.kpis.monitoredPatents === 0 && (
+          <Card>
+            <CardContent className="py-3 text-sm text-muted-foreground">
+              Nenhuma patente monitorada ativa. Cadastre em Monitoramento {"\u003e"} Patentes ou por procurador em Configurações.
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
           <Card className="xl:col-span-2">

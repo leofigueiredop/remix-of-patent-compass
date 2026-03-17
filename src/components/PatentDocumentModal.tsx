@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { Loader2, Download, ExternalLink, FileX } from "lucide-react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000").replace(/\/+$/, "");
 
 export interface InpiPublication {
   id: string;
@@ -60,6 +60,16 @@ export interface PatentDocumentData {
   petitions?: InpiPetition[];
   annuities?: InpiAnnuity[];
   scraping_status?: string;
+  document_status?: string;
+  document_error?: string | null;
+  doc_jobs?: Array<{
+    id: string;
+    publication_number?: string;
+    status?: string;
+    attempts?: number;
+    error?: string | null;
+    updated_at?: string;
+  }>;
 }
 
 interface PatentDocumentModalProps {
@@ -107,13 +117,13 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [queueing, setQueueing] = useState(false);
   const [viewerMode, setViewerMode] = useState<"doc" | "drawings" | "first">("doc");
+  const [detailsRefreshKey, setDetailsRefreshKey] = useState(0);
 
-  const normalizeApiUrl = API_URL.replace(/\/$/, "");
   const resolveAssetUrl = (value?: string | null) => {
     if (!value) return "";
     if (/^https?:\/\//i.test(value)) return value;
     const normalized = value.startsWith("/") ? value : `/${value}`;
-    return `${normalizeApiUrl}${normalized}`;
+    return `${API_URL}${normalized}`;
   };
   const isStorageAssetUrl = (value?: string | null) => Boolean(value && value.includes("/patent/storage/"));
 
@@ -189,7 +199,7 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
     let active = true;
     const loadDetails = async () => {
       if (!open || !patent) return;
-      if (patent.source !== "INPI" || patent.storage?.hasStoredDocument) {
+      if (patent.source !== "INPI") {
         setDetailedData(patent);
         return;
       }
@@ -220,7 +230,10 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
           publications: data.publications,
           petitions: data.petitions,
           annuities: data.annuities,
-          scraping_status: data.scraping_status
+          scraping_status: data.scraping_status,
+          document_status: data.document_status,
+          document_error: data.document_error,
+          doc_jobs: data.doc_jobs
         });
       } catch (err) {
         console.error("Failed to load details:", err);
@@ -233,7 +246,7 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
     return () => {
       active = false;
     };
-  }, [open, patent]);
+  }, [open, patent, detailsRefreshKey]);
 
   useEffect(() => {
     let active = true;
@@ -291,8 +304,13 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
     if (!detailedData?.cod_pedido) return;
     setQueueing(true);
     try {
-      await axios.post(`${API_URL}/patent/queue`, { codPedido: detailedData.cod_pedido });
-      setDetailedData(prev => prev ? { ...prev, scraping_status: 'pending' } : null);
+      await axios.post(`${API_URL}/patent/queue`, {
+        codPedido: detailedData.cod_pedido,
+        publicationNumber: detailedData.publicationNumber
+      });
+      setDetailedData(prev => prev ? { ...prev, scraping_status: 'pending', document_status: 'pending' } : null);
+      detailsRequestKeyRef.current = "";
+      setDetailsRefreshKey((value) => value + 1);
     } catch (err) {
       console.error("Failed to queue:", err);
     } finally {
@@ -301,17 +319,19 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
   };
 
   const headerItems = useMemo(() => {
-    if (!patent) return [];
+    const target = detailedData || patent;
+    if (!target) return [];
     return [
-      { label: "Número", value: patent.publicationNumber || "N/A" },
-      { label: "Fonte", value: patent.source || "N/A" },
-      { label: "Titular", value: patent.applicant || "N/A" },
-      { label: "Inventor", value: patent.inventor || "N/A" },
-      { label: "Data", value: patent.date || "N/A" },
-      { label: "IPC", value: patent.classification || "N/A" },
-      { label: "Situação", value: patent.status || "N/A" }
+      { label: "Número", value: target.publicationNumber || "N/A" },
+      { label: "Fonte", value: target.source || "N/A" },
+      { label: "Titular", value: target.applicant || "N/A" },
+      { label: "Inventor", value: target.inventor || "N/A" },
+      { label: "Data", value: target.date || "N/A" },
+      { label: "IPC", value: target.classification || "N/A" },
+      { label: "Situação", value: target.status || "N/A" },
+      { label: "Documento", value: (target.document_status || (target.storage?.hasStoredDocument ? "completed" : "not_queued")).toUpperCase() }
     ];
-  }, [patent]);
+  }, [patent, detailedData]);
 
   const handleDownload = () => {
     if (!pdfUrl || !patent) return;
@@ -352,6 +372,12 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-7xl w-[96vw] h-[92vh] p-4 flex flex-col gap-3">
+        <DialogTitle className="sr-only">
+          Detalhes da patente {patent?.publicationNumber || ""}
+        </DialogTitle>
+        <DialogDescription className="sr-only">
+          Visualização de histórico, documentos e metadados da patente.
+        </DialogDescription>
         {patent && (
           <>
             <div className="rounded-lg border bg-muted/30 p-3 space-y-2 overflow-auto max-h-[40vh]">
@@ -379,9 +405,14 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
                   </div>
                 ))}
               </div>
-              {patent.abstract && (
+              {(detailedData?.abstract || patent.abstract) && (
                 <p className="text-xs text-muted-foreground">
-                  <span className="font-medium">Resumo:</span> {patent.abstract}
+                  <span className="font-medium">Resumo:</span> {detailedData?.abstract || patent.abstract}
+                </p>
+              )}
+              {(detailedData?.document_error || patent.document_error) && (
+                <p className="text-xs text-amber-600">
+                  <span className="font-medium">Último erro de documento:</span> {detailedData?.document_error || patent.document_error}
                 </p>
               )}
 

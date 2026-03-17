@@ -14,14 +14,15 @@ import {
     Clock, 
     Search,
     RefreshCw,
-    Download
+    Download,
+    Bell
 } from "lucide-react";
 import axios from "axios";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import PatentDocumentModal, { PatentDocumentData } from "@/components/PatentDocumentModal";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000").replace(/\/+$/, "");
 
 interface ScrapingJob {
     id: string;
@@ -40,7 +41,13 @@ interface InpiPatent {
     numero_publicacao: string;
     title: string;
     applicant: string;
+    inventors?: string;
     filing_date: string;
+    ipc_codes?: string;
+    status?: string;
+    document_status?: string;
+    document_error?: string | null;
+    has_stored_document?: boolean;
     updated_at: string;
     _count: {
         publications: number;
@@ -56,6 +63,7 @@ export default function PatentBase() {
     const [tab, setTab] = useState("fila");
     const [page, setPage] = useState(1);
     const [totalPatents, setTotalPatents] = useState(0);
+    const [query, setQuery] = useState("");
     const [patentModalOpen, setPatentModalOpen] = useState(false);
     const [selectedPatent, setSelectedPatent] = useState<PatentDocumentData | null>(null);
 
@@ -66,7 +74,9 @@ export default function PatentBase() {
                 const res = await axios.get(`${API_URL}/patents/queue`);
                 setJobs(res.data.jobs);
             } else {
-                const res = await axios.get(`${API_URL}/patents/processed?page=${page}`);
+                const params = new URLSearchParams({ page: String(page) });
+                if (query.trim()) params.set("q", query.trim());
+                const res = await axios.get(`${API_URL}/patents/processed?${params.toString()}`);
                 setPatents(res.data.patents);
                 setTotalPatents(res.data.total);
             }
@@ -83,7 +93,7 @@ export default function PatentBase() {
             if (tab === "fila") fetchData();
         }, 10000); // Auto refresh queue every 10s
         return () => clearInterval(interval);
-    }, [tab, page]);
+    }, [tab, page, query]);
 
     const getStatusBadge = (status: string) => {
         switch (status) {
@@ -101,12 +111,27 @@ export default function PatentBase() {
             cod_pedido: patent.cod_pedido,
             title: patent.title || "Sem título",
             applicant: patent.applicant || "",
+            inventor: patent.inventors || "",
             date: patent.filing_date || "",
+            classification: patent.ipc_codes || "",
+            status: patent.status || patent.document_status || "",
             source: "INPI",
             url: fallbackUrl,
-            inpiUrl: fallbackUrl
+            inpiUrl: fallbackUrl,
+            storage: {
+                hasStoredDocument: Boolean(patent.has_stored_document)
+            }
         });
         setPatentModalOpen(true);
+    };
+
+    const addToMonitoring = async (patent: InpiPatent) => {
+        const patentNumber = (patent.numero_publicacao || patent.cod_pedido || "").trim();
+        if (!patentNumber) return;
+        await axios.post(`${API_URL}/monitoring/patents/add`, {
+            patentNumber,
+            patentId: patent.cod_pedido
+        });
     };
 
     return (
@@ -160,7 +185,7 @@ export default function PatentBase() {
                                     Fila de Raspagem em Tempo Real
                                 </CardTitle>
                                 <CardDescription>
-                                    Patentes aguardando ou em processo de captura detalhada do INPI.
+                                    Pendente = aguardando execução, Processando = worker em andamento, Falha = tentativa com erro (pode reprocessar).
                                 </CardDescription>
                             </CardHeader>
                             <CardContent className="p-0">
@@ -223,7 +248,7 @@ export default function PatentBase() {
                                             Acervo Local de Patentes
                                         </CardTitle>
                                         <CardDescription>
-                                            Patentes com dados completos capturados e disponíveis para análise.
+                                            Patentes conhecidas na base local. Use o filtro para buscar por número, título, titular ou inventor.
                                         </CardDescription>
                                     </div>
                                     <div className="flex gap-2">
@@ -232,6 +257,11 @@ export default function PatentBase() {
                                             <input 
                                                 type="search" 
                                                 placeholder="Filtrar base..." 
+                                                value={query}
+                                                onChange={(event) => {
+                                                    setPage(1);
+                                                    setQuery(event.target.value);
+                                                }}
                                                 className="h-9 w-64 pl-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                             />
                                         </div>
@@ -293,14 +323,24 @@ export default function PatentBase() {
                                                             {format(new Date(patent.updated_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
                                                         </TableCell>
                                                         <TableCell className="text-right">
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="xs"
-                                                                className="text-primary hover:bg-primary/10"
-                                                                onClick={() => openPatentModal(patent)}
-                                                            >
-                                                                <Download className="w-3 h-3 mr-1" /> Abrir
-                                                            </Button>
+                                                            <div className="flex justify-end gap-1">
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="xs"
+                                                                    className="text-emerald-600 hover:bg-emerald-50"
+                                                                    onClick={() => void addToMonitoring(patent)}
+                                                                >
+                                                                    <Bell className="w-3 h-3 mr-1" /> Monitorar
+                                                                </Button>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="xs"
+                                                                    className="text-primary hover:bg-primary/10"
+                                                                    onClick={() => openPatentModal(patent)}
+                                                                >
+                                                                    <Download className="w-3 h-3 mr-1" /> Abrir
+                                                                </Button>
+                                                            </div>
                                                         </TableCell>
                                                     </TableRow>
                                                 ))}

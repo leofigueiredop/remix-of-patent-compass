@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { Search, Loader2, ExternalLink, Hash, User, UserCheck, FileText, X, ChevronDown, ChevronUp, Building2, Lightbulb, ChevronLeft, ChevronRight, Expand, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import AppLayout from "@/components/AppLayout";
@@ -975,6 +975,8 @@ export default function QuickSearch() {
             </div>
             <Dialog open={modalOpen} onOpenChange={setModalOpen}>
                 <DialogContent className="max-w-6xl p-4">
+                    <DialogTitle className="sr-only">Visualização de figura da patente</DialogTitle>
+                    <DialogDescription className="sr-only">Navegação entre imagens e páginas do documento da patente.</DialogDescription>
                     {modalFigures.length > 0 && (
                         <div className="space-y-3">
                             <div className="flex items-center justify-between pr-10">

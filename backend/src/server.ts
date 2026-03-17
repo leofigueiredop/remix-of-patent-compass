@@ -146,6 +146,51 @@ type CachedPatentRecord = {
 const dbWriteQueue = new AsyncQueue(120);
 const prismaAny = prisma as any;
 
+async function ensureMonitoringTables() {
+    await prisma.$executeRawUnsafe(`
+        create table if not exists monitoring_attorneys (
+            id text primary key,
+            name text not null unique,
+            active boolean not null default true,
+            created_at timestamptz not null default now(),
+            updated_at timestamptz not null default now()
+        );
+        create index if not exists idx_monitoring_attorneys_active on monitoring_attorneys(active);
+        create table if not exists monitored_inpi_patents (
+            id text primary key,
+            patent_number text not null unique,
+            patent_id text null,
+            source text not null default 'manual',
+            matched_attorney text null,
+            active boolean not null default true,
+            blocked_by_user boolean not null default false,
+            created_at timestamptz not null default now(),
+            updated_at timestamptz not null default now(),
+            last_seen_at timestamptz null
+        );
+        create index if not exists idx_monitored_inpi_patents_active on monitored_inpi_patents(active);
+        create index if not exists idx_monitored_inpi_patents_patent_number on monitored_inpi_patents(patent_number);
+        create table if not exists monitoring_alerts (
+            id text primary key,
+            monitored_patent_id text not null references monitored_inpi_patents(id) on delete cascade,
+            alert_key text not null unique,
+            patent_number text not null,
+            rpi_number text not null,
+            rpi_date timestamptz not null,
+            despacho_code text null,
+            title text null,
+            complement text null,
+            severity text not null default 'low',
+            deadline timestamptz null,
+            is_read boolean not null default false,
+            created_at timestamptz not null default now(),
+            updated_at timestamptz not null default now()
+        );
+        create index if not exists idx_monitoring_alerts_unread on monitoring_alerts(is_read);
+        create index if not exists idx_monitoring_alerts_monitored_patent on monitoring_alerts(monitored_patent_id);
+    `);
+}
+
 function normalizeText(value?: string): string {
     return (value || '')
         .normalize('NFD')
@@ -2406,6 +2451,48 @@ const start = async () => {
     try {
         const startupLog = `/tmp/server_startup.log`;
         fs.writeFileSync(startupLog, `Server starting at ${new Date().toISOString()} with PID ${process.pid}\n`);
+        await prisma.$executeRawUnsafe(`
+            create table if not exists monitoring_attorneys (
+                id text primary key,
+                name text not null unique,
+                active boolean not null default true,
+                created_at timestamptz not null default now(),
+                updated_at timestamptz not null default now()
+            );
+            create index if not exists idx_monitoring_attorneys_active on monitoring_attorneys(active);
+            create table if not exists monitored_inpi_patents (
+                id text primary key,
+                patent_number text not null unique,
+                patent_id text null,
+                source text not null default 'manual',
+                matched_attorney text null,
+                active boolean not null default true,
+                blocked_by_user boolean not null default false,
+                created_at timestamptz not null default now(),
+                updated_at timestamptz not null default now(),
+                last_seen_at timestamptz null
+            );
+            create index if not exists idx_monitored_inpi_patents_active on monitored_inpi_patents(active);
+            create index if not exists idx_monitored_inpi_patents_patent_number on monitored_inpi_patents(patent_number);
+            create table if not exists monitoring_alerts (
+                id text primary key,
+                monitored_patent_id text not null references monitored_inpi_patents(id) on delete cascade,
+                alert_key text not null unique,
+                patent_number text not null,
+                rpi_number text not null,
+                rpi_date timestamptz not null,
+                despacho_code text null,
+                title text null,
+                complement text null,
+                severity text not null default 'low',
+                deadline timestamptz null,
+                is_read boolean not null default false,
+                created_at timestamptz not null default now(),
+                updated_at timestamptz not null default now()
+            );
+            create index if not exists idx_monitoring_alerts_unread on monitoring_alerts(is_read);
+            create index if not exists idx_monitoring_alerts_monitored_patent on monitoring_alerts(monitored_patent_id);
+        `);
 
         // ─── STARTUP ──────────────────────────────────────────────────
         await fastify.listen({ port: parseInt(process.env.PORT || '3001'), host: '0.0.0.0' });
@@ -2428,9 +2515,8 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
             petitions: true,
             annuities: true,
             document_jobs: {
-                where: { status: 'completed', storage_key: { not: null } },
                 orderBy: { updated_at: 'desc' },
-                take: 1
+                take: 15
             },
             scraping_jobs: {
                 orderBy: { created_at: 'desc' },
@@ -2446,8 +2532,17 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
         });
     }
     const publicationNumber = dbData.numero_publicacao || dbData.cod_pedido;
-    const completedDocJob = dbData.document_jobs[0];
+    const completedDocJob = (dbData.document_jobs || []).find((item: any) => item?.status === 'completed' && item?.storage_key);
     const hasStoredDocument = Boolean(completedDocJob?.storage_key);
+    const latestDocJob = dbData.document_jobs?.[0] || null;
+    const latestPublicationWithBiblio = (dbData.publications || []).find((item: any) =>
+        Boolean(item?.ops_title || item?.ops_applicant || item?.ops_inventor || item?.ops_ipc || item?.ops_publication_date)
+    );
+    const resolvedTitle = dbData.title || latestPublicationWithBiblio?.ops_title || '';
+    const resolvedApplicant = dbData.applicant || latestPublicationWithBiblio?.ops_applicant || '';
+    const resolvedInventors = dbData.inventors || latestPublicationWithBiblio?.ops_inventor || '';
+    const resolvedFilingDate = dbData.filing_date || latestPublicationWithBiblio?.ops_publication_date || '';
+    const resolvedIpc = dbData.ipc_codes || latestPublicationWithBiblio?.ops_ipc || '';
     const publications = (dbData.publications || [])
         .map((item: any) => ({
             ...item,
@@ -2465,8 +2560,23 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
         });
     return {
         ...dbData,
+        title: resolvedTitle,
+        applicant: resolvedApplicant,
+        inventors: resolvedInventors,
+        filing_date: resolvedFilingDate,
+        ipc_codes: resolvedIpc,
         publications,
         scraping_status: dbData.scraping_jobs[0]?.status || 'available_for_queue',
+        document_status: latestDocJob?.status || (hasStoredDocument ? 'completed' : 'not_queued'),
+        document_error: latestDocJob?.error || null,
+        doc_jobs: (dbData.document_jobs || []).map((job: any) => ({
+            id: job.id,
+            publication_number: job.publication_number,
+            status: job.status,
+            attempts: job.attempts,
+            error: job.error,
+            updated_at: job.updated_at
+        })),
         inpiUrl: buildInpiDetailUrl(codPedido, publicationNumber),
         googlePatentsUrl: buildGooglePatentsUrl(publicationNumber),
         espacenetUrl: buildEspacenetUiUrl(publicationNumber),
@@ -2513,16 +2623,37 @@ fastify.get('/patent/storage/:publicationNumber/:asset', async (request: any, re
 
 // ─── Patent Base Endpoints ──────────────────────────────
 fastify.get('/patents/processed', async (request: any) => {
-    const { page = 1, pageSize = 20 } = request.query as any;
+    const { page = 1, pageSize = 20, q } = request.query as any;
     const skip = (parseInt(page, 10) - 1) * parseInt(pageSize, 10);
     const take = parseInt(pageSize, 10);
+    const queryText = String(q || '').trim();
+    const whereClause: any = queryText
+        ? {
+            OR: [
+                { cod_pedido: { contains: queryText } },
+                { numero_publicacao: { contains: queryText } },
+                { title: { contains: queryText } },
+                { applicant: { contains: queryText } },
+                { inventors: { contains: queryText } }
+            ]
+        }
+        : undefined;
 
     const [patents, total] = await Promise.all([
         prisma.inpiPatent.findMany({
             skip,
             take,
             orderBy: { updated_at: 'desc' },
+            where: whereClause,
             include: {
+                publications: {
+                    orderBy: { created_at: 'desc' },
+                    take: 1
+                },
+                document_jobs: {
+                    orderBy: { updated_at: 'desc' },
+                    take: 1
+                },
                 _count: {
                     select: {
                         publications: true,
@@ -2532,11 +2663,25 @@ fastify.get('/patents/processed', async (request: any) => {
                 }
             }
         }),
-        prisma.inpiPatent.count()
+        prisma.inpiPatent.count({ where: whereClause })
     ]);
 
     return {
-        patents,
+        patents: patents.map((patent: any) => {
+            const latestPublication = patent.publications?.[0];
+            const latestDocJob = patent.document_jobs?.[0];
+            return {
+                ...patent,
+                title: patent.title || latestPublication?.ops_title || '',
+                applicant: patent.applicant || latestPublication?.ops_applicant || '',
+                inventors: patent.inventors || latestPublication?.ops_inventor || '',
+                filing_date: patent.filing_date || latestPublication?.ops_publication_date || '',
+                ipc_codes: patent.ipc_codes || latestPublication?.ops_ipc || '',
+                document_status: latestDocJob?.status || 'not_queued',
+                document_error: latestDocJob?.error || null,
+                has_stored_document: Boolean(latestDocJob?.status === 'completed' && latestDocJob?.storage_key)
+            };
+        }),
         total,
         page: parseInt(page, 10),
         pageSize: take,
@@ -2950,7 +3095,9 @@ fastify.post('/background-workers/ops/retry-errors', async (request: any, reply)
 });
 
 fastify.get('/monitoring/dashboard-summary', async () => {
+    await ensureMonitoringTables();
     const criticalCodes = ['6.1', '7.1'];
+    const normalizeKey = (value?: string | null) => String(value || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
     const parseBrDate = (value?: string | null): Date | null => {
         const text = String(value || '').trim();
         if (!text) return null;
@@ -2965,21 +3112,31 @@ fastify.get('/monitoring/dashboard-summary', async () => {
     const addDays = (date: Date, days: number) => new Date(date.getTime() + (days * 24 * 60 * 60 * 1000));
     const now = new Date();
     const sevenDaysAgo = addDays(now, -7);
+    const monitoredRows = await prisma.$queryRawUnsafe<any[]>(
+        `select patent_number from monitored_inpi_patents where active = true`
+    ).catch(() => []);
+    const monitoredPatentSet = new Set<string>(
+        (monitoredRows || []).map((row: any) => normalizeKey(row?.patent_number)).filter(Boolean)
+    );
+    const monitoredList = Array.from(monitoredPatentSet);
+    const monitoredPatents = monitoredList.length;
 
-    const [monitoredPatents, unreadAlerts, exigenciesRaw, communicationsRaw] = await Promise.all([
-        prismaAny.patent.count({ where: { status: 'active' } }).catch(() => 0),
-        prismaAny.collisionAlert.count({ where: { is_read: false } }).catch(() => 0),
+    const [exigenciesBaseRaw, communicationsBaseRaw] = await Promise.all([
         prismaAny.inpiPublication.findMany({
             where: { despacho_code: { in: criticalCodes } },
             orderBy: { created_at: 'desc' },
-            take: 100
+            take: 400
         }).catch(() => []),
         prismaAny.inpiPublication.findMany({
             where: { despacho_code: { not: null } },
             orderBy: { created_at: 'desc' },
-            take: 120
+            take: 1000
         }).catch(() => [])
     ]);
+
+    const shouldFilterByMonitored = true;
+    const exigenciesRaw = (exigenciesBaseRaw as any[]).filter((row) => monitoredPatentSet.has(normalizeKey(row?.patent_number)));
+    const communicationsRaw = (communicationsBaseRaw as any[]).filter((row) => monitoredPatentSet.has(normalizeKey(row?.patent_number)));
 
     const exigencies = exigenciesRaw
         .map((row: any) => {
@@ -3015,6 +3172,18 @@ fastify.get('/monitoring/dashboard-summary', async () => {
         const dt = parseBrDate(row?.date) || row?.created_at;
         return dt ? new Date(dt).getTime() >= sevenDaysAgo.getTime() : false;
     }).length;
+    const unreadAlertsRows = monitoredList.length > 0
+        ? await prisma.$queryRawUnsafe<any[]>(
+            `select count(*)::int as total
+             from monitoring_alerts a
+             where a.is_read=false
+               and a.patent_number = any($1::text[])`,
+            monitoredList
+        ).catch(() => [{ total: 0 }])
+        : await prisma.$queryRawUnsafe<any[]>(
+            `select count(*)::int as total from monitoring_alerts where is_read=false`
+        ).catch(() => [{ total: 0 }]);
+    const unreadAlerts = Number(unreadAlertsRows?.[0]?.total || 0);
 
     const deadlines = exigencies
         .filter((item: any) => item.deadline)
@@ -3033,6 +3202,210 @@ fastify.get('/monitoring/dashboard-summary', async () => {
         communications: communications.slice(0, 40),
         deadlines
     };
+});
+
+fastify.get('/monitoring/patents', async (request: any) => {
+    await ensureMonitoringTables();
+    const {
+        page = 1,
+        pageSize = 20,
+        active,
+        source,
+        attorney,
+        q
+    } = request.query as {
+        page?: string | number;
+        pageSize?: string | number;
+        active?: string;
+        source?: string;
+        attorney?: string;
+        q?: string;
+    };
+    const currentPage = Math.max(1, parseInt(String(page || '1'), 10) || 1);
+    const size = Math.min(100, Math.max(1, parseInt(String(pageSize || '20'), 10) || 20));
+    const offset = (currentPage - 1) * size;
+    const conditions: string[] = [];
+    const values: any[] = [];
+    const push = (value: any) => {
+        values.push(value);
+        return `$${values.length}`;
+    };
+
+    if (active === 'true' || active === 'false') {
+        conditions.push(`m.active = ${push(active === 'true')}`);
+    }
+    if (source && source !== 'all') {
+        conditions.push(`m.source = ${push(source)}`);
+    }
+    if (attorney) {
+        conditions.push(`coalesce(m.matched_attorney, '') ilike ${push(`%${attorney}%`)}`);
+    }
+    if (q) {
+        const token = `%${q}%`;
+        const p = push(token);
+        const p2 = push(token);
+        const p3 = push(token);
+        conditions.push(`(m.patent_number ilike ${p} or coalesce(m.patent_id, '') ilike ${p2} or coalesce(p.title, '') ilike ${p3})`);
+    }
+    const whereClause = conditions.length ? `where ${conditions.join(' and ')}` : '';
+
+    const totalRows = await prisma.$queryRawUnsafe<any[]>(
+        `select count(*)::int as total
+         from monitored_inpi_patents m
+         left join inpi_patents p on p.cod_pedido = m.patent_id
+         ${whereClause}`,
+        ...values
+    ).catch(() => [{ total: 0 }]);
+    const total = Number(totalRows?.[0]?.total || 0);
+
+    const pageRows = await prisma.$queryRawUnsafe<any[]>(
+        `select
+            m.id,
+            m.patent_number,
+            m.patent_id,
+            m.source,
+            m.matched_attorney,
+            m.active,
+            m.blocked_by_user,
+            m.created_at,
+            m.updated_at,
+            m.last_seen_at,
+            p.title,
+            p.applicant,
+            p.inventors,
+            p.ipc_codes,
+            p.status,
+            p.last_event
+         from monitored_inpi_patents m
+         left join inpi_patents p on p.cod_pedido = m.patent_id
+         ${whereClause}
+         order by m.updated_at desc
+         limit ${push(size)} offset ${push(offset)}`,
+        ...values
+    ).catch(() => []);
+
+    return {
+        rows: pageRows,
+        total,
+        page: currentPage,
+        pageSize: size,
+        totalPages: Math.max(1, Math.ceil(total / size))
+    };
+});
+
+fastify.get('/monitoring/alerts', async (request: any) => {
+    await ensureMonitoringTables();
+    const { page = 1, pageSize = 30, unreadOnly } = request.query as any;
+    const currentPage = Math.max(1, parseInt(String(page || '1'), 10) || 1);
+    const size = Math.min(100, Math.max(1, parseInt(String(pageSize || '30'), 10) || 30));
+    const offset = (currentPage - 1) * size;
+    const onlyUnread = String(unreadOnly || '').toLowerCase() === 'true';
+    const totalRows = await prisma.$queryRawUnsafe<any[]>(
+        `select count(*)::int as total
+         from monitoring_alerts
+         where ($1::boolean is false) or is_read=false`,
+        onlyUnread
+    ).catch(() => [{ total: 0 }]);
+    const total = Number(totalRows?.[0]?.total || 0);
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+        `select id, monitored_patent_id, patent_number, rpi_number, rpi_date, despacho_code, title, complement, severity, deadline, is_read, created_at, updated_at
+         from monitoring_alerts
+         where ($1::boolean is false) or is_read=false
+         order by rpi_date desc, created_at desc
+         limit $2 offset $3`,
+        onlyUnread,
+        size,
+        offset
+    ).catch(() => []);
+    return { rows, total, page: currentPage, pageSize: size, totalPages: Math.max(1, Math.ceil(total / size)) };
+});
+
+fastify.post('/monitoring/alerts/:id/read', async (request: any, reply) => {
+    await ensureMonitoringTables();
+    const { id } = request.params as { id: string };
+    const updated = await prisma.$queryRawUnsafe<any[]>(
+        `update monitoring_alerts set is_read=true, updated_at=now() where id=$1 returning id, is_read`,
+        id
+    ).catch(() => []);
+    if (!updated?.[0]) return reply.code(404).send({ error: 'Alerta não encontrado' });
+    return updated[0];
+});
+
+fastify.get('/monitoring/config', async () => {
+    await ensureMonitoringTables();
+    const attorneys = await prisma.$queryRawUnsafe<any[]>(
+        `select id, name, active, created_at, updated_at from monitoring_attorneys order by name asc`
+    ).catch(() => []);
+    const patents = await prisma.$queryRawUnsafe<any[]>(
+        `select id, patent_number, patent_id, source, matched_attorney, active, blocked_by_user, created_at, updated_at from monitored_inpi_patents order by updated_at desc limit 500`
+    ).catch(() => []);
+    return {
+        monitoredAttorneyNames: attorneys,
+        monitoredPatents: patents
+    };
+});
+
+fastify.post('/monitoring/attorneys', async (request: any, reply) => {
+    await ensureMonitoringTables();
+    const name = String(request.body?.name || '').trim();
+    if (!name) return reply.code(400).send({ error: 'name é obrigatório' });
+    const id = randomUUID();
+    await prisma.$executeRawUnsafe(
+        `insert into monitoring_attorneys (id, name, active, created_at, updated_at) values ($1,$2,true,now(),now())
+         on conflict (name) do update set active=true, updated_at=now()`,
+        id,
+        name
+    );
+    return { id, name, active: true };
+});
+
+fastify.post('/monitoring/attorneys/:id/toggle', async (request: any, reply) => {
+    await ensureMonitoringTables();
+    const { id } = request.params as { id: string };
+    const active = Boolean(request.body?.active);
+    const updated = await prisma.$queryRawUnsafe<any[]>(
+        `update monitoring_attorneys set active=$2, updated_at=now() where id=$1 returning id, name, active`,
+        id,
+        active
+    );
+    if (!updated?.[0]) return reply.code(404).send({ error: 'Procurador não encontrado' });
+    return updated[0];
+});
+
+fastify.post('/monitoring/patents/add', async (request: any, reply) => {
+    await ensureMonitoringTables();
+    const patentNumber = String(request.body?.patentNumber || '').trim();
+    const patentId = String(request.body?.patentId || '').trim();
+    if (!patentNumber) return reply.code(400).send({ error: 'patentNumber é obrigatório' });
+    const id = randomUUID();
+    await prisma.$executeRawUnsafe(
+        `insert into monitored_inpi_patents (id, patent_number, patent_id, source, matched_attorney, active, blocked_by_user, created_at, updated_at, last_seen_at)
+         values ($1,$2,$3,'manual',null,true,false,now(),now(),now())
+         on conflict (patent_number) do update
+         set active=true, blocked_by_user=false, patent_id=coalesce(excluded.patent_id, monitored_inpi_patents.patent_id), source='manual', updated_at=now(), last_seen_at=now()`,
+        id,
+        patentNumber,
+        patentId || null
+    );
+    return { id, patentNumber, active: true };
+});
+
+fastify.post('/monitoring/patents/:id/toggle', async (request: any, reply) => {
+    await ensureMonitoringTables();
+    const { id } = request.params as { id: string };
+    const active = Boolean(request.body?.active);
+    const blockedByUser = request.body?.blockedByUser === undefined ? !active : Boolean(request.body?.blockedByUser);
+    const updated = await prisma.$queryRawUnsafe<any[]>(
+        `update monitored_inpi_patents
+         set active=$2, blocked_by_user=$3, updated_at=now()
+         where id=$1
+         returning id, patent_number, patent_id, source, matched_attorney, active, blocked_by_user`,
+        id,
+        active,
+        blockedByUser
+    );
+    if (!updated?.[0]) return reply.code(404).send({ error: 'Patente monitorada não encontrada' });
+    return updated[0];
 });
 
 fastify.get('/patents/queue', async () => {
@@ -3098,8 +3471,42 @@ fastify.post('/patent/queue', async (request: any, reply) => {
             status: 'pending'
         }
     });
+    const normalize = (value?: string | null) => String(value || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+    const candidateKeys = Array.from(new Set([normalize(codPedido), normalize(publicationNumber)].filter(Boolean)));
+    const publicationCandidates = await prisma.inpiPublication.findMany({
+        where: {
+            OR: [
+                { patent_id: codPedido },
+                ...(candidateKeys.length ? [{ patent_number: { in: candidateKeys } }] : [])
+            ]
+        },
+        orderBy: { created_at: 'desc' },
+        take: 300
+    }).catch(() => []);
+    let docJobsQueued = 0;
+    for (const row of publicationCandidates) {
+        const normalizedCode = String(row.despacho_code || '').replace(/\s+/g, '');
+        const docEligible = row.eligible_for_doc_download || normalizedCode === '3.1' || normalizedCode === '16.1';
+        const publicationForJob = row.patent_number || publicationNumber || codPedido;
+        if (!docEligible || !publicationForJob) continue;
+        const existingJob = await prisma.documentDownloadJob.findFirst({
+            where: { patent_id: codPedido, publication_number: publicationForJob }
+        });
+        if (existingJob?.id) {
+            await prisma.documentDownloadJob.update({
+                where: { id: existingJob.id },
+                data: { status: 'pending', error: null, updated_at: new Date() }
+            });
+            docJobsQueued += 1;
+        } else {
+            const created = await prisma.documentDownloadJob.create({
+                data: { patent_id: codPedido, publication_number: publicationForJob, status: 'pending' }
+            });
+            if (created?.id) docJobsQueued += 1;
+        }
+    }
 
-    return { status: job.status, jobId: job.id };
+    return { status: job.status, jobId: job.id, docJobsQueued };
 });
 
 start();
