@@ -15,6 +15,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from './db';
 import {
     debugBigQueryLookup,
+    debugInpiLookup,
     enqueueLastFiveYearsRpi,
     getBackgroundWorkerState,
     retryAllDocumentErrorJobs,
@@ -2865,6 +2866,15 @@ fastify.get('/background-workers/bigquery/test', async (request: any, reply) => 
         return reply.code(400).send({ error: 'publication é obrigatório' });
     }
     const result = await debugBigQueryLookup(publication);
+    return result;
+});
+
+fastify.get('/background-workers/inpi/test', async (request: any, reply) => {
+    const patent = String(request.query?.patent || '').trim();
+    if (!patent) {
+        return reply.code(400).send({ error: 'patent é obrigatório' });
+    }
+    const result = await debugInpiLookup(patent);
     return result;
 });
 

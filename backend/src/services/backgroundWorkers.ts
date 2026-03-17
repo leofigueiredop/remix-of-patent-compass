@@ -2009,6 +2009,17 @@ export async function debugBigQueryLookup(publicationNumber: string) {
     };
 }
 
+export async function debugInpiLookup(patentNumber: string) {
+    const digits = extractDigits(patentNumber);
+    const codPedido = digits.length > 12 ? digits.slice(0, 12) : digits;
+    const module = await import('./inpiScraper');
+    if (!module?.debugInpiScrapeSteps) {
+        return { ok: false, patentNumber, codPedido, steps: [{ step: 'load_module', message: 'debugInpiScrapeSteps indisponível' }] };
+    }
+    const result = await module.debugInpiScrapeSteps(codPedido);
+    return { patentNumber, ...result };
+}
+
 export function setBackgroundWorkerPause(queue: 'rpi' | 'docs' | 'ops' | 'all', paused: boolean) {
     if (queue === 'all' || queue === 'rpi') rpiPaused = paused;
     if (queue === 'all' || queue === 'docs') docsPaused = paused;
