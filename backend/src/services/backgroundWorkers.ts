@@ -72,6 +72,14 @@ function extractDigits(value?: string): string {
     return (value || '').replace(/[^\d]/g, '');
 }
 
+function normalizeInpiCodPedido(value?: string): string {
+    const text = normalizeText(value).toUpperCase().replace(/[^0-9A-Z]/g, '');
+    if (text.startsWith('BR') && text.length >= 8) return text;
+    const digits = extractDigits(text);
+    if (digits.length >= 12) return `BR${digits}`;
+    return text;
+}
+
 function truncateError(message: string): string {
     return (message || '').slice(0, 1800);
 }
@@ -1492,9 +1500,8 @@ async function fetchEspacenetUiBibliographicData(patentNumber: string): Promise<
 
 async function fetchInpiScrapeBibliographicData(patentNumber: string): Promise<OpsBibliographicData | null> {
     if (!INPI_SCRAPE_FALLBACK_ENABLED) return null;
-    const digits = extractDigits(patentNumber);
-    if (!digits) return null;
-    const codPedido = digits.length > 12 ? digits.slice(0, 12) : digits;
+    const codPedido = normalizeInpiCodPedido(patentNumber);
+    if (!codPedido) return null;
     try {
         const module = await import('./inpiScraper');
         if (!module?.scrapeInpiPatent) return null;
@@ -2010,8 +2017,7 @@ export async function debugBigQueryLookup(publicationNumber: string) {
 }
 
 export async function debugInpiLookup(patentNumber: string) {
-    const digits = extractDigits(patentNumber);
-    const codPedido = digits.length > 12 ? digits.slice(0, 12) : digits;
+    const codPedido = normalizeInpiCodPedido(patentNumber);
     const module = await import('./inpiScraper');
     if (!module?.debugInpiScrapeSteps) {
         return { ok: false, patentNumber, codPedido, steps: [{ step: 'load_module', message: 'debugInpiScrapeSteps indisponível' }] };

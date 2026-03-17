@@ -65,7 +65,16 @@ async function persistCookies(page: Page) {
 
 async function ensureLoggedIn(page: Page) {
     await page.goto('https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login', { waitUntil: 'networkidle2', timeout: 60000 });
-    const hasLoginInput = await page.$('input[name="T_Login"]');
+    let hasLoginInput = await page.$('input[name="T_Login"]');
+    if (!hasLoginInput) {
+        await page.evaluate(() => {
+            const links = Array.from(document.querySelectorAll('a'));
+            const loginLink = links.find((link) => (link.textContent || '').toLowerCase().includes('login'));
+            if (loginLink) (loginLink as HTMLAnchorElement).click();
+        });
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => undefined);
+        hasLoginInput = await page.$('input[name="T_Login"]');
+    }
     if (hasLoginInput && INPI_USER && INPI_PASSWORD) {
         console.log(`Logging in as ${INPI_USER}...`);
         await page.type('input[name="T_Login"]', INPI_USER, { delay: 20 });
@@ -145,8 +154,23 @@ export async function debugInpiScrapeSteps(codPedido: string) {
         await page.goto('https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login', { waitUntil: 'networkidle2', timeout: 60000 });
         push('open_login', { url: page.url(), title: await page.title() });
 
-        const hasLoginInput = Boolean(await page.$('input[name="T_Login"]'));
+        let hasLoginInput = Boolean(await page.$('input[name="T_Login"]'));
         push('check_login_form', { hasLoginInput, hasCredentials: Boolean(INPI_USER && INPI_PASSWORD) });
+
+        if (!hasLoginInput) {
+            const clickedLoginLink = await page.evaluate(() => {
+                const links = Array.from(document.querySelectorAll('a'));
+                const loginLink = links.find((link) => (link.textContent || '').toLowerCase().includes('login'));
+                if (loginLink) {
+                    (loginLink as HTMLAnchorElement).click();
+                    return true;
+                }
+                return false;
+            });
+            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => undefined);
+            hasLoginInput = Boolean(await page.$('input[name="T_Login"]'));
+            push('open_login_form', { clickedLoginLink, hasLoginInput });
+        }
 
         if (hasLoginInput && INPI_USER && INPI_PASSWORD) {
             await page.type('input[name="T_Login"]', INPI_USER, { delay: 15 });
