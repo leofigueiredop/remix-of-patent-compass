@@ -30,7 +30,9 @@ const OPS_BREAKER_COOLDOWN_MS = Math.max(30_000, parseInt(process.env.OPS_BREAKE
 const OPS_INDEXING_GRACE_YEARS = Math.max(1, parseInt(process.env.OPS_INDEXING_GRACE_YEARS || '3', 10));
 const GOOGLE_PATENTS_FALLBACK_ENABLED = (process.env.GOOGLE_PATENTS_FALLBACK_ENABLED || 'true').toLowerCase() === 'true';
 const ESPACENET_UI_FALLBACK_ENABLED = (process.env.ESPACENET_UI_FALLBACK_ENABLED || 'false').toLowerCase() === 'true';
-const INPI_SCRAPE_FALLBACK_ENABLED = (process.env.INPI_SCRAPE_FALLBACK_ENABLED || 'false').toLowerCase() === 'true';
+const INPI_CREDENTIALS_PRESENT = Boolean((process.env.INPI_USER || '').trim() && (process.env.INPI_PASSWORD || '').trim());
+const INPI_SCRAPE_FALLBACK_ENABLED = (process.env.INPI_SCRAPE_FALLBACK_ENABLED || (INPI_CREDENTIALS_PRESENT ? 'true' : 'false')).toLowerCase() === 'true';
+const INPI_SCRAPE_FIRST_ENABLED = (process.env.INPI_SCRAPE_FIRST_ENABLED || 'true').toLowerCase() === 'true';
 const BIGQUERY_PROJECT_ID = process.env.BIGQUERY_PROJECT_ID || '';
 const GOOGLE_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '';
 const GOOGLE_SERVICE_ACCOUNT_FILE = process.env.GOOGLE_SERVICE_ACCOUNT_FILE || '';
@@ -1518,7 +1520,8 @@ async function fetchInpiScrapeBibliographicData(patentNumber: string): Promise<O
             publicationDate: scraped.filing_date || undefined,
             source: 'inpi_scrape'
         };
-    } catch {
+    } catch (error) {
+        opsJobLog({ status: 'inpi_scrape_error', patentNumber, error: serializeUnknownError(error) });
         return null;
     }
 }
@@ -1572,6 +1575,10 @@ async function fetchBibliographicDataWithFallbacks(patentNumber: string, attempt
         const fromBigQuery = await fetchBigQueryBibliographicData(patentNumber);
         if (fromBigQuery) return mapBigQueryToBiblio(patentNumber, fromBigQuery);
     }
+    if (INPI_SCRAPE_FIRST_ENABLED && patentNumber.startsWith('BR')) {
+        const fromInpiScrape = await fetchInpiScrapeBibliographicData(patentNumber);
+        if (fromInpiScrape) return fromInpiScrape;
+    }
     const fromOps = await fetchOpsBibliographicData(patentNumber);
     if (fromOps) return fromOps;
     if (!BIGQUERY_FIRST_ENABLED) {
@@ -1582,8 +1589,10 @@ async function fetchBibliographicDataWithFallbacks(patentNumber: string, attempt
     if (fromGoogle) return fromGoogle;
     const fromEspacenetUi = await fetchEspacenetUiBibliographicData(patentNumber);
     if (fromEspacenetUi) return fromEspacenetUi;
-    const fromInpiScrape = await fetchInpiScrapeBibliographicData(patentNumber);
-    if (fromInpiScrape) return fromInpiScrape;
+    if (!INPI_SCRAPE_FIRST_ENABLED || !patentNumber.startsWith('BR')) {
+        const fromInpiScrape = await fetchInpiScrapeBibliographicData(patentNumber);
+        if (fromInpiScrape) return fromInpiScrape;
+    }
     return null;
 }
 
