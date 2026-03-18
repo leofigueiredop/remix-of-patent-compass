@@ -238,3 +238,21 @@ model OpsBibliographicJob {
   @@unique([patent_number])
   @@index([status, created_at])
 }
+
+model InpiProcessingJob {
+  id                 String   @id @default(uuid())
+  patent_number      String
+  priority           Int      @default(5)
+  status             String   @default("pending") // 'pending', 'running', 'completed', 'failed', 'failed_permanent'
+  attempts           Int      @default(0)
+  error              String?
+  result_data        Json?
+  started_at         DateTime?
+  finished_at        DateTime?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  @@unique([patent_number])
+  @@index([status, priority, created_at])
+  @@index([patent_number])
+}

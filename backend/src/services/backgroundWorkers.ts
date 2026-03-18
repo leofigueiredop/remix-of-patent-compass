@@ -51,9 +51,11 @@ let loopsStarted = false;
 let rpiRunning = false;
 let docRunning = false;
 let opsRunning = false;
+let inpiRunning = false;
 let rpiPaused = false;
 let docsPaused = false;
 let opsPaused = false;
+let inpiPaused = false;
 let latestRpiCache: { value: number; expiresAt: number } | null = null;
 let opsAccessToken: string | null = null;
 let opsTokenExpiration = 0;
@@ -1623,9 +1625,9 @@ async function fetchInpiScrapeBibliographicData(patentNumber: string): Promise<O
     const codPedido = normalizeInpiCodPedido(patentNumber);
     if (!codPedido) return null;
     try {
-        const module = await import('./inpiScraper');
-        if (!module?.scrapeInpiPatent) return null;
-        await module.scrapeInpiPatent(codPedido);
+        const module = await import('./inpiWorker');
+        if (!module?.processInpiPatent) return null;
+        await module.processInpiPatent(codPedido);
         const scraped = await prisma.inpiPatent.findUnique({
             where: { cod_pedido: codPedido },
             select: {
@@ -1645,7 +1647,7 @@ async function fetchInpiScrapeBibliographicData(patentNumber: string): Promise<O
             inventor: scraped.inventors || undefined,
             ipc: scraped.ipc_codes || undefined,
             publicationDate: scraped.filing_date || undefined,
-            source: 'inpi_scrape'
+            source: 'inpi_worker'
         };
     } catch (error) {
         const message = serializeUnknownError(error);
@@ -1702,44 +1704,23 @@ async function fetchOpsBibliographicData(patentNumber: string): Promise<OpsBibli
 }
 
 async function fetchBibliographicDataWithFallbacks(patentNumber: string, attemptNumber = 1): Promise<OpsBibliographicData | null> {
-    let inpiMaintenance = false;
-    if (BIGQUERY_FIRST_ENABLED || attemptNumber >= 2) {
-        const fromBigQuery = await fetchBigQueryBibliographicData(patentNumber);
-        if (fromBigQuery) return mapBigQueryToBiblio(patentNumber, fromBigQuery);
-    }
-    if (INPI_SCRAPE_FIRST_ENABLED && patentNumber.startsWith('BR')) {
-        let fromInpiScrape: OpsBibliographicData | null = null;
+    // Ordem exigida: 1) INPI worker 2) OPS 3) Google Patents via BigQuery
+    if (patentNumber.startsWith('BR')) {
         try {
-            fromInpiScrape = await fetchInpiScrapeBibliographicData(patentNumber);
+            const inpi = await fetchInpiScrapeBibliographicData(patentNumber);
+            if (inpi) return inpi;
         } catch (error) {
-            if (serializeUnknownError(error).includes('INPI_MAINTENANCE')) inpiMaintenance = true;
-            else throw error;
+            if (serializeUnknownError(error).includes('INPI_MAINTENANCE')) {
+                // Se INPI em manutenção, seguimos para OPS sem erro
+            } else {
+                // Qualquer outro erro: seguir para OPS
+            }
         }
-        if (fromInpiScrape) return fromInpiScrape;
     }
     const fromOps = await fetchOpsBibliographicData(patentNumber);
     if (fromOps) return fromOps;
-    if (!BIGQUERY_FIRST_ENABLED) {
-        const fromBigQuery = await fetchBigQueryBibliographicData(patentNumber);
-        if (fromBigQuery) return mapBigQueryToBiblio(patentNumber, fromBigQuery);
-    }
-    const fromGoogle = await fetchGooglePatentsBibliographicData(patentNumber);
-    if (fromGoogle) return fromGoogle;
-    const fromEspacenetUi = await fetchEspacenetUiBibliographicData(patentNumber);
-    if (fromEspacenetUi) return fromEspacenetUi;
-    if (!INPI_SCRAPE_FIRST_ENABLED || !patentNumber.startsWith('BR')) {
-        let fromInpiScrape: OpsBibliographicData | null = null;
-        try {
-            fromInpiScrape = await fetchInpiScrapeBibliographicData(patentNumber);
-        } catch (error) {
-            if (serializeUnknownError(error).includes('INPI_MAINTENANCE')) inpiMaintenance = true;
-            else throw error;
-        }
-        if (fromInpiScrape) return fromInpiScrape;
-    }
-    if (inpiMaintenance) {
-        throw new Error('INPI_MAINTENANCE');
-    }
+    const fromBigQuery = await fetchBigQueryBibliographicData(patentNumber);
+    if (fromBigQuery) return mapBigQueryToBiblio(patentNumber, fromBigQuery);
     return null;
 }
 
@@ -2144,14 +2125,17 @@ export function getBackgroundWorkerState() {
         rpiPaused,
         docsPaused,
         opsPaused,
+        inpiPaused,
         rpiRunning,
         docRunning,
         opsRunning,
+        inpiRunning,
         opsCircuitOpen: opsCircuitOpenUntil > Date.now(),
         opsCircuitOpenUntil: opsCircuitOpenUntil > Date.now() ? new Date(opsCircuitOpenUntil).toISOString() : null,
         bigQueryEnabled: BIGQUERY_ENABLED,
         bigQueryProject: BIGQUERY_BILLING_PROJECT || null,
-        bigQueryFirstEnabled: BIGQUERY_FIRST_ENABLED
+        bigQueryFirstEnabled: BIGQUERY_FIRST_ENABLED,
+        inpiEnabled: INPI_SCRAPE_FALLBACK_ENABLED
     };
 }
 
@@ -2319,6 +2303,142 @@ export async function retryAllOpsErrorJobs(ids?: string[], preferBigQuery = fals
     return { updated: result.count };
 }
 
+// INPI Worker - Processamento de dados completos do INPI
+async function processNextInpiJob() {
+    if (inpiRunning || inpiPaused) return;
+    inpiRunning = true;
+    
+    try {
+        let job = await prisma.inpiProcessingJob.findFirst({
+            where: { status: 'pending' },
+            orderBy: [{ priority: 'desc' }, { created_at: 'asc' }]
+        });
+        
+        if (!job) {
+            job = await prisma.inpiProcessingJob.findFirst({
+                where: {
+                    status: 'failed',
+                    attempts: { lt: 3 }
+                },
+                orderBy: [{ attempts: 'asc' }, { updated_at: 'asc' }, { created_at: 'asc' }]
+            });
+        }
+        
+        if (!job) {
+            inpiRunning = false;
+            return;
+        }
+        
+        const nextAttempt = job.attempts + 1;
+        await prisma.inpiProcessingJob.update({
+            where: { id: job.id },
+            data: {
+                status: 'running',
+                started_at: new Date(),
+                attempts: { increment: 1 },
+                error: null
+            }
+        });
+        
+        try {
+            console.log(`🔍 INPI Worker processando: ${job.patent_number}`);
+            
+            // Importar e usar o worker INPI
+            const { processInpiPatent } = await import('./inpiWorker');
+            const result = await processInpiPatent(job.patent_number);
+            
+            await prisma.inpiProcessingJob.update({
+                where: { id: job.id },
+                data: {
+                    status: 'completed',
+                    finished_at: new Date(),
+                    result_data: result as any
+                }
+            });
+            
+            console.log(`✅ INPI Worker concluído: ${job.patent_number}`);
+            
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(`❌ INPI Worker falhou: ${job.patent_number} - ${errorMessage}`);
+            
+            await prisma.inpiProcessingJob.update({
+                where: { id: job.id },
+                data: {
+                    status: nextAttempt >= 3 ? 'failed_permanent' : 'failed',
+                    finished_at: new Date(),
+                    error: errorMessage
+                }
+            });
+        }
+        
+    } catch (error) {
+        console.error('Erro no INPI Worker loop:', error);
+    } finally {
+        inpiRunning = false;
+    }
+}
+
+// Funções para gerenciamento do worker INPI
+export async function retryInpiJob(jobId: string) {
+    const updated = await prisma.inpiProcessingJob.update({
+        where: { id: jobId },
+        data: {
+            status: 'pending',
+            attempts: 0,
+            error: null,
+            started_at: null,
+            finished_at: null
+        }
+    });
+    processNextInpiJob().catch(() => undefined);
+    return updated;
+}
+
+export async function retryAllInpiErrorJobs(ids?: string[]) {
+    const where = ids && ids.length > 0
+        ? { id: { in: Array.from(new Set(ids)) }, status: { in: ['failed', 'failed_permanent'] } }
+        : { status: { in: ['failed', 'failed_permanent'] } };
+    const result = await prisma.inpiProcessingJob.updateMany({
+        where,
+        data: {
+            status: 'pending',
+            attempts: 0,
+            error: null,
+            started_at: null,
+            finished_at: null
+        }
+    });
+    processNextInpiJob().catch(() => undefined);
+    return { updated: result.count };
+}
+
+export async function enqueueInpiReprocessing(patentNumbers?: string[], priority = 5) {
+    if (!patentNumbers || patentNumbers.length === 0) {
+        // Se não especificado, enfileira todas as patentes BR existentes
+        const existingPatents = await prisma.inpiPatent.findMany({
+            where: { cod_pedido: { startsWith: 'BR' } },
+            select: { cod_pedido: true }
+        });
+        patentNumbers = existingPatents.map(p => p.cod_pedido);
+    }
+    
+    const jobs = patentNumbers.map(patentNumber => ({
+        patent_number: patentNumber,
+        priority,
+        status: 'pending' as const,
+        attempts: 0,
+        created_at: new Date()
+    }));
+    
+    const result = await prisma.inpiProcessingJob.createMany({
+        data: jobs,
+        skipDuplicates: true
+    });
+    
+    return { enqueued: result.count };
+}
+
 export async function startBackgroundWorkers() {
     if (loopsStarted) return;
     loopsStarted = true;
@@ -2337,6 +2457,9 @@ export async function startBackgroundWorkers() {
     setInterval(() => {
         processNextOpsBibliographicJob().catch(() => undefined);
     }, 3000);
+    setInterval(() => {
+        processNextInpiJob().catch(() => undefined);
+    }, 5000);
     setInterval(() => {
         recoverStaleRunningJobs().catch(() => undefined);
     }, 60 * 1000);
