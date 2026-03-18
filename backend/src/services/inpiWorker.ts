@@ -39,6 +39,8 @@ const CHROME_CANDIDATE_PATHS = [
     '/usr/bin/google-chrome-stable',
     '/usr/bin/chromium-browser',
     '/usr/bin/chromium',
+    '/usr/lib/chromium/chromium',
+    '/usr/lib/chromium/chrome',
     '/snap/bin/chromium'
 ].filter((item): item is string => Boolean(item && item.trim()));
 
