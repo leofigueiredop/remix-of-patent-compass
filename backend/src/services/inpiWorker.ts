@@ -31,6 +31,16 @@ let sharedBrowser: Browser | null = null;
 let sharedPage: Page | null = null;
 let sessionStartedAt = 0;
 let sessionQueue: Promise<void> = Promise.resolve();
+const CHROME_CANDIDATE_PATHS = [
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    process.env.CHROME_PATH,
+    process.env.CHROME_BIN,
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    '/snap/bin/chromium'
+].filter((item): item is string => Boolean(item && item.trim()));
 
 function isDetachedFrameError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error || '');
@@ -338,18 +348,32 @@ async function ensureLoggedIn(page: Page): Promise<boolean> {
 }
 
 async function initBrowser() {
-    return await puppeteer.launch({
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu',
-            '--disable-web-security',
-            '--disable-features=IsolateOrigins,site-per-process',
-            '--window-size=1280,1024'
-        ]
-    });
+    const args = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins,site-per-process',
+        '--window-size=1280,1024'
+    ];
+    const launchErrors: string[] = [];
+    const launchAttempts: Array<{ executablePath?: string }> = [{}, ...CHROME_CANDIDATE_PATHS
+        .filter((p) => fs.existsSync(p))
+        .map((p) => ({ executablePath: p }))];
+    for (const attempt of launchAttempts) {
+        try {
+            return await puppeteer.launch({
+                headless: true,
+                args,
+                ...(attempt.executablePath ? { executablePath: attempt.executablePath } : {})
+            });
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            launchErrors.push(attempt.executablePath ? `${attempt.executablePath}: ${msg}` : `default: ${msg}`);
+        }
+    }
+    throw new Error(`INPI_BROWSER_LAUNCH_FAILED ${launchErrors.join(' | ')}`);
 }
 
 async function ensureSessionPage(): Promise<Page> {

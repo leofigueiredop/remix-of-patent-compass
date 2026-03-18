@@ -1533,15 +1533,28 @@ async function resolveDocdbId(publicationNumber: string): Promise<string | null>
 
 async function resolveExistingStorageKey(candidates: Array<string | undefined | null>): Promise<string | null> {
     const seen = new Set<string>();
+    const testKey = async (base: string): Promise<string | null> => {
+        if (!base || seen.has(base)) return null;
+        seen.add(base);
+        const key = `patent-docs/${base}/full_document.pdf`;
+        if (await objectExistsInS3(key)) return key;
+        return null;
+    };
     for (const raw of candidates) {
         const normalized = normalizeText(raw || '');
         if (!normalized) continue;
         const safeBase = normalized.replace(/[^\w.-]/g, '_');
-        if (!safeBase || seen.has(safeBase)) continue;
-        seen.add(safeBase);
-        const key = `patent-docs/${safeBase}/full_document.pdf`;
-        if (await objectExistsInS3(key)) {
-            return key;
+        const compactBase = normalized.replace(/[^\w]/g, '').toUpperCase();
+        const patentKeyBase = buildPatentNumberKey(normalized);
+        const candidatesBase = [
+            safeBase,
+            safeBase.toUpperCase(),
+            compactBase,
+            patentKeyBase
+        ].filter(Boolean);
+        for (const base of candidatesBase) {
+            const key = await testKey(base);
+            if (key) return key;
         }
     }
     return null;
@@ -2405,11 +2418,15 @@ async function processNextInpiJob() {
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             console.error(`❌ INPI Worker falhou: ${job.patent_number} - ${errorMessage}`);
+            const infraBrowserError = errorMessage.includes('INPI_BROWSER_LAUNCH_FAILED')
+                || errorMessage.includes('Failed to launch the browser process')
+                || errorMessage.includes('spawn ')
+                || errorMessage.includes(' ENOENT');
             
             await prisma.inpiProcessingJob.update({
                 where: { id: job.id },
                 data: {
-                    status: nextAttempt >= 3 ? 'failed_permanent' : 'failed',
+                    status: infraBrowserError || nextAttempt >= 3 ? 'failed_permanent' : 'failed',
                     finished_at: new Date(),
                     error: errorMessage
                 }

@@ -51,6 +51,13 @@ fastify.register(cors, {
     origin: (origin, callback) => {
         if (!origin) return callback(null, true);
         if (corsAllowedOrigins.has(origin)) return callback(null, true);
+        try {
+            const parsed = new URL(origin);
+            if (parsed.protocol === 'https:' && parsed.hostname.endsWith('.seafeetlabs.tech')) {
+                return callback(null, true);
+            }
+        } catch {
+        }
         return callback(new Error('Origin not allowed by CORS'), false);
     },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -2522,34 +2529,22 @@ const start = async () => {
 fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
     const { codPedido } = request.params as { codPedido: string };
 
-    const [dbData, latestInpiJob] = await Promise.all([
-        prisma.inpiPatent.findUnique({
-            where: { cod_pedido: codPedido },
-            include: {
-                publications: true,
-                petitions: true,
-                annuities: true,
-                document_jobs: {
-                    orderBy: { updated_at: 'desc' },
-                    take: 15
-                },
-                scraping_jobs: {
-                    orderBy: { created_at: 'desc' },
-                    take: 1
-                }
-            }
-        }),
-        prismaAny.inpiProcessingJob.findFirst({
-            where: {
-                patent_number: codPedido,
-                status: 'completed'
+    const dbData = await prisma.inpiPatent.findUnique({
+        where: { cod_pedido: codPedido },
+        include: {
+            publications: true,
+            petitions: true,
+            annuities: true,
+            document_jobs: {
+                orderBy: { updated_at: 'desc' },
+                take: 15
             },
-            orderBy: { finished_at: 'desc' },
-            select: {
-                result_data: true
+            scraping_jobs: {
+                orderBy: { created_at: 'desc' },
+                take: 1
             }
-        }).catch(() => null)
-    ]);
+        }
+    });
 
     if (!dbData) {
         return reply.code(404).send({
@@ -2558,6 +2553,24 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
         });
     }
     const publicationNumber = dbData.numero_publicacao || dbData.cod_pedido;
+    const inpiLookupKeys = Array.from(new Set([
+        codPedido,
+        dbData.cod_pedido,
+        dbData.numero_publicacao,
+        String(codPedido || '').replace(/[^\w.-]/g, ''),
+        String(codPedido || '').replace(/[^\dA-Za-z]/g, '').toUpperCase(),
+        String(dbData.numero_publicacao || '').replace(/[^\dA-Za-z]/g, '').toUpperCase()
+    ].filter((item) => typeof item === 'string' && item.trim().length > 0)));
+    const latestInpiJob = await prismaAny.inpiProcessingJob.findFirst({
+        where: {
+            status: 'completed',
+            patent_number: { in: inpiLookupKeys }
+        },
+        orderBy: { finished_at: 'desc' },
+        select: {
+            result_data: true
+        }
+    }).catch(() => null);
     const completedDocJob = (dbData.document_jobs || []).find((item: any) => item?.status === 'completed' && item?.storage_key);
     const hasStoredDocument = Boolean(completedDocJob?.storage_key);
     const latestDocJob = dbData.document_jobs?.[0] || null;
