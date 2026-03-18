@@ -367,8 +367,13 @@ async function initBrowser() {
     const args = [
         '--no-sandbox',
         '--disable-setuid-sandbox',
+        '--no-zygote',
+        '--single-process',
         '--disable-dev-shm-usage',
         '--disable-gpu',
+        '--disable-software-rasterizer',
+        '--disable-extensions',
+        '--disable-background-networking',
         '--disable-web-security',
         '--disable-features=IsolateOrigins,site-per-process',
         '--window-size=1280,1024'
@@ -381,6 +386,8 @@ async function initBrowser() {
         try {
             return await puppeteer.launch({
                 headless: true,
+                pipe: true,
+                dumpio: true,
                 args,
                 ...(attempt.executablePath ? { executablePath: attempt.executablePath } : {})
             });

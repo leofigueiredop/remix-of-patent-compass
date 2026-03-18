@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM node:20-alpine AS builder
+FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
@@ -10,7 +10,7 @@ RUN npx prisma generate
 RUN npm run build
 
 # Stage 2: Production
-FROM node:20-alpine
+FROM node:20-bookworm-slim
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --only=production
@@ -19,17 +19,39 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/client
 COPY --from=builder /app/prisma ./prisma
 
-# Install ffmpeg, curl + iconv and chromium for INPI scraping
-RUN apk add --no-cache ffmpeg curl gnu-libiconv chromium nss freetype harfbuzz ttf-freefont udev
-RUN if [ -x /usr/bin/chromium-browser ]; then \
-      ln -sf /usr/bin/chromium-browser /usr/bin/google-chrome-stable && \
-      ln -sf /usr/bin/chromium-browser /usr/bin/google-chrome ; \
-    elif [ -x /usr/bin/chromium ]; then \
-      ln -sf /usr/bin/chromium /usr/bin/chromium-browser && \
-      ln -sf /usr/bin/chromium /usr/bin/google-chrome-stable && \
-      ln -sf /usr/bin/chromium /usr/bin/google-chrome ; \
-    fi
-ENV LD_PRELOAD=/usr/lib/preloadable_libiconv.so
+# Install ffmpeg, curl and chromium for INPI scraping
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    ffmpeg \
+    curl \
+    chromium \
+    ca-certificates \
+    fonts-liberation \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgbm1 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libpango-1.0-0 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxrandr2 \
+    xdg-utils \
+    && rm -rf /var/lib/apt/lists/*
+RUN ln -sf /usr/bin/chromium /usr/bin/chromium-browser \
+    && ln -sf /usr/bin/chromium /usr/bin/google-chrome-stable \
+    && ln -sf /usr/bin/chromium /usr/bin/google-chrome
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 ENV CHROME_BIN=/usr/bin/google-chrome-stable
