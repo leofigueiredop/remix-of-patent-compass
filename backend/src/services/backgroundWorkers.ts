@@ -934,6 +934,33 @@ async function queueDocumentJobForPatent(params: {
     if (!shouldQueueDocumentByDispatchCode(params.dispatchCode)) {
         return;
     }
+    const existingStorageKey = await resolveExistingStorageKey([
+        params.publicationNumber,
+        existing?.publication_number,
+        params.patentId
+    ]);
+    if (existingStorageKey) {
+        await prisma.documentDownloadJob.upsert({
+            where: { patent_id: params.patentId },
+            update: {
+                status: 'completed',
+                error: null,
+                storage_key: existingStorageKey,
+                publication_number: params.publicationNumber || existing?.publication_number || null,
+                rpi_number: params.rpiNumber,
+                finished_at: new Date()
+            },
+            create: {
+                patent_id: params.patentId,
+                rpi_number: params.rpiNumber,
+                publication_number: params.publicationNumber || null,
+                status: 'completed',
+                storage_key: existingStorageKey,
+                finished_at: new Date()
+            }
+        });
+        return;
+    }
     if (existing && ['pending', 'running', 'completed'].includes(existing.status)) return;
     await prisma.documentDownloadJob.upsert({
         where: { patent_id: params.patentId },
