@@ -17,6 +17,7 @@ const RPI_LOOKBACK_ISSUES = Math.max(26, parseInt(process.env.RPI_LOOKBACK_ISSUE
 const RPI_SCAN_MAX = Math.max(2000, parseInt(process.env.RPI_SCAN_MAX || '4000', 10));
 const RPI_SCAN_MIN = Math.max(1, parseInt(process.env.RPI_SCAN_MIN || '2000', 10));
 const RPI_FORCE_LATEST = parseInt(process.env.RPI_FORCE_LATEST || '0', 10);
+const RPI_PROCESS_ORDER: 'asc' | 'desc' = (process.env.RPI_PROCESS_ORDER || 'desc').toLowerCase() === 'asc' ? 'asc' : 'desc';
 const MAX_RPI_ATTEMPTS = Math.max(2, parseInt(process.env.MAX_RPI_ATTEMPTS || '8', 10));
 const MAX_DOC_ATTEMPTS = Math.max(2, parseInt(process.env.MAX_DOC_ATTEMPTS || '6', 10));
 const STALE_JOB_MINUTES = Math.max(5, parseInt(process.env.STALE_JOB_MINUTES || '12', 10));
@@ -1305,7 +1306,7 @@ async function processNextRpiImportJob() {
     try {
         let job = await prisma.rpiImportJob.findFirst({
             where: { status: 'pending' },
-            orderBy: [{ rpi_number: 'desc' }, { created_at: 'asc' }]
+            orderBy: [{ rpi_number: RPI_PROCESS_ORDER }, { created_at: 'asc' }]
         });
         if (!job) {
             job = await prisma.rpiImportJob.findFirst({
@@ -1313,7 +1314,7 @@ async function processNextRpiImportJob() {
                     status: 'failed',
                     attempts: { lt: MAX_RPI_ATTEMPTS }
                 },
-                orderBy: [{ attempts: 'asc' }, { updated_at: 'asc' }, { rpi_number: 'desc' }]
+                orderBy: [{ attempts: 'asc' }, { updated_at: 'asc' }, { rpi_number: RPI_PROCESS_ORDER }]
             });
         }
         if (!job) return;
@@ -1940,6 +1941,9 @@ async function processNextDocumentJob() {
             }
 
             const tryEspacenetPuppeteerFallback = async (reasonCode: string): Promise<boolean> => {
+                if (!ESPACENET_UI_FALLBACK_ENABLED || INPI_SCRAPE_FIRST_ENABLED) {
+                    return false;
+                }
                 try {
                     const module = await import('./espacenetScraper');
                     if (!module?.downloadEspacenetOriginalDocument) return false;
@@ -2197,10 +2201,11 @@ export async function debugInpiLookup(patentNumber: string) {
     return { patentNumber, ...result };
 }
 
-export function setBackgroundWorkerPause(queue: 'rpi' | 'docs' | 'ops' | 'all', paused: boolean) {
+export function setBackgroundWorkerPause(queue: 'rpi' | 'docs' | 'ops' | 'inpi' | 'all', paused: boolean) {
     if (queue === 'all' || queue === 'rpi') rpiPaused = paused;
     if (queue === 'all' || queue === 'docs') docsPaused = paused;
     if (queue === 'all' || queue === 'ops') opsPaused = paused;
+    if (queue === 'all' || queue === 'inpi') inpiPaused = paused;
     return getBackgroundWorkerState();
 }
 

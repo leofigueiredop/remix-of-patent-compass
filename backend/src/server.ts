@@ -19,6 +19,7 @@ import {
     enqueueLastFiveYearsRpi,
     getBackgroundWorkerState,
     retryAllDocumentErrorJobs,
+    retryInpiJob,
     retryAllOpsErrorJobs,
     retryAllRpiErrorJobs,
     retryDocumentJob,
@@ -119,6 +120,39 @@ function isRetryableInpiNetworkError(message: string): boolean {
         || normalized.includes('timed out')
         || normalized.includes('empty reply')
         || normalized.includes('connection reset');
+}
+
+function isMissingTableError(error: any): boolean {
+    return Boolean(error && error.code === 'P2021');
+}
+
+function emptyBackgroundQueuesPayload() {
+    return {
+        rpi: {
+            processing: [],
+            success: [],
+            errors: [],
+            counts: { processing: 0, success: 0, errors: 0 }
+        },
+        docs: {
+            processing: [],
+            success: [],
+            errors: [],
+            counts: { processing: 0, success: 0, errors: 0 }
+        },
+        ops: {
+            processing: [],
+            success: [],
+            errors: [],
+            counts: { processing: 0, success: 0, errors: 0 }
+        },
+        inpi: {
+            processing: [],
+            success: [],
+            errors: [],
+            counts: { processing: 0, success: 0, errors: 0 }
+        }
+    };
 }
 
 async function execInpiCurlWithRetry(command: string, attempts = 3, timeout = 30000, maxBuffer?: number): Promise<{ stdout: string; stderr: string; }> {
@@ -2601,76 +2635,94 @@ fastify.get('/patent/storage/:publicationNumber/:asset', async (request: any, re
 });
 
 // ─── Patent Base Endpoints ──────────────────────────────
-fastify.get('/patents/processed', async (request: any) => {
-    const { page = 1, pageSize = 20, q } = request.query as any;
-    const skip = (parseInt(page, 10) - 1) * parseInt(pageSize, 10);
-    const take = parseInt(pageSize, 10);
-    const queryText = String(q || '').trim();
-    const whereClause: any = queryText
-        ? {
-            OR: [
-                { cod_pedido: { contains: queryText } },
-                { numero_publicacao: { contains: queryText } },
-                { title: { contains: queryText } },
-                { applicant: { contains: queryText } },
-                { inventors: { contains: queryText } }
-            ]
-        }
-        : undefined;
+fastify.get('/patents/processed', async (request: any, reply) => {
+    try {
+        const { page = 1, pageSize = 20, q } = request.query as any;
+        const skip = (parseInt(page, 10) - 1) * parseInt(pageSize, 10);
+        const take = parseInt(pageSize, 10);
+        const queryText = String(q || '').trim();
+        const whereClause: any = queryText
+            ? {
+                OR: [
+                    { cod_pedido: { contains: queryText } },
+                    { numero_publicacao: { contains: queryText } },
+                    { title: { contains: queryText } },
+                    { applicant: { contains: queryText } },
+                    { inventors: { contains: queryText } }
+                ]
+            }
+            : undefined;
 
-    const [patents, total] = await Promise.all([
-        prisma.inpiPatent.findMany({
-            skip,
-            take,
-            orderBy: { updated_at: 'desc' },
-            where: whereClause,
-            include: {
-                publications: {
-                    orderBy: { created_at: 'desc' },
-                    take: 1
-                },
-                document_jobs: {
-                    orderBy: { updated_at: 'desc' },
-                    take: 1
-                },
-                _count: {
-                    select: {
-                        publications: true,
-                        petitions: true,
-                        annuities: true
+        const [patents, total] = await Promise.all([
+            prisma.inpiPatent.findMany({
+                skip,
+                take,
+                orderBy: { updated_at: 'desc' },
+                where: whereClause,
+                include: {
+                    publications: {
+                        orderBy: { created_at: 'desc' },
+                        take: 1
+                    },
+                    document_jobs: {
+                        orderBy: { updated_at: 'desc' },
+                        take: 1
+                    },
+                    _count: {
+                        select: {
+                            publications: true,
+                            petitions: true,
+                            annuities: true
+                        }
                     }
                 }
-            }
-        }),
-        prisma.inpiPatent.count({ where: whereClause })
-    ]);
+            }),
+            prisma.inpiPatent.count({ where: whereClause })
+        ]);
 
-    return {
-        patents: patents.map((patent: any) => {
-            const latestPublication = patent.publications?.[0];
-            const latestDocJob = patent.document_jobs?.[0];
+        return {
+            patents: patents.map((patent: any) => {
+                const latestPublication = patent.publications?.[0];
+                const latestDocJob = patent.document_jobs?.[0];
+                return {
+                    ...patent,
+                    title: patent.title || latestPublication?.ops_title || '',
+                    applicant: patent.applicant || latestPublication?.ops_applicant || '',
+                    inventors: patent.inventors || latestPublication?.ops_inventor || '',
+                    filing_date: patent.filing_date || latestPublication?.ops_publication_date || '',
+                    ipc_codes: patent.ipc_codes || latestPublication?.ops_ipc || '',
+                    document_status: latestDocJob?.status || 'not_queued',
+                    document_error: latestDocJob?.error || null,
+                    has_stored_document: Boolean(latestDocJob?.status === 'completed' && latestDocJob?.storage_key)
+                };
+            }),
+            total,
+            page: parseInt(page, 10),
+            pageSize: take,
+            totalPages: Math.ceil(total / take)
+        };
+    } catch (error: any) {
+        if (isMissingTableError(error)) {
+            const page = parseInt(String(request.query?.page || 1), 10) || 1;
+            const pageSize = parseInt(String(request.query?.pageSize || 20), 10) || 20;
+            request.log.warn({ error }, 'Fallback /patents/processed por tabela ausente');
             return {
-                ...patent,
-                title: patent.title || latestPublication?.ops_title || '',
-                applicant: patent.applicant || latestPublication?.ops_applicant || '',
-                inventors: patent.inventors || latestPublication?.ops_inventor || '',
-                filing_date: patent.filing_date || latestPublication?.ops_publication_date || '',
-                ipc_codes: patent.ipc_codes || latestPublication?.ops_ipc || '',
-                document_status: latestDocJob?.status || 'not_queued',
-                document_error: latestDocJob?.error || null,
-                has_stored_document: Boolean(latestDocJob?.status === 'completed' && latestDocJob?.storage_key)
+                patents: [],
+                total: 0,
+                page,
+                pageSize,
+                totalPages: 0
             };
-        }),
-        total,
-        page: parseInt(page, 10),
-        pageSize: take,
-        totalPages: Math.ceil(total / take)
-    };
+        }
+        request.log.error({ error }, 'Erro em /patents/processed');
+        return reply.code(500).send({ error: 'Falha ao buscar patentes processadas' });
+    }
 });
 
-fastify.get('/background-workers/queues', async (request: any) => {
-    const limit = Math.min(200, Math.max(20, parseInt((request.query?.limit || '100') as string, 10)));
-    const [rpiProcessing, rpiSuccess, rpiErrors, docsProcessing, docsSuccess, docsErrors, opsProcessing, opsSuccess, opsErrors, rpiProcessingCount, rpiSuccessCount, rpiErrorsCount, docsProcessingCount, docsSuccessCount, docsErrorsCount, opsProcessingCount, opsSuccessCount, opsErrorsCount] = await Promise.all([
+fastify.get('/background-workers/queues', async (request: any, reply) => {
+    try {
+        const limit = Math.min(200, Math.max(20, parseInt((request.query?.limit || '100') as string, 10)));
+        const [rpiProcessing, rpiSuccess, rpiErrors, docsProcessing, docsSuccess, docsErrors, opsProcessing, opsSuccess, opsErrors, inpiProcessing, inpiSuccess, inpiErrors, rpiProcessingCount, rpiSuccessCount, rpiErrorsCount, docsProcessingCount, docsSuccessCount, docsErrorsCount, opsProcessingCount, opsSuccessCount, opsErrorsCount, inpiProcessingCount, inpiSuccessCount, inpiErrorsCount] = await Promise.all([
         prisma.rpiImportJob.findMany({
             where: { status: { in: ['pending', 'running'] } },
             orderBy: [{ rpi_number: 'asc' }, { created_at: 'asc' }],
@@ -2725,6 +2777,21 @@ fastify.get('/background-workers/queues', async (request: any) => {
             orderBy: { finished_at: 'desc' },
             take: limit
         }),
+            prismaAny.inpiProcessingJob.findMany({
+                where: { status: { in: ['pending', 'running'] } },
+                orderBy: [{ priority: 'desc' }, { created_at: 'asc' }],
+                take: limit
+            }),
+            prismaAny.inpiProcessingJob.findMany({
+                where: { status: 'completed' },
+                orderBy: { finished_at: 'desc' },
+                take: limit
+            }),
+            prismaAny.inpiProcessingJob.findMany({
+                where: { status: { in: ['failed', 'failed_permanent'] } },
+                orderBy: { finished_at: 'desc' },
+                take: limit
+            }),
         prisma.rpiImportJob.count({
             where: { status: { in: ['pending', 'running'] } }
         }),
@@ -2751,6 +2818,15 @@ fastify.get('/background-workers/queues', async (request: any) => {
         }),
         prismaAny.opsBibliographicJob.count({
             where: { status: { in: ['failed', 'failed_permanent', 'not_found'] } }
+            }),
+            prismaAny.inpiProcessingJob.count({
+                where: { status: { in: ['pending', 'running'] } }
+            }),
+            prismaAny.inpiProcessingJob.count({
+                where: { status: 'completed' }
+            }),
+            prismaAny.inpiProcessingJob.count({
+                where: { status: { in: ['failed', 'failed_permanent'] } }
         })
     ]);
 
@@ -2775,39 +2851,58 @@ fastify.get('/background-workers/queues', async (request: any) => {
         ...row,
         source: extractSource(row.error) || (row.docdb_id ? 'ops_api' : null)
     }));
+    const mapInpi = (rows: any[]) => rows.map((row) => ({ ...row, source: 'inpi' }));
 
-    return {
-        rpi: {
-            processing: mapRpi(rpiProcessing),
-            success: mapRpi(rpiSuccess),
-            errors: mapRpi(rpiErrors),
-            counts: {
-                processing: rpiProcessingCount,
-                success: rpiSuccessCount,
-                errors: rpiErrorsCount
+        return {
+            rpi: {
+                processing: mapRpi(rpiProcessing),
+                success: mapRpi(rpiSuccess),
+                errors: mapRpi(rpiErrors),
+                counts: {
+                    processing: rpiProcessingCount,
+                    success: rpiSuccessCount,
+                    errors: rpiErrorsCount
+                }
+            },
+            docs: {
+                processing: mapDocs(docsProcessing),
+                success: mapDocs(docsSuccess),
+                errors: mapDocs(docsErrors),
+                counts: {
+                    processing: docsProcessingCount,
+                    success: docsSuccessCount,
+                    errors: docsErrorsCount
+                }
+            },
+            ops: {
+                processing: mapOps(opsProcessing),
+                success: mapOps(opsSuccess),
+                errors: mapOps(opsErrors),
+                counts: {
+                    processing: opsProcessingCount,
+                    success: opsSuccessCount,
+                    errors: opsErrorsCount
+                }
+            },
+            inpi: {
+                processing: mapInpi(inpiProcessing),
+                success: mapInpi(inpiSuccess),
+                errors: mapInpi(inpiErrors),
+                counts: {
+                    processing: inpiProcessingCount,
+                    success: inpiSuccessCount,
+                    errors: inpiErrorsCount
+                }
             }
-        },
-        docs: {
-            processing: mapDocs(docsProcessing),
-            success: mapDocs(docsSuccess),
-            errors: mapDocs(docsErrors),
-            counts: {
-                processing: docsProcessingCount,
-                success: docsSuccessCount,
-                errors: docsErrorsCount
-            }
-        },
-        ops: {
-            processing: mapOps(opsProcessing),
-            success: mapOps(opsSuccess),
-            errors: mapOps(opsErrors),
-            counts: {
-                processing: opsProcessingCount,
-                success: opsSuccessCount,
-                errors: opsErrorsCount
-            }
+        };
+    } catch (error: any) {
+        if (isMissingTableError(error)) {
+            request.log.warn({ error }, 'Fallback /background-workers/queues por tabela ausente');
+            return emptyBackgroundQueuesPayload();
         }
-    };
+        request.log.error({ error }, 'Erro em /background-workers/queues');
+        return reply.code(500).send({ error: 'Falha ao carregar filas de background workers' });
+    }
 });
 
 fastify.post('/background-workers/rpi/bootstrap', async (_request, reply) => {
@@ -3003,12 +3098,22 @@ fastify.get('/background-workers/inpi/test', async (request: any, reply) => {
 });
 
 fastify.post('/background-workers/control', async (request: any, reply) => {
-    const { queue, action } = request.body as { queue?: 'rpi' | 'docs' | 'ops' | 'all'; action?: 'pause' | 'resume' };
+    const { queue, action } = request.body as { queue?: 'rpi' | 'docs' | 'ops' | 'inpi' | 'all'; action?: 'pause' | 'resume' };
     if (!queue || !action) {
         return reply.code(400).send({ error: 'queue e action são obrigatórios' });
     }
     const paused = action === 'pause';
     return setBackgroundWorkerPause(queue, paused);
+});
+
+fastify.post('/background-workers/inpi/retry/:id', async (request: any, reply) => {
+    const { id } = request.params as { id: string };
+    try {
+        const job = await retryInpiJob(id);
+        return { id: job.id, status: job.status };
+    } catch (error) {
+        return reply.code(404).send({ error: 'Job INPI não encontrado' });
+    }
 });
 
 fastify.post('/background-workers/rpi/retry/:id', async (request: any, reply) => {
@@ -3387,22 +3492,31 @@ fastify.post('/monitoring/patents/:id/toggle', async (request: any, reply) => {
     return updated[0];
 });
 
-fastify.get('/patents/queue', async () => {
-    const jobs = await prisma.scrapingJob.findMany({
-        where: {
-            status: { in: ['pending', 'running', 'failed'] }
-        },
-        orderBy: { created_at: 'desc' },
-        include: {
-            patent: {
-                select: {
-                    numero_publicacao: true,
-                    title: true
+fastify.get('/patents/queue', async (request: any, reply) => {
+    try {
+        const jobs = await prisma.scrapingJob.findMany({
+            where: {
+                status: { in: ['pending', 'running', 'failed'] }
+            },
+            orderBy: { created_at: 'desc' },
+            include: {
+                patent: {
+                    select: {
+                        numero_publicacao: true,
+                        title: true
+                    }
                 }
             }
+        });
+        return { jobs };
+    } catch (error: any) {
+        if (isMissingTableError(error)) {
+            request.log.warn({ error }, 'Fallback /patents/queue por tabela ausente');
+            return { jobs: [] };
         }
-    });
-    return { jobs };
+        request.log.error({ error }, 'Erro em /patents/queue');
+        return reply.code(500).send({ error: 'Falha ao carregar fila de patentes' });
+    }
 });
 
 fastify.post('/patent/queue', async (request: any, reply) => {
