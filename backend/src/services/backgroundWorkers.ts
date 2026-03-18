@@ -2413,7 +2413,7 @@ export async function retryAllInpiErrorJobs(ids?: string[]) {
     return { updated: result.count };
 }
 
-export async function enqueueInpiReprocessing(patentNumbers?: string[], priority = 5) {
+export async function enqueueInpiReprocessing(patentNumbers?: string[], priority = 10) {
     if (!patentNumbers || patentNumbers.length === 0) {
         // Se não especificado, enfileira todas as patentes BR existentes
         const existingPatents = await prisma.inpiPatent.findMany({
@@ -2445,21 +2445,22 @@ export async function startBackgroundWorkers() {
     recoverStaleRunningJobs().catch(() => undefined);
     quarantineInvalidFutureRpiJobs().catch(() => undefined);
     enqueueLastFiveYearsRpi().catch(() => undefined);
+    processNextInpiJob().catch(() => undefined);
     processNextRpiImportJob().catch(() => undefined);
     processNextDocumentJob().catch(() => undefined);
     processNextOpsBibliographicJob().catch(() => undefined);
+    setInterval(() => {
+        processNextInpiJob().catch(() => undefined);
+    }, 3000);
     setInterval(() => {
         processNextRpiImportJob().catch(() => undefined);
     }, 4000);
     setInterval(() => {
         processNextDocumentJob().catch(() => undefined);
-    }, 3000);
+    }, 5000);
     setInterval(() => {
         processNextOpsBibliographicJob().catch(() => undefined);
-    }, 3000);
-    setInterval(() => {
-        processNextInpiJob().catch(() => undefined);
-    }, 5000);
+    }, 6000);
     setInterval(() => {
         recoverStaleRunningJobs().catch(() => undefined);
     }, 60 * 1000);
