@@ -38,4 +38,4 @@ ENV CHROME_PATH=/usr/bin/google-chrome-stable
 ENV PORT=3000
 EXPOSE 3000
 
-CMD npx prisma db push --accept-data-loss && node dist/server.js
+CMD npx prisma migrate deploy && node dist/server.js

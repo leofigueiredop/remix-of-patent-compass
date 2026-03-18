@@ -5,7 +5,7 @@
     "main": "dist/server.js",
     "scripts": {
         "build": "tsc",
-        "start": "npx prisma db push && node dist/server.js",
+        "start": "npx prisma migrate deploy && node dist/server.js",
         "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
         "pipeline:rebuild": "node scripts/rebuild-rpi-processing.js",
         "server:prepare:ubuntu": "bash scripts/install-browser-deps-ubuntu.sh"
