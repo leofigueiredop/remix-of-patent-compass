@@ -42,6 +42,20 @@ const CHROME_CANDIDATE_PATHS = [
     '/snap/bin/chromium'
 ].filter((item): item is string => Boolean(item && item.trim()));
 
+function formatLaunchError(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    if (error && typeof error === 'object') {
+        const anyErr = error as any;
+        if (typeof anyErr.message === 'string' && anyErr.message.trim()) return anyErr.message;
+        try {
+            return JSON.stringify(anyErr);
+        } catch {
+            return String(anyErr);
+        }
+    }
+    return String(error);
+}
+
 function isDetachedFrameError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error || '');
     const lower = message.toLowerCase();
@@ -369,7 +383,7 @@ async function initBrowser() {
                 ...(attempt.executablePath ? { executablePath: attempt.executablePath } : {})
             });
         } catch (error) {
-            const msg = error instanceof Error ? error.message : String(error);
+            const msg = formatLaunchError(error);
             launchErrors.push(attempt.executablePath ? `${attempt.executablePath}: ${msg}` : `default: ${msg}`);
         }
     }

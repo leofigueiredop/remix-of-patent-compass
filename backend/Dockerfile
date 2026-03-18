@@ -21,11 +21,19 @@ COPY --from=builder /app/prisma ./prisma
 
 # Install ffmpeg, curl + iconv and chromium for INPI scraping
 RUN apk add --no-cache ffmpeg curl gnu-libiconv chromium nss freetype harfbuzz ttf-freefont udev
+RUN if [ -x /usr/bin/chromium-browser ]; then \
+      ln -sf /usr/bin/chromium-browser /usr/bin/google-chrome-stable && \
+      ln -sf /usr/bin/chromium-browser /usr/bin/google-chrome ; \
+    elif [ -x /usr/bin/chromium ]; then \
+      ln -sf /usr/bin/chromium /usr/bin/chromium-browser && \
+      ln -sf /usr/bin/chromium /usr/bin/google-chrome-stable && \
+      ln -sf /usr/bin/chromium /usr/bin/google-chrome ; \
+    fi
 ENV LD_PRELOAD=/usr/lib/preloadable_libiconv.so
 ENV PUPPETEER_SKIP_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
-ENV CHROME_BIN=/usr/bin/chromium-browser
-ENV CHROME_PATH=/usr/bin/chromium-browser
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+ENV CHROME_BIN=/usr/bin/google-chrome-stable
+ENV CHROME_PATH=/usr/bin/google-chrome-stable
 
 ENV PORT=3000
 EXPOSE 3000
