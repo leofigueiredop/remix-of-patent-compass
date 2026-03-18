@@ -42,6 +42,8 @@ export interface PatentDocumentData {
   inventor?: string;
   date?: string;
   abstract?: string;
+  resumo_detalhado?: string;
+  procurador?: string;
   classification?: string;
   source?: string;
   url: string;
@@ -218,6 +220,8 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
           cod_pedido: data.cod_pedido || codPedido,
           title: data.title || patent.title,
           abstract: data.abstract || patent.abstract,
+          resumo_detalhado: data.resumo_detalhado || data.abstract || patent.resumo_detalhado || patent.abstract,
+          procurador: data.procurador || patent.procurador,
           applicant: data.applicant || patent.applicant,
           inventor: data.inventors || patent.inventor,
           date: data.filing_date || patent.date,
@@ -405,10 +409,16 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
                   </div>
                 ))}
               </div>
-              {(detailedData?.abstract || patent.abstract) && (
+              {(detailedData?.procurador || patent.procurador) && (
                 <p className="text-xs text-muted-foreground">
-                  <span className="font-medium">Resumo:</span> {detailedData?.abstract || patent.abstract}
+                  <span className="font-medium">Procurador:</span> {detailedData?.procurador || patent.procurador}
                 </p>
+              )}
+              {(detailedData?.resumo_detalhado || detailedData?.abstract || patent.resumo_detalhado || patent.abstract) && (
+                <div className="text-xs text-muted-foreground rounded border bg-background px-2 py-2 whitespace-pre-wrap leading-relaxed">
+                  <span className="font-medium">Resumo detalhado:</span>{" "}
+                  {detailedData?.resumo_detalhado || detailedData?.abstract || patent.resumo_detalhado || patent.abstract}
+                </div>
               )}
               {(detailedData?.document_error || patent.document_error) && (
                 <p className="text-xs text-amber-600">

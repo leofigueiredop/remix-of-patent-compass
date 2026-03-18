@@ -1281,6 +1281,18 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
         }
 
         if (isDocumentEligible && patentId) {
+            if (INPI_SCRAPE_FIRST_ENABLED) {
+                await prisma.inpiProcessingJob.createMany({
+                    data: [{
+                        patent_number: patentId,
+                        priority: 10,
+                        status: 'pending',
+                        attempts: 0,
+                        created_at: new Date()
+                    }],
+                    skipDuplicates: true
+                }).catch(() => undefined);
+            }
             await queueDocumentJobForPatent({
                 patentId,
                 rpiNumber,

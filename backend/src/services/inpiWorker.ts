@@ -32,6 +32,24 @@ let sharedPage: Page | null = null;
 let sessionStartedAt = 0;
 let sessionQueue: Promise<void> = Promise.resolve();
 
+function isDetachedFrameError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error || '');
+    const lower = message.toLowerCase();
+    return lower.includes('detached frame')
+        || lower.includes('execution context was destroyed')
+        || lower.includes('target closed')
+        || lower.includes('session closed');
+}
+
+async function resetSharedSession() {
+    if (sharedBrowser) {
+        await sharedBrowser.close().catch(() => undefined);
+    }
+    sharedBrowser = null;
+    sharedPage = null;
+    sessionStartedAt = 0;
+}
+
 async function getSessionCookieHeader(): Promise<string | undefined> {
     try {
         const page = sharedPage;
@@ -338,12 +356,11 @@ async function ensureSessionPage(): Promise<Page> {
     await rateLimit();
     
     const now = Date.now();
-    const expired = !sharedBrowser || !sharedPage || (now - sessionStartedAt) > INPI_SESSION_TTL_MS;
+    const pageClosed = sharedPage ? sharedPage.isClosed() : true;
+    const expired = !sharedBrowser || !sharedPage || pageClosed || (now - sessionStartedAt) > INPI_SESSION_TTL_MS;
     
     if (expired) {
-        if (sharedBrowser) {
-            await sharedBrowser.close().catch(() => undefined);
-        }
+        await resetSharedSession();
         
         sharedBrowser = await initBrowser();
         sharedPage = await sharedBrowser.newPage();
@@ -871,97 +888,103 @@ async function extractPatentData(page: Page, codPedido: string) {
 
 export async function processInpiPatent(codPedido: string) {
     return await withSessionLock(async () => {
-        const page = await ensureSessionPage();
-        
-        try {
-            console.log(`🔍 Processando patente INPI: ${codPedido}`);
-            
-            const success = await searchAndOpenPatentDetail(page, codPedido);
-            if (!success) {
-                throw new Error(`Não foi possível encontrar a patente ${codPedido}`);
-            }
-            
-            const patentData = await extractPatentData(page, codPedido);
-            console.log(`✅ Patente ${codPedido} processada com sucesso`);
-            
-            // Salvar no banco de dados
+        for (let attempt = 1; attempt <= 3; attempt++) {
             try {
-                if (Array.isArray(patentData.publicacoes) && patentData.publicacoes.length) {
-                    for (const pub of patentData.publicacoes) {
-                        try {
-                            const existing = await prisma.inpiPublication.findFirst({
-                                where: { patent_id: codPedido, rpi: pub.rpi, despacho_code: pub.despacho_code, date: pub.date, complement: pub.complement }
-                            });
-                            const despacho_desc = classifyPatentStatus(pub.despacho_code, pub.complement);
-                            if (existing) {
-                                await prisma.inpiPublication.update({
-                                    where: { id: existing.id },
-                                    data: {
-                                        despacho_desc,
-                                        rpi_url: pub.rpi_url || existing.rpi_url || undefined,
-                                        eligible_for_doc_download: Boolean(pub.rpi_url)
-                                    }
+                const page = await ensureSessionPage();
+                console.log(`🔍 Processando patente INPI: ${codPedido}`);
+                
+                const success = await searchAndOpenPatentDetail(page, codPedido);
+                if (!success) {
+                    throw new Error(`Não foi possível encontrar a patente ${codPedido}`);
+                }
+                
+                const patentData = await extractPatentData(page, codPedido);
+                console.log(`✅ Patente ${codPedido} processada com sucesso`);
+                
+                try {
+                    if (Array.isArray(patentData.publicacoes) && patentData.publicacoes.length) {
+                        for (const pub of patentData.publicacoes) {
+                            try {
+                                const existing = await prisma.inpiPublication.findFirst({
+                                    where: { patent_id: codPedido, rpi: pub.rpi, despacho_code: pub.despacho_code, date: pub.date, complement: pub.complement }
                                 });
-                            } else {
-                                await prisma.inpiPublication.create({
-                                    data: {
-                                        patent_id: codPedido,
-                                        patent_number: patentData.numeroProcesso || null,
-                                        rpi: pub.rpi,
-                                        date: pub.date,
-                                        despacho_code: pub.despacho_code,
-                                        despacho_desc,
-                                        complement: pub.complement,
-                                        eligible_for_doc_download: Boolean(pub.rpi_url),
-                                        rpi_url: pub.rpi_url || null
-                                    }
-                                });
+                                const despacho_desc = classifyPatentStatus(pub.despacho_code, pub.complement);
+                                if (existing) {
+                                    await prisma.inpiPublication.update({
+                                        where: { id: existing.id },
+                                        data: {
+                                            despacho_desc,
+                                            rpi_url: pub.rpi_url || existing.rpi_url || undefined,
+                                            eligible_for_doc_download: Boolean(pub.rpi_url)
+                                        }
+                                    });
+                                } else {
+                                    await prisma.inpiPublication.create({
+                                        data: {
+                                            patent_id: codPedido,
+                                            patent_number: patentData.numeroProcesso || null,
+                                            rpi: pub.rpi,
+                                            date: pub.date,
+                                            despacho_code: pub.despacho_code,
+                                            despacho_desc,
+                                            complement: pub.complement,
+                                            eligible_for_doc_download: Boolean(pub.rpi_url),
+                                            rpi_url: pub.rpi_url || null
+                                        }
+                                    });
+                                }
+                            } catch (e) {
+                                const msg = (e as any)?.message ?? String(e);
+                                console.warn(`Falha ao persistir publicação RPI ${pub.rpi}: ${msg}`);
                             }
-                        } catch (e) {
-                            const msg = (e as any)?.message ?? String(e);
-                            console.warn(`Falha ao persistir publicação RPI ${pub.rpi}: ${msg}`);
                         }
                     }
+                    await prisma.inpiPatent.upsert({
+                        where: { cod_pedido: codPedido },
+                        update: {
+                            title: patentData.titulo || undefined,
+                            abstract: patentData.resumo || undefined,
+                            applicant: patentData.titular || undefined,
+                            inventors: (patentData.inventores || patentData.inventor) || undefined,
+                            filing_date: patentData.dataDeposito || undefined,
+                            ipc_codes: [patentData.classificacao, patentData.classificacaoIPC].filter(Boolean).join(' | ') || undefined,
+                            status: patentData.status || undefined,
+                            last_event: [patentData.ultimoDespacho, patentData.complementoDespacho, patentData.temDocumentos ? 'DOC' : ''].filter(Boolean).join(' | ') || undefined,
+                            updated_at: new Date()
+                        },
+                        create: {
+                            cod_pedido: codPedido,
+                            numero_publicacao: '',
+                            title: patentData.titulo || '',
+                            abstract: patentData.resumo || '',
+                            applicant: patentData.titular || '',
+                            inventors: (patentData.inventores || patentData.inventor) || '',
+                            filing_date: patentData.dataDeposito || '',
+                            ipc_codes: [patentData.classificacao, patentData.classificacaoIPC].filter(Boolean).join(' | ') || '',
+                            status: patentData.status || '',
+                            last_event: [patentData.ultimoDespacho, patentData.complementoDespacho, patentData.temDocumentos ? 'DOC' : ''].filter(Boolean).join(' | ') || ''
+                        }
+                    });
+                    
+                    console.log(`💾 Dados da patente ${codPedido} salvos no banco`);
+                } catch (dbError) {
+                    const msg = (dbError as any)?.message ?? String(dbError);
+                    console.warn(`⚠️  Não foi possível salvar no banco: ${msg}`);
                 }
-                await prisma.inpiPatent.upsert({
-                    where: { cod_pedido: codPedido },
-                    update: {
-                        title: patentData.titulo || undefined,
-                        abstract: patentData.resumo || undefined,
-                        applicant: patentData.titular || undefined,
-                        inventors: (patentData.inventores || patentData.inventor) || undefined,
-                        filing_date: patentData.dataDeposito || undefined,
-                        ipc_codes: [patentData.classificacao, patentData.classificacaoIPC].filter(Boolean).join(' | ') || undefined,
-                        status: patentData.status || undefined,
-                        last_event: [patentData.ultimoDespacho, patentData.complementoDespacho, patentData.temDocumentos ? 'DOC' : ''].filter(Boolean).join(' | ') || undefined,
-                        updated_at: new Date()
-                    },
-                    create: {
-                        cod_pedido: codPedido,
-                        numero_publicacao: '',
-                        title: patentData.titulo || '',
-                        abstract: patentData.resumo || '',
-                        applicant: patentData.titular || '',
-                        inventors: (patentData.inventores || patentData.inventor) || '',
-                        filing_date: patentData.dataDeposito || '',
-                        ipc_codes: [patentData.classificacao, patentData.classificacaoIPC].filter(Boolean).join(' | ') || '',
-                        status: patentData.status || '',
-                        last_event: [patentData.ultimoDespacho, patentData.complementoDespacho, patentData.temDocumentos ? 'DOC' : ''].filter(Boolean).join(' | ') || ''
-                    }
-                });
                 
-                console.log(`💾 Dados da patente ${codPedido} salvos no banco`);
-            } catch (dbError) {
-                const msg = (dbError as any)?.message ?? String(dbError);
-                console.warn(`⚠️  Não foi possível salvar no banco: ${msg}`);
+                return patentData;
+            } catch (error) {
+                if (isDetachedFrameError(error) && attempt < 3) {
+                    console.warn(`🔄 Sessão INPI inválida para ${codPedido}, reiniciando sessão (tentativa ${attempt}/3)`);
+                    await resetSharedSession();
+                    await humanPause(0.8);
+                    continue;
+                }
+                console.error(`❌ Erro ao processar patente ${codPedido}:`, error);
+                throw error;
             }
-            
-            return patentData;
-            
-        } catch (error) {
-            console.error(`❌ Erro ao processar patente ${codPedido}:`, error);
-            throw error;
         }
+        throw new Error(`Falha inesperada ao processar patente ${codPedido}`);
     });
 }
 

@@ -3,15 +3,10 @@ import AppLayout from "@/components/AppLayout";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { 
     Database, 
-    ListRestart, 
-    CheckCircle2, 
     Loader2, 
-    AlertCircle, 
-    Clock, 
     Search,
     RefreshCw,
     Download,
@@ -24,22 +19,13 @@ import PatentDocumentModal, { PatentDocumentData } from "@/components/PatentDocu
 
 const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000").replace(/\/+$/, "");
 
-interface ScrapingJob {
-    id: string;
-    patent_id: string;
-    status: string;
-    attempts: number;
-    created_at: string;
-    patent: {
-        numero_publicacao: string;
-        title: string;
-    };
-}
-
 interface InpiPatent {
     cod_pedido: string;
     numero_publicacao: string;
     title: string;
+    abstract?: string;
+    resumo_detalhado?: string;
+    procurador?: string;
     applicant: string;
     inventors?: string;
     filing_date: string;
@@ -57,10 +43,8 @@ interface InpiPatent {
 }
 
 export default function PatentBase() {
-    const [jobs, setJobs] = useState<ScrapingJob[]>([]);
     const [patents, setPatents] = useState<InpiPatent[]>([]);
     const [loading, setLoading] = useState(true);
-    const [tab, setTab] = useState("fila");
     const [page, setPage] = useState(1);
     const [totalPatents, setTotalPatents] = useState(0);
     const [query, setQuery] = useState("");
@@ -70,16 +54,11 @@ export default function PatentBase() {
     const fetchData = async () => {
         setLoading(true);
         try {
-            if (tab === "fila") {
-                const res = await axios.get(`${API_URL}/patents/queue`);
-                setJobs(res.data.jobs);
-            } else {
-                const params = new URLSearchParams({ page: String(page) });
-                if (query.trim()) params.set("q", query.trim());
-                const res = await axios.get(`${API_URL}/patents/processed?${params.toString()}`);
-                setPatents(res.data.patents);
-                setTotalPatents(res.data.total);
-            }
+            const params = new URLSearchParams({ page: String(page) });
+            if (query.trim()) params.set("q", query.trim());
+            const res = await axios.get(`${API_URL}/patents/processed?${params.toString()}`);
+            setPatents(res.data.patents);
+            setTotalPatents(res.data.total);
         } catch (err) {
             console.error("Error fetching data:", err);
         } finally {
@@ -89,20 +68,7 @@ export default function PatentBase() {
 
     useEffect(() => {
         fetchData();
-        const interval = setInterval(() => {
-            if (tab === "fila") fetchData();
-        }, 10000); // Auto refresh queue every 10s
-        return () => clearInterval(interval);
-    }, [tab, page, query]);
-
-    const getStatusBadge = (status: string) => {
-        switch (status) {
-            case "completed": return <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20">Concluído</Badge>;
-            case "running": return <Badge className="bg-blue-500/10 text-blue-500 border-blue-500/20 flex gap-1 items-center"><Loader2 className="w-3 h-3 animate-spin"/> Processando</Badge>;
-            case "failed": return <Badge variant="destructive" className="flex gap-1 items-center"><AlertCircle className="w-3 h-3"/> Falha</Badge>;
-            default: return <Badge variant="secondary" className="flex gap-1 items-center"><Clock className="w-3 h-3"/> Pendente</Badge>;
-        }
-    };
+    }, [page, query]);
 
     const openPatentModal = (patent: InpiPatent) => {
         const fallbackUrl = `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${encodeURIComponent(patent.cod_pedido)}`;
@@ -110,6 +76,9 @@ export default function PatentBase() {
             publicationNumber: patent.numero_publicacao || patent.cod_pedido,
             cod_pedido: patent.cod_pedido,
             title: patent.title || "Sem título",
+            abstract: patent.resumo_detalhado || patent.abstract || "",
+            resumo_detalhado: patent.resumo_detalhado || patent.abstract || "",
+            procurador: patent.procurador || "",
             applicant: patent.applicant || "",
             inventor: patent.inventors || "",
             date: patent.filing_date || "",
@@ -143,7 +112,7 @@ export default function PatentBase() {
                             Base de Patentes
                         </h1>
                         <p className="text-muted-foreground">
-                            Gerencie sua base local de patentes sincronizadas e monitore a fila de processamento.
+                            Gerencie sua base local de patentes sincronizadas.
                         </p>
                     </div>
                     <div className="flex gap-3">
@@ -160,85 +129,8 @@ export default function PatentBase() {
                     </div>
                 </div>
 
-                <Tabs value={tab} onValueChange={setTab} className="space-y-6">
-                    <TabsList className="bg-muted/50 p-1 glass-effect border">
-                        <TabsTrigger value="fila" className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground transition-all">
-                            <ListRestart className="w-4 h-4" />
-                            Fila de Processamento
-                            {jobs.length > 0 && (
-                                <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-primary-foreground text-primary rounded-full font-bold">
-                                    {jobs.length}
-                                </span>
-                            )}
-                        </TabsTrigger>
-                        <TabsTrigger value="processadas" className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground transition-all">
-                            <CheckCircle2 className="w-4 h-4" />
-                            Patentes Processadas
-                        </TabsTrigger>
-                    </TabsList>
-
-                    <TabsContent value="fila" className="animate-in fade-in zoom-in-95 duration-500">
-                        <Card className="border-none shadow-2xl glass-effect-dark overflow-hidden">
-                            <CardHeader className="border-b bg-muted/20">
-                                <CardTitle className="text-lg flex items-center gap-2">
-                                    <Clock className="w-5 h-5 text-primary" />
-                                    Fila de Raspagem em Tempo Real
-                                </CardTitle>
-                                <CardDescription>
-                                    Pendente = aguardando execução, Processando = worker em andamento, Falha = tentativa com erro (pode reprocessar).
-                                </CardDescription>
-                            </CardHeader>
-                            <CardContent className="p-0">
-                                {loading && jobs.length === 0 ? (
-                                    <div className="p-12 text-center text-muted-foreground flex flex-col items-center gap-3">
-                                        <Loader2 className="w-10 h-10 animate-spin text-primary/40" />
-                                        Carregando fila...
-                                    </div>
-                                ) : jobs.length === 0 ? (
-                                    <div className="p-20 text-center">
-                                        <div className="w-16 h-16 bg-muted/50 rounded-full flex items-center justify-center mx-auto mb-4 border-2 border-dashed">
-                                            <CheckCircle2 className="w-8 h-8 text-muted-foreground/30" />
-                                        </div>
-                                        <h3 className="font-semibold text-lg mb-1 italic text-muted-foreground">Tudo limpo!</h3>
-                                        <p className="text-muted-foreground text-sm">Nenhum job pendente no momento.</p>
-                                    </div>
-                                ) : (
-                                    <Table>
-                                        <TableHeader className="bg-muted/30">
-                                            <TableRow>
-                                                <TableHead>Patente</TableHead>
-                                                <TableHead>Título</TableHead>
-                                                <TableHead>Status</TableHead>
-                                                <TableHead>Tentativas</TableHead>
-                                                <TableHead>Enfileirado em</TableHead>
-                                            </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                            {jobs.map((job) => (
-                                                <TableRow key={job.id} className="hover:bg-muted/20 transition-colors border-b-muted/20">
-                                                    <TableCell className="font-mono font-medium text-primary">
-                                                        {job.patent?.numero_publicacao || job.patent_id}
-                                                    </TableCell>
-                                                    <TableCell className="max-w-[400px]">
-                                                        <div className="truncate text-sm" title={job.patent?.title}>
-                                                            {job.patent?.title || "Carregando..."}
-                                                        </div>
-                                                    </TableCell>
-                                                    <TableCell>{getStatusBadge(job.status)}</TableCell>
-                                                    <TableCell className="text-sm font-medium">{job.attempts}</TableCell>
-                                                    <TableCell className="text-muted-foreground text-xs font-mono">
-                                                        {format(new Date(job.created_at), "HH:mm:ss 'em' dd/MM", { locale: ptBR })}
-                                                    </TableCell>
-                                                </TableRow>
-                                            ))}
-                                        </TableBody>
-                                    </Table>
-                                )}
-                            </CardContent>
-                        </Card>
-                    </TabsContent>
-
-                    <TabsContent value="processadas" className="animate-in fade-in zoom-in-95 duration-500">
+                <div className="space-y-6">
+                    <div className="animate-in fade-in zoom-in-95 duration-500">
                         <Card className="border-none shadow-2xl glass-effect-dark overflow-hidden">
                             <CardHeader className="border-b bg-muted/20">
                                 <div className="flex justify-between items-center">
@@ -374,8 +266,8 @@ export default function PatentBase() {
                                 )}
                             </CardContent>
                         </Card>
-                    </TabsContent>
-                </Tabs>
+                    </div>
+                </div>
             </div>
             <PatentDocumentModal
                 open={patentModalOpen}

@@ -16,6 +16,7 @@ import { prisma } from './db';
 import {
     debugBigQueryLookup,
     debugInpiLookup,
+    enqueueInpiReprocessing,
     enqueueLastFiveYearsRpi,
     getBackgroundWorkerState,
     retryAllDocumentErrorJobs,
@@ -2521,22 +2522,34 @@ const start = async () => {
 fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
     const { codPedido } = request.params as { codPedido: string };
 
-    const dbData = await prisma.inpiPatent.findUnique({
-        where: { cod_pedido: codPedido },
-        include: {
-            publications: true,
-            petitions: true,
-            annuities: true,
-            document_jobs: {
-                orderBy: { updated_at: 'desc' },
-                take: 15
-            },
-            scraping_jobs: {
-                orderBy: { created_at: 'desc' },
-                take: 1
+    const [dbData, latestInpiJob] = await Promise.all([
+        prisma.inpiPatent.findUnique({
+            where: { cod_pedido: codPedido },
+            include: {
+                publications: true,
+                petitions: true,
+                annuities: true,
+                document_jobs: {
+                    orderBy: { updated_at: 'desc' },
+                    take: 15
+                },
+                scraping_jobs: {
+                    orderBy: { created_at: 'desc' },
+                    take: 1
+                }
             }
-        }
-    });
+        }),
+        prismaAny.inpiProcessingJob.findFirst({
+            where: {
+                patent_number: codPedido,
+                status: 'completed'
+            },
+            orderBy: { finished_at: 'desc' },
+            select: {
+                result_data: true
+            }
+        }).catch(() => null)
+    ]);
 
     if (!dbData) {
         return reply.code(404).send({
@@ -2556,6 +2569,16 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
     const resolvedInventors = dbData.inventors || latestPublicationWithBiblio?.ops_inventor || '';
     const resolvedFilingDate = dbData.filing_date || latestPublicationWithBiblio?.ops_publication_date || '';
     const resolvedIpc = dbData.ipc_codes || latestPublicationWithBiblio?.ops_ipc || '';
+    const inpiResultData = latestInpiJob?.result_data && typeof latestInpiJob.result_data === 'object'
+        ? latestInpiJob.result_data as Record<string, any>
+        : null;
+    const resolvedDetailedAbstract = normalizeStringField(
+        dbData.abstract
+        || inpiResultData?.resumoDetalhado
+        || inpiResultData?.resumo
+        || ''
+    );
+    const resolvedProcurador = normalizeStringField(inpiResultData?.procurador || '');
     const publications = (dbData.publications || [])
         .map((item: any) => ({
             ...item,
@@ -2576,6 +2599,9 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
         title: resolvedTitle,
         applicant: resolvedApplicant,
         inventors: resolvedInventors,
+        abstract: resolvedDetailedAbstract,
+        resumo_detalhado: resolvedDetailedAbstract,
+        procurador: resolvedProcurador,
         filing_date: resolvedFilingDate,
         ipc_codes: resolvedIpc,
         publications,
@@ -3095,6 +3121,20 @@ fastify.get('/background-workers/inpi/test', async (request: any, reply) => {
     }
     const result = await debugInpiLookup(patent);
     return result;
+});
+
+fastify.post('/background-workers/inpi/enqueue', async (request: any, reply) => {
+    try {
+        const patentNumbers = Array.isArray(request.body?.patentNumbers)
+            ? request.body.patentNumbers.filter((item: any) => typeof item === 'string' && item.trim().length > 0)
+            : undefined;
+        const priorityRaw = Number(request.body?.priority);
+        const priority = Number.isFinite(priorityRaw) ? Math.max(1, Math.min(10, Math.floor(priorityRaw))) : 10;
+        const result = await enqueueInpiReprocessing(patentNumbers, priority);
+        return result;
+    } catch (error: any) {
+        return reply.code(500).send({ error: error?.message || 'Falha ao enfileirar processamento INPI' });
+    }
 });
 
 fastify.post('/background-workers/control', async (request: any, reply) => {
