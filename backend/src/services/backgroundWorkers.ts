@@ -1654,6 +1654,52 @@ async function fetchGooglePatentsBibliographicData(patentNumber: string): Promis
     };
 }
 
+async function downloadGooglePatentsFullDocument(patentNumber: string): Promise<Buffer | null> {
+    if (!GOOGLE_PATENTS_FALLBACK_ENABLED) return null;
+    const candidate = extractGooglePatentNumberCandidate(patentNumber);
+    if (!candidate) return null;
+    const pageUrl = `https://patents.google.com/patent/${candidate}/en`;
+    const pageResponse = await axios.get(pageUrl, {
+        timeout: 30000,
+        validateStatus: () => true,
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+        }
+    });
+    if (pageResponse.status < 200 || pageResponse.status >= 300) return null;
+    const html = typeof pageResponse.data === 'string' ? pageResponse.data : '';
+    if (!html || /security verification|just a moment/i.test(html)) return null;
+    const $ = cheerio.load(html);
+    const candidateLinks = new Set<string>();
+    const addLink = (value?: string | null) => {
+        const href = normalizeText(value || '');
+        if (!href) return;
+        if (/\.pdf($|\?)/i.test(href) || /download=pdf/i.test(href) || /\/patent\/.*\/download/i.test(href)) {
+            candidateLinks.add(href);
+        }
+    };
+    addLink($('meta[name="citation_pdf_url"]').attr('content'));
+    $('a[href]').each((_, el) => addLink($(el).attr('href')));
+    for (const link of Array.from(candidateLinks)) {
+        const absolute = link.startsWith('http') ? link : `https://patents.google.com${link.startsWith('/') ? '' : '/'}${link}`;
+        const pdfResponse = await axios.get(absolute, {
+            responseType: 'arraybuffer',
+            timeout: 60000,
+            validateStatus: () => true,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+            }
+        });
+        if (pdfResponse.status < 200 || pdfResponse.status >= 300) continue;
+        const contentType = String(pdfResponse.headers?.['content-type'] || '').toLowerCase();
+        const pdfBuffer = Buffer.from(pdfResponse.data);
+        if ((contentType.includes('pdf') || pdfBuffer.slice(0, 4).toString() === '%PDF') && pdfBuffer.length > 1024) {
+            return pdfBuffer;
+        }
+    }
+    return null;
+}
+
 async function fetchEspacenetUiBibliographicData(patentNumber: string): Promise<OpsBibliographicData | null> {
     if (!ESPACENET_UI_FALLBACK_ENABLED) return null;
     const candidate = extractGooglePatentNumberCandidate(patentNumber);
@@ -1992,6 +2038,46 @@ async function processNextDocumentJob() {
                 return;
             }
 
+            const tryGooglePatentsFallback = async (reasonCode: string): Promise<boolean> => {
+                try {
+                    const pdf = await downloadGooglePatentsFullDocument(publicationNumber);
+                    if (!pdf || pdf.length < 1024) return false;
+                    const safeBase = publicationNumber.replace(/[^\w.-]/g, '_');
+                    const baseKey = `patent-docs/${safeBase}`;
+                    const fullKey = `${baseKey}/full_document.pdf`;
+                    await uploadPdfToS3(fullKey, pdf);
+                    await prisma.documentDownloadJob.update({
+                        where: { id: job.id },
+                        data: {
+                            status: 'completed',
+                            storage_key: fullKey,
+                            finished_at: new Date(),
+                            publication_number: publicationNumber,
+                            error: truncateError(`${reasonCode} source=google_patents`)
+                        }
+                    });
+                    documentJobLog({
+                        jobId: job.id,
+                        patentId: job.patent_id,
+                        publicationNumber,
+                        status: 'completed',
+                        code: `${reasonCode}_GOOGLE_PATENTS`,
+                        storageKey: fullKey
+                    });
+                    return true;
+                } catch (error) {
+                    documentJobLog({
+                        jobId: job.id,
+                        patentId: job.patent_id,
+                        publicationNumber,
+                        status: 'failed',
+                        code: `${reasonCode}_GOOGLE_PATENTS_FAILED`,
+                        detail: serializeUnknownError(error)
+                    });
+                    return false;
+                }
+            };
+
             const tryEspacenetPuppeteerFallback = async (reasonCode: string): Promise<boolean> => {
                 if (!ESPACENET_UI_FALLBACK_ENABLED || INPI_SCRAPE_FIRST_ENABLED) {
                     return false;
@@ -2093,6 +2179,8 @@ async function processNextDocumentJob() {
                         }
                     }).catch(() => undefined);
                 }
+                const googleRecovered = await tryGooglePatentsFallback('DOC_DOCDB_MISSING');
+                if (googleRecovered) return;
                 const espacenetRecovered = await tryEspacenetPuppeteerFallback('DOC_DOCDB_MISSING');
                 if (espacenetRecovered) return;
                 const recentIndexing = isRecentPatentForIndexing(publicationNumber);
@@ -2111,6 +2199,8 @@ async function processNextDocumentJob() {
             const instances = await fetchDocumentInstances(docdbId);
             const fullDoc = instances.find((item) => item['@desc'] === 'FullDocument' && typeof item['@link'] === 'string');
             if (!fullDoc?.['@link']) {
+                const googleRecovered = await tryGooglePatentsFallback('DOC_FULLDOCUMENT_MISSING');
+                if (googleRecovered) return;
                 const espacenetRecovered = await tryEspacenetPuppeteerFallback('DOC_FULLDOCUMENT_MISSING');
                 if (espacenetRecovered) return;
                 const errorText = `DOC_FULLDOCUMENT_NOT_AVAILABLE docdb=${docdbId}`;

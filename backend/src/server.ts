@@ -20,6 +20,7 @@ import {
     enqueueLastFiveYearsRpi,
     getBackgroundWorkerState,
     retryAllDocumentErrorJobs,
+    retryAllInpiErrorJobs,
     retryInpiJob,
     retryAllOpsErrorJobs,
     retryAllRpiErrorJobs,
@@ -2586,12 +2587,13 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
         ? latestInpiJob.result_data as Record<string, any>
         : null;
     const resolvedDetailedAbstract = normalizeStringField(
-        dbData.abstract
+        dbData.resumo_detalhado
+        || dbData.abstract
         || inpiResultData?.resumoDetalhado
         || inpiResultData?.resumo
         || ''
     );
-    const resolvedProcurador = normalizeStringField(inpiResultData?.procurador || '');
+    const resolvedProcurador = normalizeStringField(dbData.procurador || inpiResultData?.procurador || '');
     const publications = (dbData.publications || [])
         .map((item: any) => ({
             ...item,
@@ -3166,6 +3168,16 @@ fastify.post('/background-workers/inpi/retry/:id', async (request: any, reply) =
         return { id: job.id, status: job.status };
     } catch (error) {
         return reply.code(404).send({ error: 'Job INPI não encontrado' });
+    }
+});
+
+fastify.post('/background-workers/inpi/retry-errors', async (request: any, reply) => {
+    try {
+        const ids = Array.isArray(request.body?.ids) ? request.body.ids.filter((item: any) => typeof item === 'string') : undefined;
+        const result = await retryAllInpiErrorJobs(ids);
+        return result;
+    } catch (error) {
+        return reply.code(500).send({ error: 'Falha ao reprocessar erros da fila INPI' });
     }
 });
 

@@ -94,6 +94,8 @@ model InpiPatent {
   numero_publicacao String?
   title             String?
   abstract          String?
+  resumo_detalhado  String?
+  procurador        String?
   applicant         String?
   inventors         String?
   status            String?

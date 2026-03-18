@@ -942,11 +942,29 @@ export async function processInpiPatent(codPedido: string) {
                 console.log(`✅ Patente ${codPedido} processada com sucesso`);
                 
                 try {
+                    const normalizedCod = normalizeFlat(codPedido).replace(/\s+/g, '');
+                    const linkedPatent = await prisma.inpiPatent.findFirst({
+                        where: {
+                            OR: [
+                                { cod_pedido: codPedido },
+                                { cod_pedido: normalizedCod },
+                                { numero_publicacao: codPedido },
+                                { numero_publicacao: normalizedCod }
+                            ]
+                        },
+                        select: {
+                            cod_pedido: true,
+                            numero_publicacao: true
+                        }
+                    }).catch(() => null);
+                    const targetCodPedido = linkedPatent?.cod_pedido || codPedido;
+                    const currentPublication = linkedPatent?.numero_publicacao || '';
+                    const normalizedPublication = normalizeFlat(codPedido).replace(/\s+/g, '');
                     if (Array.isArray(patentData.publicacoes) && patentData.publicacoes.length) {
                         for (const pub of patentData.publicacoes) {
                             try {
                                 const existing = await prisma.inpiPublication.findFirst({
-                                    where: { patent_id: codPedido, rpi: pub.rpi, despacho_code: pub.despacho_code, date: pub.date, complement: pub.complement }
+                                    where: { patent_id: targetCodPedido, rpi: pub.rpi, despacho_code: pub.despacho_code, date: pub.date, complement: pub.complement }
                                 });
                                 const despacho_desc = classifyPatentStatus(pub.despacho_code, pub.complement);
                                 if (existing) {
@@ -961,7 +979,7 @@ export async function processInpiPatent(codPedido: string) {
                                 } else {
                                     await prisma.inpiPublication.create({
                                         data: {
-                                            patent_id: codPedido,
+                                            patent_id: targetCodPedido,
                                             patent_number: patentData.numeroProcesso || null,
                                             rpi: pub.rpi,
                                             date: pub.date,
@@ -980,10 +998,13 @@ export async function processInpiPatent(codPedido: string) {
                         }
                     }
                     await prisma.inpiPatent.upsert({
-                        where: { cod_pedido: codPedido },
+                        where: { cod_pedido: targetCodPedido },
                         update: {
                             title: patentData.titulo || undefined,
-                            abstract: patentData.resumo || undefined,
+                            abstract: patentData.resumoDetalhado || patentData.resumo || undefined,
+                            resumo_detalhado: patentData.resumoDetalhado || patentData.resumo || undefined,
+                            procurador: patentData.procurador || undefined,
+                            numero_publicacao: currentPublication || normalizedPublication || undefined,
                             applicant: patentData.titular || undefined,
                             inventors: (patentData.inventores || patentData.inventor) || undefined,
                             filing_date: patentData.dataDeposito || undefined,
@@ -993,10 +1014,12 @@ export async function processInpiPatent(codPedido: string) {
                             updated_at: new Date()
                         },
                         create: {
-                            cod_pedido: codPedido,
-                            numero_publicacao: '',
+                            cod_pedido: targetCodPedido,
+                            numero_publicacao: currentPublication || normalizedPublication || '',
                             title: patentData.titulo || '',
-                            abstract: patentData.resumo || '',
+                            abstract: patentData.resumoDetalhado || patentData.resumo || '',
+                            resumo_detalhado: patentData.resumoDetalhado || patentData.resumo || '',
+                            procurador: patentData.procurador || '',
                             applicant: patentData.titular || '',
                             inventors: (patentData.inventores || patentData.inventor) || '',
                             filing_date: patentData.dataDeposito || '',

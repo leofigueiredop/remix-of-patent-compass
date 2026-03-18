@@ -314,7 +314,7 @@ function InpiTable({ rows, onRetry }: { rows: InpiJob[]; onRetry?: (id: string) 
             <TableCell className="text-xs text-muted-foreground">{formatDate(row.finished_at)}</TableCell>
             <TableCell className="text-xs text-muted-foreground max-w-[320px] truncate" title={row.error || ""}>{row.error || "-"}</TableCell>
             <TableCell className="text-right">
-              {onRetry && row.status === "failed" && (
+              {onRetry && (row.status === "failed" || row.status === "failed_permanent") && (
                 <Button size="sm" variant="outline" onClick={() => onRetry(row.id)}>Reprocessar</Button>
               )}
             </TableCell>
@@ -350,7 +350,6 @@ export default function BackgroundWorkers() {
   const [filterCodes, setFilterCodes] = useState("");
   const [filterTarget, setFilterTarget] = useState<"all" | "docs" | "ops">("all");
   const [actionMessage, setActionMessage] = useState("");
-  const [bigQueryProbe, setBigQueryProbe] = useState("BR112022008189A2");
 
   const counters = useMemo(() => ({
     rpiProcessing: data.rpi.counts?.processing ?? data.rpi.processing.length,
@@ -457,16 +456,13 @@ export default function BackgroundWorkers() {
     }
   };
 
-  const testBigQueryLookup = async () => {
+  const retryAllInpiErrors = async () => {
     setLoading(true);
     try {
-      const response = await axios.get(`${API_URL}/background-workers/bigquery/test`, {
-        params: { publication: bigQueryProbe }
-      });
-      const found = Boolean(response.data?.found);
-      setActionMessage(found ? `BigQuery OK para ${bigQueryProbe}` : `BigQuery sem resultado para ${bigQueryProbe}`);
-    } catch (error: any) {
-      setActionMessage(error?.response?.data?.error || "Falha no teste BigQuery");
+      const ids = data.inpi.errors.map((row) => row.id);
+      const response = await axios.post(`${API_URL}/background-workers/inpi/retry-errors`, { ids });
+      setActionMessage(`INPI reprocessados: ${response.data?.updated ?? 0}`);
+      await fetchQueues();
     } finally {
       setLoading(false);
     }
@@ -549,7 +545,7 @@ export default function BackgroundWorkers() {
           <div>
             <h1 className="text-3xl font-extrabold tracking-tight">Background Workers</h1>
             <p className="text-muted-foreground mt-1">
-              Controle da fila de importação de RPI e da fila de download de documentos via Espacenet.
+              Controle da fila de importação de RPI e da fila de download de documentos (S3, OPS, Google Patents e fallback).
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -575,10 +571,6 @@ export default function BackgroundWorkers() {
             <Button variant="outline" onClick={fetchQueues} disabled={loading} className="gap-2">
               <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
               Atualizar
-            </Button>
-            <Input value={bigQueryProbe} onChange={(event) => setBigQueryProbe(event.target.value)} className="w-[220px]" />
-            <Button variant="outline" onClick={testBigQueryLookup} disabled={loading || !bigQueryProbe.trim()}>
-              Testar BigQuery
             </Button>
             <Badge variant={state.bigQueryEnabled ? "default" : "destructive"}>
               BQ {state.bigQueryEnabled ? `ON ${state.bigQueryProject || ""} ${state.bigQueryFirstEnabled ? "(PRIORIDADE)" : ""}` : "OFF"}
@@ -840,7 +832,14 @@ export default function BackgroundWorkers() {
                   </TabsList>
                   <TabsContent value="processing"><InpiTable rows={data.inpi.processing} /></TabsContent>
                   <TabsContent value="success"><InpiTable rows={data.inpi.success} /></TabsContent>
-                  <TabsContent value="errors"><InpiTable rows={data.inpi.errors} onRetry={retryInpiJob} /></TabsContent>
+                  <TabsContent value="errors" className="space-y-3">
+                    <div className="flex justify-end">
+                      <Button variant="outline" size="sm" disabled={loading || data.inpi.errors.length === 0} onClick={() => retryAllInpiErrors()}>
+                        Reprocessar todos os erros
+                      </Button>
+                    </div>
+                    <InpiTable rows={data.inpi.errors} onRetry={retryInpiJob} />
+                  </TabsContent>
                 </Tabs>
               </CardContent>
             </Card>
