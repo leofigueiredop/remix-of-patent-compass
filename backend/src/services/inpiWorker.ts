@@ -369,6 +369,7 @@ async function initBrowser() {
         '--disable-setuid-sandbox',
         '--no-zygote',
         '--single-process',
+        '--disable-seccomp-filter-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu',
         '--disable-software-rasterizer',
@@ -379,21 +380,29 @@ async function initBrowser() {
         '--window-size=1280,1024'
     ];
     const launchErrors: string[] = [];
+    const launchModes: Array<{ pipe: boolean; dumpio: boolean; label: string }> = [
+        { pipe: false, dumpio: false, label: 'ws' },
+        { pipe: true, dumpio: true, label: 'pipe' }
+    ];
     const launchAttempts: Array<{ executablePath?: string }> = [{}, ...CHROME_CANDIDATE_PATHS
         .filter((p) => fs.existsSync(p))
         .map((p) => ({ executablePath: p }))];
-    for (const attempt of launchAttempts) {
-        try {
-            return await puppeteer.launch({
-                headless: true,
-                pipe: true,
-                dumpio: true,
-                args,
-                ...(attempt.executablePath ? { executablePath: attempt.executablePath } : {})
-            });
-        } catch (error) {
-            const msg = formatLaunchError(error);
-            launchErrors.push(attempt.executablePath ? `${attempt.executablePath}: ${msg}` : `default: ${msg}`);
+    for (const mode of launchModes) {
+        for (const attempt of launchAttempts) {
+            try {
+                return await puppeteer.launch({
+                    headless: true,
+                    pipe: mode.pipe,
+                    dumpio: mode.dumpio,
+                    args,
+                    protocolTimeout: 120000,
+                    ...(attempt.executablePath ? { executablePath: attempt.executablePath } : {})
+                });
+            } catch (error) {
+                const msg = formatLaunchError(error);
+                const origin = attempt.executablePath ? attempt.executablePath : 'default';
+                launchErrors.push(`${mode.label}:${origin}: ${msg}`);
+            }
         }
     }
     throw new Error(`INPI_BROWSER_LAUNCH_FAILED ${launchErrors.join(' | ')}`);

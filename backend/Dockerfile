@@ -52,6 +52,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 RUN ln -sf /usr/bin/chromium /usr/bin/chromium-browser \
     && ln -sf /usr/bin/chromium /usr/bin/google-chrome-stable \
     && ln -sf /usr/bin/chromium /usr/bin/google-chrome
+RUN useradd -m -u 1001 appuser && chown -R appuser:appuser /app /tmp
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 ENV CHROME_BIN=/usr/bin/google-chrome-stable
@@ -59,5 +60,7 @@ ENV CHROME_PATH=/usr/bin/google-chrome-stable
 
 ENV PORT=3000
 EXPOSE 3000
+
+USER appuser
 
 CMD npx prisma migrate deploy && node dist/server.js
