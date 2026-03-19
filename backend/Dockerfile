@@ -24,6 +24,7 @@ RUN npx prisma generate
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
+    unzip \
     chromium \
     chromium-common \
     ca-certificates \
