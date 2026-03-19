@@ -1696,7 +1696,7 @@ function extractGooglePatentNumberCandidates(patentNumber: string): string[] {
     const normalized = raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
     if (!normalizedBase && !normalizedWithoutCheckDigit && !normalized) return [];
     const primary = normalizedBase || normalizedWithoutCheckDigit || normalized;
-    const variants = new Set<string>([primary, normalizedWithoutCheckDigit, normalized]);
+    const variants = new Set<string>([primary, normalizedWithoutCheckDigit]);
     const noBr = primary.replace(/^BR/i, '');
     if (noBr) variants.add(noBr);
     if (primary.endsWith('0')) variants.add(primary.slice(0, -1));
@@ -1858,6 +1858,21 @@ async function openGooglePatentViaBrowser(patentNumber: string): Promise<GoogleP
             portugueseUrl = page.url();
             const html = await page.content();
             if (html && !/security verification|just a moment/i.test(html)) {
+                portugueseHtml = html;
+            }
+        }
+        if (!portugueseHtml) {
+            const current = page.url() || detailUrl;
+            const ptUrl = current.includes('/en')
+                ? current.replace('/en', '/pt')
+                : `${current.replace(/\/$/, '')}/pt`;
+            await waitGooglePatentsThrottle();
+            lastGooglePatentsRequestAt = Date.now();
+            await page.goto(ptUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+            await sleep(900 + Math.floor(Math.random() * 500));
+            const html = await page.content();
+            if (html && !/security verification|just a moment/i.test(html) && !/error 404/i.test(html.toLowerCase())) {
+                portugueseUrl = page.url();
                 portugueseHtml = html;
             }
         }
@@ -2574,11 +2589,14 @@ async function processNextDocumentJob() {
             }
 
             const googleSearchCandidates = Array.from(new Set([
-                publicationNumber,
-                normalizeText(patent.numero_publicacao || ''),
+                publicationNumber.split('-')[0] || publicationNumber,
+                normalizeText(patent.numero_publicacao || '').split('-')[0] || normalizeText(patent.numero_publicacao || ''),
                 normalizeText(job.patent_id || ''),
                 normalizeText(patent.cod_pedido || '')
-            ].filter(Boolean)));
+            ].map((value) => normalizeText(value).replace(/[^A-Za-z0-9-]/g, ''))
+                .filter(Boolean)
+                .map((value) => value.replace(/-([0-9X])$/i, ''))
+                .filter(Boolean)));
 
             const tryGooglePatentsFallback = async (reasonCode: string): Promise<boolean> => {
                 for (const candidate of googleSearchCandidates) {
