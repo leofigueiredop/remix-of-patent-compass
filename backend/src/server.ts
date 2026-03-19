@@ -546,7 +546,12 @@ function normalizePatentForWeb(publicationNumber?: string): string {
 
 function buildGooglePatentsUrl(publicationNumber?: string): string {
     const normalized = normalizePatentForWeb(publicationNumber);
-    return normalized ? `https://patents.google.com/patent/${normalized}/en` : '';
+    if (!normalized) return '';
+    const brMatch = normalized.match(/^BR(10|11)(\d{8,})$/);
+    const candidate = brMatch && brMatch[2].length > 1
+        ? `BR${brMatch[1]}${brMatch[2].slice(0, -1)}`
+        : normalized;
+    return `https://patents.google.com/patent/${candidate}/en`;
 }
 
 function buildEspacenetUiUrl(publicationNumber?: string): string {

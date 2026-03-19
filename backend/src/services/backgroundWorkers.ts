@@ -1612,89 +1612,102 @@ type OpsBibliographicData = {
     source?: string;
 };
 
-function extractGooglePatentNumberCandidate(patentNumber: string): string {
-    return normalizePublicationNumber(patentNumber).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+function extractGooglePatentNumberCandidates(patentNumber: string): string[] {
+    const normalized = normalizePublicationNumber(patentNumber).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    if (!normalized) return [];
+    const variants = new Set<string>([normalized]);
+    const brMatch = normalized.match(/^BR(10|11)(\d{8,})$/);
+    if (brMatch) {
+        const doc = brMatch[2];
+        if (doc.length > 1) {
+            variants.add(`BR${brMatch[1]}${doc.slice(0, -1)}`);
+        }
+    }
+    return Array.from(variants);
 }
 
 async function fetchGooglePatentsBibliographicData(patentNumber: string): Promise<OpsBibliographicData | null> {
     if (!GOOGLE_PATENTS_FALLBACK_ENABLED) return null;
-    const candidate = extractGooglePatentNumberCandidate(patentNumber);
-    if (!candidate) return null;
-    const url = `https://patents.google.com/patent/${candidate}/en`;
-    const response = await axios.get(url, {
-        timeout: 30000,
-        validateStatus: () => true,
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
-        }
-    });
-    if (response.status < 200 || response.status >= 300) return null;
-    const html = typeof response.data === 'string' ? response.data : '';
-    if (!html || /security verification|just a moment/i.test(html)) return null;
-    const $ = cheerio.load(html);
-    const title = normalizeText($('meta[name="DC.title"]').attr('content') || $('title').text());
-    const applicant = normalizeText($('meta[scheme="assignee"]').attr('content') || $('dd[itemprop="assigneeOriginal"] span[itemprop="name"]').first().text());
-    const inventor = normalizeText($('meta[scheme="inventor"]').attr('content') || $('dd[itemprop="inventor"] span[itemprop="name"]').first().text());
-    const publicationDate = normalizeText($('meta[scheme="publication-date"]').attr('content') || $('time[itemprop="publicationDate"]').attr('datetime') || '');
-    const ipc = $('span[itemprop="Code"], td[itemprop="Code"]')
-        .toArray()
-        .map((el) => normalizeText($(el).text()))
-        .filter(Boolean)
-        .slice(0, 20)
-        .join(', ');
-    if (!title && !applicant && !inventor && !ipc) return null;
-    return {
-        docdbId: candidate,
-        title: title || undefined,
-        applicant: applicant || undefined,
-        inventor: inventor || undefined,
-        ipc: ipc || undefined,
-        publicationDate: publicationDate || undefined,
-        source: 'google_patents'
-    };
-}
-
-async function downloadGooglePatentsFullDocument(patentNumber: string): Promise<Buffer | null> {
-    if (!GOOGLE_PATENTS_FALLBACK_ENABLED) return null;
-    const candidate = extractGooglePatentNumberCandidate(patentNumber);
-    if (!candidate) return null;
-    const pageUrl = `https://patents.google.com/patent/${candidate}/en`;
-    const pageResponse = await axios.get(pageUrl, {
-        timeout: 30000,
-        validateStatus: () => true,
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
-        }
-    });
-    if (pageResponse.status < 200 || pageResponse.status >= 300) return null;
-    const html = typeof pageResponse.data === 'string' ? pageResponse.data : '';
-    if (!html || /security verification|just a moment/i.test(html)) return null;
-    const $ = cheerio.load(html);
-    const candidateLinks = new Set<string>();
-    const addLink = (value?: string | null) => {
-        const href = normalizeText(value || '');
-        if (!href) return;
-        if (/\.pdf($|\?)/i.test(href) || /download=pdf/i.test(href) || /\/patent\/.*\/download/i.test(href)) {
-            candidateLinks.add(href);
-        }
-    };
-    addLink($('meta[name="citation_pdf_url"]').attr('content'));
-    $('a[href]').each((_, el) => addLink($(el).attr('href')));
-    for (const link of Array.from(candidateLinks)) {
-        const absolute = link.startsWith('http') ? link : `https://patents.google.com${link.startsWith('/') ? '' : '/'}${link}`;
-        const pdfResponse = await axios.get(absolute, {
-            responseType: 'arraybuffer',
-            timeout: 60000,
+    const candidates = extractGooglePatentNumberCandidates(patentNumber);
+    for (const candidate of candidates) {
+        const url = `https://patents.google.com/patent/${candidate}/en`;
+        const response = await axios.get(url, {
+            timeout: 30000,
             validateStatus: () => true,
             headers: {
                 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
             }
         });
-        if (pdfResponse.status < 200 || pdfResponse.status >= 300) continue;
-        const contentType = String(pdfResponse.headers?.['content-type'] || '').toLowerCase();
-        const pdfBuffer = Buffer.from(pdfResponse.data);
-        if ((contentType.includes('pdf') || pdfBuffer.slice(0, 4).toString() === '%PDF') && pdfBuffer.length > 1024) {
-            return pdfBuffer;
+        if (response.status < 200 || response.status >= 300) continue;
+        const html = typeof response.data === 'string' ? response.data : '';
+        if (!html || /security verification|just a moment/i.test(html)) continue;
+        const $ = cheerio.load(html);
+        const title = normalizeText($('meta[name="DC.title"]').attr('content') || $('title').text());
+        const applicant = normalizeText($('meta[scheme="assignee"]').attr('content') || $('dd[itemprop="assigneeOriginal"] span[itemprop="name"]').first().text());
+        const inventor = normalizeText($('meta[scheme="inventor"]').attr('content') || $('dd[itemprop="inventor"] span[itemprop="name"]').first().text());
+        const publicationDate = normalizeText($('meta[scheme="publication-date"]').attr('content') || $('time[itemprop="publicationDate"]').attr('datetime') || '');
+        const ipc = $('span[itemprop="Code"], td[itemprop="Code"]')
+            .toArray()
+            .map((el) => normalizeText($(el).text()))
+            .filter(Boolean)
+            .slice(0, 20)
+            .join(', ');
+        if (!title && !applicant && !inventor && !ipc) continue;
+        return {
+            docdbId: candidate,
+            title: title || undefined,
+            applicant: applicant || undefined,
+            inventor: inventor || undefined,
+            ipc: ipc || undefined,
+            publicationDate: publicationDate || undefined,
+            source: 'google_patents'
+        };
+    }
+    return null;
+}
+
+async function downloadGooglePatentsFullDocument(patentNumber: string): Promise<Buffer | null> {
+    if (!GOOGLE_PATENTS_FALLBACK_ENABLED) return null;
+    const candidates = extractGooglePatentNumberCandidates(patentNumber);
+    for (const candidate of candidates) {
+        const pageUrl = `https://patents.google.com/patent/${candidate}/en`;
+        const pageResponse = await axios.get(pageUrl, {
+            timeout: 30000,
+            validateStatus: () => true,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+            }
+        });
+        if (pageResponse.status < 200 || pageResponse.status >= 300) continue;
+        const html = typeof pageResponse.data === 'string' ? pageResponse.data : '';
+        if (!html || /security verification|just a moment/i.test(html)) continue;
+        const $ = cheerio.load(html);
+        const candidateLinks = new Set<string>();
+        const addLink = (value?: string | null) => {
+            const href = normalizeText(value || '');
+            if (!href) return;
+            if (/\.pdf($|\?)/i.test(href) || /download=pdf/i.test(href) || /\/patent\/.*\/download/i.test(href)) {
+                candidateLinks.add(href);
+            }
+        };
+        addLink($('meta[name="citation_pdf_url"]').attr('content'));
+        $('a[href]').each((_, el) => addLink($(el).attr('href')));
+        for (const link of Array.from(candidateLinks)) {
+            const absolute = link.startsWith('http') ? link : `https://patents.google.com${link.startsWith('/') ? '' : '/'}${link}`;
+            const pdfResponse = await axios.get(absolute, {
+                responseType: 'arraybuffer',
+                timeout: 60000,
+                validateStatus: () => true,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+                }
+            });
+            if (pdfResponse.status < 200 || pdfResponse.status >= 300) continue;
+            const contentType = String(pdfResponse.headers?.['content-type'] || '').toLowerCase();
+            const pdfBuffer = Buffer.from(pdfResponse.data);
+            if ((contentType.includes('pdf') || pdfBuffer.slice(0, 4).toString() === '%PDF') && pdfBuffer.length > 1024) {
+                return pdfBuffer;
+            }
         }
     }
     return null;
@@ -1702,7 +1715,7 @@ async function downloadGooglePatentsFullDocument(patentNumber: string): Promise<
 
 async function fetchEspacenetUiBibliographicData(patentNumber: string): Promise<OpsBibliographicData | null> {
     if (!ESPACENET_UI_FALLBACK_ENABLED) return null;
-    const candidate = extractGooglePatentNumberCandidate(patentNumber);
+    const candidate = extractGooglePatentNumberCandidates(patentNumber)[0];
     if (!candidate) return null;
     const url = `https://worldwide.espacenet.com/patent/search/publication/${candidate}`;
     const response = await axios.get(url, { timeout: 30000, validateStatus: () => true });
