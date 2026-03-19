@@ -1,7 +1,6 @@
 import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
 const api = axios.create({
     baseURL: API_URL,
@@ -39,7 +38,7 @@ export interface AuthUser {
 
 export const authService = {
     register: async (email: string, password: string, name?: string): Promise<{ token: string; user: AuthUser }> => {
-        const response = await api.post('/auth/register', { email: normalizeEmail(email), password, name: name?.trim() || undefined });
+        const response = await api.post('/auth/register', { email, password, name });
         const { token, user } = response.data;
         localStorage.setItem('token', token);
         localStorage.setItem('user', JSON.stringify(user));
@@ -47,7 +46,7 @@ export const authService = {
     },
 
     login: async (email: string, password: string): Promise<{ token: string; user: AuthUser }> => {
-        const response = await api.post('/auth/login', { email: normalizeEmail(email), password });
+        const response = await api.post('/auth/login', { email, password });
         const { token, user } = response.data;
         localStorage.setItem('token', token);
         localStorage.setItem('user', JSON.stringify(user));
