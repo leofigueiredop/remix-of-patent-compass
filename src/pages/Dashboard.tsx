@@ -1,149 +1,217 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { Plus, FileText, Calendar, ChevronRight, ShieldCheck, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import {
+  Activity,
+  AlertTriangle,
+  CheckCircle2,
+  Clock3,
+  Database,
+  FileWarning,
+  Network,
+  Radar,
+  ShieldAlert,
+  Users,
+} from "lucide-react";
+import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import AppLayout from "@/components/AppLayout";
-import { aiService } from "@/services/ai";
-
-interface Research {
-  id: string;
-  title: string;
-  date: string;
-  status: "editing" | "analyzed" | "finalized";
-}
-
-const statusLabels: Record<string, string> = {
-  editing: "Em edição",
-  analyzed: "Analisada",
-  finalized: "Finalizada",
-};
-
-const statusClasses: Record<string, string> = {
-  editing: "status-editing",
-  analyzed: "status-analyzed",
-  finalized: "status-finalized",
-};
+import { PageHeader, RiskBadge, ScoreBadge, SectionCard, StatCard, StatusBadge } from "@/components/platform/components";
+import { clients, collisions, kpiDashboard, marketSignals, processEvents, workers } from "@/data/platformMock";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
 
 export default function Dashboard() {
-  const navigate = useNavigate();
-  const [researches] = useState<Research[]>([]);
-  const [aiOnline, setAiOnline] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    aiService.checkHealth().then(setAiOnline);
-  }, []);
-
-  const totalPesquisas = researches.length;
-  const emAnalise = researches.filter(r => r.status === "analyzed").length;
-  const finalizadas = researches.filter(r => r.status === "finalized").length;
+  const eventsByType = [
+    { name: "Colidência", value: 46, color: "#0e7490" },
+    { name: "Processo", value: 32, color: "#1d4ed8" },
+    { name: "Mercado", value: 21, color: "#7c3aed" },
+    { name: "Pesquisa", value: 18, color: "#0f766e" },
+  ];
 
   return (
     <AppLayout>
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-bold">Pesquisas de Patentes</h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            Gerencie suas pesquisas e análises
-          </p>
-        </div>
-        <Button onClick={() => navigate("/research/new")} className="gap-2">
-          <Plus className="w-4 h-4" />
-          Nova Pesquisa
-        </Button>
-      </div>
+      <PageHeader
+        title="Dashboard de Inteligência"
+        subtitle="Priorize risco, prazos e movimentação competitiva em uma visão operacional única."
+        breadcrumbs={[{ label: "Dashboard" }]}
+        actions={<Button className="bg-slate-900 hover:bg-slate-800">Gerar briefing executivo</Button>}
+      />
 
-      {/* Stats & AI Health */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-        {[
-          { label: "Total de Pesquisas", value: String(totalPesquisas), icon: FileText, color: "text-blue-500" },
-          { label: "Em Análise", value: String(emAnalise), icon: Calendar, color: "text-amber-500" },
-          { label: "Finalizadas", value: String(finalizadas), icon: FileText, color: "text-green-500" },
-        ].map((stat) => (
-          <div key={stat.label} className="bg-card rounded-lg border p-4 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-lg bg-muted flex items-center justify-center ${stat.color}`}>
-                <stat.icon className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{stat.value}</p>
-                <p className="text-xs text-muted-foreground">{stat.label}</p>
-              </div>
+      <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
+        <StatCard title="Clientes ativos" value={String(kpiDashboard.activeClients)} detail="+4 no trimestre" icon={<Users className="h-4 w-4" />} trend="up" />
+        <StatCard title="Pesquisas em andamento" value={String(kpiDashboard.activeResearches)} detail="6 com prazo < 5 dias" icon={<Radar className="h-4 w-4" />} trend="stable" />
+        <StatCard title="Patentes monitoradas" value={String(kpiDashboard.monitoredPatents)} detail="+8.2% vs mês anterior" icon={<Database className="h-4 w-4" />} trend="up" />
+        <StatCard title="Colisões pendentes" value={String(kpiDashboard.pendingCollisions)} detail="11 sem responsável" icon={<ShieldAlert className="h-4 w-4" />} trend="down" />
+        <StatCard title="Exigências críticas" value={String(kpiDashboard.criticalRequirements)} detail="2 vencem em 48h" icon={<FileWarning className="h-4 w-4" />} trend="down" />
+        <StatCard title="Monitoramentos mercado" value={String(kpiDashboard.activeMarketMonitoring)} detail="4 novos esta semana" icon={<Network className="h-4 w-4" />} trend="up" />
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+        <SectionCard title="Ações recomendadas hoje" className="xl:col-span-4" description="Itens de maior impacto operacional">
+          <div className="space-y-3">
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-3">
+              <p className="text-sm font-medium text-rose-900">Validar colisão crítica WO2026022445A1</p>
+              <p className="text-xs text-rose-700">Cliente BioSyn Energia · responsável sugerido Júlia Costa</p>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-sm font-medium text-amber-900">Gerar tarefa de resposta da exigência 6.1</p>
+              <p className="text-xs text-amber-700">Processo BR102020014552-2 · prazo em 5 dias</p>
+            </div>
+            <div className="rounded-lg border border-cyan-200 bg-cyan-50 p-3">
+              <p className="text-sm font-medium text-cyan-900">Revisar tendência em baterias sólidas</p>
+              <p className="text-xs text-cyan-700">24 novos depósitos no período</p>
             </div>
           </div>
-        ))}
+        </SectionCard>
 
-        {/* AI Infrastructure Health Card */}
-        <div className="bg-slate-950 text-white rounded-lg border border-slate-800 p-4 shadow-sm relative overflow-hidden group">
-          <div className="absolute top-0 right-0 p-2 opacity-50"><ShieldCheck className="w-12 h-12 text-slate-800" /></div>
-          <div className="relative z-10">
-            <div className="flex items-center gap-2 mb-2">
-              {aiOnline === null ? (
-                <Loader2 className="w-3 h-3 animate-spin text-blue-400" />
-              ) : (
-                <div className={`w-2 h-2 rounded-full ${aiOnline ? "bg-green-500 animate-pulse" : "bg-red-500"}`}></div>
-              )}
-              <span className={`text-xs font-mono uppercase tracking-widest ${aiOnline === false ? "text-red-400" : "text-green-400"}`}>
-                {aiOnline === null ? "Verificando..." : aiOnline ? "System Operational" : "Offline"}
-              </span>
-            </div>
-            <div className="space-y-1">
-              <div className="flex justify-between text-[10px] text-slate-400">
-                <span>Backend API</span>
-                <span>{aiOnline ? "Online" : "—"}</span>
-              </div>
-              <div className="w-full bg-slate-800 h-1 rounded-full overflow-hidden">
-                <div className={`h-full ${aiOnline ? "bg-green-500 w-full" : "bg-red-500 w-0"} transition-all`}></div>
-              </div>
-            </div>
-            <div className="mt-3 flex items-center gap-1.5 text-[10px] text-slate-400">
-              <ShieldCheck className="w-3 h-3 text-green-500" />
-              <span>Local Encryption: <strong className="text-white">Active (AES-256)</strong></span>
-            </div>
+        <SectionCard title="Eventos por período" className="xl:col-span-5" description="Volume semanal consolidado">
+          <div className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={marketSignals}>
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="deposits" fill="#0f172a" radius={[8, 8, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
           </div>
-        </div>
-      </div>
+        </SectionCard>
 
-      {/* Research list */}
-      <div className="bg-card rounded-lg border">
-        <div className="px-5 py-3 border-b">
-          <h2 className="text-sm font-semibold">Pesquisas Recentes</h2>
-        </div>
-        <div className="divide-y">
-          {researches.length === 0 ? (
-            <div className="text-center py-10 text-muted-foreground">
-              <FileText className="w-8 h-8 mx-auto mb-3 opacity-50" />
-              <p className="text-sm">Nenhuma pesquisa realizada ainda.</p>
-              <p className="text-xs mt-1">Clique em "Nova Pesquisa" para começar.</p>
-            </div>
-          ) : (
-            researches.map((research) => (
-              <button
-                key={research.id}
-                onClick={() => {
-                  if (research.status === 'finalized') navigate("/research/report");
-                  else if (research.status === 'analyzed') navigate("/research/analysis");
-                  else navigate("/research/briefing");
-                }}
-                className="w-full flex items-center justify-between px-5 py-4 hover:bg-muted/50 transition-colors text-left"
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{research.title}</p>
-                  <div className="flex items-center gap-3 mt-1.5">
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">
-                      <Calendar className="w-3 h-3" />
-                      {new Date(research.date).toLocaleDateString("pt-BR")}
-                    </span>
-                    <span className={`status-badge ${statusClasses[research.status]}`}>
-                      {statusLabels[research.status]}
-                    </span>
-                  </div>
+        <SectionCard title="Categoria de monitoramento" className="xl:col-span-3" description="Distribuição dos alertas ativos">
+          <div className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={eventsByType} dataKey="value" innerRadius={48} outerRadius={78}>
+                  {eventsByType.map((entry) => (
+                    <Cell key={entry.name} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </SectionCard>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+        <SectionCard title="Colisões recentes" className="xl:col-span-6">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Cliente</TableHead>
+                <TableHead>Documento</TableHead>
+                <TableHead>Score</TableHead>
+                <TableHead>Risco</TableHead>
+                <TableHead>Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {collisions.map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell>{row.client}</TableCell>
+                  <TableCell className="font-mono text-xs">{row.document}</TableCell>
+                  <TableCell><ScoreBadge score={row.score} /></TableCell>
+                  <TableCell><RiskBadge value={row.risk} /></TableCell>
+                  <TableCell><StatusBadge label={row.status} variant={row.status === "confirmado" ? "stable" : "attention"} /></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </SectionCard>
+
+        <SectionCard title="Prazos críticos" className="xl:col-span-3">
+          <div className="space-y-2">
+            {processEvents.map((event) => (
+              <div key={event.id} className="rounded-lg border border-slate-200 p-3">
+                <p className="text-sm font-medium">{event.client}</p>
+                <p className="text-xs text-slate-500">{event.process}</p>
+                <div className="mt-2 flex items-center justify-between">
+                  <StatusBadge label={`${event.daysLeft} dias`} variant={event.daysLeft <= 7 ? "critical" : "attention"} />
+                  <p className="text-xs text-slate-500">{event.eventType}</p>
                 </div>
-                <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0 ml-4" />
-              </button>
-            ))
-          )}
-        </div>
-      </div>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Status técnico" className="xl:col-span-3">
+          <div className="space-y-3 text-sm">
+            <div className="flex items-center justify-between">
+              <span>Última RPI processada</span>
+              <span className="font-semibold">#2819</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Fila pendente</span>
+              <span className="font-semibold">{workers.reduce((acc, current) => acc + current.pending, 0)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Workers ativos</span>
+              <span className="font-semibold">{workers.filter((item) => item.online).length}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Falhas recentes</span>
+              <span className="font-semibold text-rose-600">{workers.reduce((acc, current) => acc + current.failures, 0)}</span>
+            </div>
+            <div className="rounded-lg bg-slate-900 p-3 text-slate-100">
+              <p className="text-xs text-slate-300">Saúde geral</p>
+              <p className="mt-1 inline-flex items-center gap-1 text-sm font-semibold"><CheckCircle2 className="h-4 w-4 text-emerald-400" /> Operação estável</p>
+            </div>
+          </div>
+        </SectionCard>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+        <SectionCard title="Ranking de clientes por atividade" className="xl:col-span-7">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Cliente</TableHead>
+                <TableHead>Monitoramentos</TableHead>
+                <TableHead>Demandas abertas</TableHead>
+                <TableHead>Última atividade</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {clients.map((client) => (
+                <TableRow key={client.id}>
+                  <TableCell className="font-medium">{client.name}</TableCell>
+                  <TableCell>{client.monitorings}</TableCell>
+                  <TableCell>{client.openDemands}</TableCell>
+                  <TableCell>{client.lastActivity}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </SectionCard>
+
+        <SectionCard title="Mercado por tema" className="xl:col-span-5">
+          <div className="space-y-3">
+            {[
+              { label: "Baterias de estado sólido", value: 24, variation: "+18%" },
+              { label: "Biomateriais antibacterianos", value: 17, variation: "+11%" },
+              { label: "Visão computacional industrial", value: 12, variation: "+7%" },
+            ].map((item) => (
+              <div key={item.label} className="flex items-center justify-between rounded-lg border border-slate-200 p-3">
+                <div>
+                  <p className="text-sm font-medium">{item.label}</p>
+                  <p className="text-xs text-slate-500">Novos depósitos no período</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-lg font-semibold">{item.value}</p>
+                  <p className="text-xs text-emerald-600">{item.variation}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <SectionCard title="Comunicados RPI recentes">
+          <div className="space-y-2 text-sm">
+            <p className="flex items-center justify-between rounded-lg border border-slate-200 p-2"><span>RPI #2819 publicada</span><Clock3 className="h-4 w-4 text-slate-400" /></p>
+            <p className="flex items-center justify-between rounded-lg border border-slate-200 p-2"><span>Despacho 6.1 identificado (32 processos)</span><AlertTriangle className="h-4 w-4 text-amber-500" /></p>
+            <p className="flex items-center justify-between rounded-lg border border-slate-200 p-2"><span>Atualização de anuidades (14 processos)</span><Activity className="h-4 w-4 text-cyan-500" /></p>
+          </div>
+        </SectionCard>
+      </section>
     </AppLayout>
   );
 }
