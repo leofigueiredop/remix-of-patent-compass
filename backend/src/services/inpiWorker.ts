@@ -680,12 +680,37 @@ async function extractPatentData(page: Page, codPedido: string) {
     
     // Extrair resumo detalhado
     const extractResumoDetalhado = () => {
-        const resumoElements = $('.resumo, .abstract, .summary, [id*="resumo"], [class*="resumo"]');
+        const cleanResumoText = (value?: string) => normalizeFlat(value)
+            .replace(/^\(?57\)?\s*/i, '')
+            .replace(/^resumo\s*[:\-]?\s*/i, '')
+            .trim();
+        const isUsefulResumo = (value: string) => value.length >= 120;
+
+        const resumoElements = $('.resumo, .abstract, .summary, [id*="resumo"], [class*="resumo"], [data-label*="resumo"]');
         if (resumoElements.length) {
-            return normalizeFlat(resumoElements.first().text());
+            const parsed = cleanResumoText(resumoElements.first().text());
+            if (isUsefulResumo(parsed)) return parsed;
         }
-        
-        return normalizeFlat($('p').filter((i, el) => {
+
+        const labelCandidates = $('tr, td, th, div, p, span').filter((_, el) => {
+            const text = normalizeFlat($(el).text());
+            return /\bresumo\b/i.test(text) || /\(57\)/.test(text);
+        });
+
+        for (let i = 0; i < labelCandidates.length; i++) {
+            const element = labelCandidates.eq(i);
+            const current = cleanResumoText(element.text());
+            if (isUsefulResumo(current)) return current;
+            const row = element.closest('tr');
+            const rowText = cleanResumoText(row.text());
+            if (isUsefulResumo(rowText)) return rowText;
+            const nextRowText = cleanResumoText(row.next('tr').text());
+            if (isUsefulResumo(nextRowText)) return nextRowText;
+            const siblingText = cleanResumoText(element.next().text());
+            if (isUsefulResumo(siblingText)) return siblingText;
+        }
+
+        return cleanResumoText($('p').filter((_, el) => {
             const text = $(el).text();
             return text.length > 100 && text.length < 2000;
         }).first().text());
