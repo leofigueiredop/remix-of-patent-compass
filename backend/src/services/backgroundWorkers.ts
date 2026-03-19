@@ -2246,6 +2246,26 @@ async function processNextBigQueryBibliographicJob() {
                 orderBy: [{ attempts: 'asc' }, { updated_at: 'asc' }, { created_at: 'asc' }]
             });
         }
+        if (!job) {
+            const archivedError = await prismaAny.bigQueryBibliographicJob.findFirst({
+                where: {
+                    status: { in: ['failed_permanent', 'not_found', 'waiting_indexing'] }
+                },
+                orderBy: [{ updated_at: 'asc' }, { created_at: 'asc' }]
+            });
+            if (archivedError) {
+                job = await prismaAny.bigQueryBibliographicJob.update({
+                    where: { id: archivedError.id },
+                    data: {
+                        status: 'pending',
+                        attempts: 0,
+                        error: null,
+                        started_at: null,
+                        finished_at: null
+                    }
+                });
+            }
+        }
         if (!job) return;
         const nextAttempt = job.attempts + 1;
         await prismaAny.bigQueryBibliographicJob.update({

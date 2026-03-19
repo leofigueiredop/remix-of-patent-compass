@@ -364,7 +364,6 @@ export default function BackgroundWorkers() {
   const [docsTab, setDocsTab] = useState("processing");
   const [opsTab, setOpsTab] = useState("processing");
   const [inpiTab, setInpiTab] = useState("processing");
-  const [bqTab, setBqTab] = useState("processing");
   const [enqueueFrom, setEnqueueFrom] = useState("");
   const [enqueueTo, setEnqueueTo] = useState("");
   const [filterFrom, setFilterFrom] = useState("");
@@ -385,10 +384,7 @@ export default function BackgroundWorkers() {
     opsErrors: data.ops.counts?.errors ?? data.ops.errors.length,
     inpiProcessing: data.inpi.counts?.processing ?? data.inpi.processing.length,
     inpiSuccess: data.inpi.counts?.success ?? data.inpi.success.length,
-    inpiErrors: data.inpi.counts?.errors ?? data.inpi.errors.length,
-    bqProcessing: data.bigquery.counts?.processing ?? data.bigquery.processing.length,
-    bqSuccess: data.bigquery.counts?.success ?? data.bigquery.success.length,
-    bqErrors: data.bigquery.counts?.errors ?? data.bigquery.errors.length
+    inpiErrors: data.inpi.counts?.errors ?? data.inpi.errors.length
   }), [data]);
 
   const fetchQueues = async () => {
@@ -445,11 +441,6 @@ export default function BackgroundWorkers() {
     await fetchQueues();
   };
 
-  const retryBigQueryJob = async (id: string) => {
-    await axios.post(`${API_URL}/background-workers/google-patents/retry/${id}`);
-    await fetchQueues();
-  };
-
   const retryAllRpiErrors = async (preferBigQuery = false) => {
     setLoading(true);
     try {
@@ -492,18 +483,6 @@ export default function BackgroundWorkers() {
       const ids = data.inpi.errors.map((row) => row.id);
       const response = await axios.post(`${API_URL}/background-workers/inpi/retry-errors`, { ids });
       setActionMessage(`INPI reprocessados: ${response.data?.updated ?? 0}`);
-      await fetchQueues();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const retryAllBigQueryErrors = async () => {
-    setLoading(true);
-    try {
-      const ids = data.bigquery.errors.map((row) => row.id);
-      const response = await axios.post(`${API_URL}/background-workers/google-patents/retry-errors`, { ids });
-      setActionMessage(`Google Patents reprocessados: ${response.data?.updated ?? 0}`);
       await fetchQueues();
     } finally {
       setLoading(false);
@@ -694,10 +673,6 @@ export default function BackgroundWorkers() {
               <Files className="w-4 h-4" />
               Fila INPI
             </TabsTrigger>
-            <TabsTrigger value="bigquery" className="gap-2">
-              <Files className="w-4 h-4" />
-              Fila Google Patents
-            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="rpi" className="space-y-4">
@@ -885,38 +860,6 @@ export default function BackgroundWorkers() {
                       </Button>
                     </div>
                     <InpiTable rows={data.inpi.errors} onRetry={retryInpiJob} />
-                  </TabsContent>
-                </Tabs>
-              </CardContent>
-            </Card>
-          </TabsContent>
-          <TabsContent value="bigquery" className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Card><CardHeader className="pb-2"><CardDescription>Processando</CardDescription><CardTitle className="text-2xl flex items-center gap-2"><Clock className="w-5 h-5" />{counters.bqProcessing}</CardTitle></CardHeader></Card>
-              <Card><CardHeader className="pb-2"><CardDescription>Sucesso</CardDescription><CardTitle className="text-2xl flex items-center gap-2"><CheckCircle2 className="w-5 h-5 text-emerald-600" />{counters.bqSuccess}</CardTitle></CardHeader></Card>
-              <Card><CardHeader className="pb-2"><CardDescription>Erros</CardDescription><CardTitle className="text-2xl flex items-center gap-2"><AlertCircle className="w-5 h-5 text-red-600" />{counters.bqErrors}</CardTitle></CardHeader></Card>
-            </div>
-            <Card>
-              <CardHeader>
-                <CardTitle>Fila Google Patents</CardTitle>
-                <CardDescription>Reprocessamento bibliográfico alternativo para falhas de OPS/Docs/INPI.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Tabs value={bqTab} onValueChange={setBqTab}>
-                  <TabsList>
-                    <TabsTrigger value="processing">Processando</TabsTrigger>
-                    <TabsTrigger value="success">Sucesso</TabsTrigger>
-                    <TabsTrigger value="errors">Erros</TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="processing"><OpsTable rows={data.bigquery.processing} /></TabsContent>
-                  <TabsContent value="success"><OpsTable rows={data.bigquery.success} /></TabsContent>
-                  <TabsContent value="errors" className="space-y-3">
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" size="sm" disabled={loading || data.bigquery.errors.length === 0} onClick={() => retryAllBigQueryErrors()}>
-                        Reprocessar todos os erros
-                      </Button>
-                    </div>
-                    <OpsTable rows={data.bigquery.errors} onRetry={retryBigQueryJob} />
                   </TabsContent>
                 </Tabs>
               </CardContent>
