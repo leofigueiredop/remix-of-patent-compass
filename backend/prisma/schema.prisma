@@ -242,6 +242,25 @@ model OpsBibliographicJob {
   @@index([status, created_at])
 }
 
+model BigQueryBibliographicJob {
+  id                 String   @id @default(uuid())
+  patent_number      String
+  rpi_number         Int?
+  status             String   @default("pending")
+  attempts           Int      @default(0)
+  docdb_id           String?
+  source_job_type    String?
+  source_job_id      String?
+  error              String?
+  started_at         DateTime?
+  finished_at        DateTime?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  @@unique([patent_number])
+  @@index([status, created_at])
+}
+
 model InpiProcessingJob {
   id                 String   @id @default(uuid())
   patent_number      String

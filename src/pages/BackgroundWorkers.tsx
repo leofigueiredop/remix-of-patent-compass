@@ -84,6 +84,16 @@ type QueuePayload = {
       errors: number;
     };
   };
+  bigquery: {
+    processing: OpsJob[];
+    success: OpsJob[];
+    errors: OpsJob[];
+    counts?: {
+      processing: number;
+      success: number;
+      errors: number;
+    };
+  };
 };
 
 type OpsJob = {
@@ -104,10 +114,12 @@ type WorkerState = {
   docsPaused: boolean;
   opsPaused: boolean;
   inpiPaused: boolean;
+  bqPaused: boolean;
   rpiRunning: boolean;
   docRunning: boolean;
   opsRunning: boolean;
   inpiRunning: boolean;
+  bqRunning: boolean;
   bigQueryEnabled?: boolean;
   bigQueryProject?: string | null;
   bigQueryFirstEnabled?: boolean;
@@ -129,7 +141,8 @@ const initialData: QueuePayload = {
   rpi: { processing: [], success: [], errors: [] },
   docs: { processing: [], success: [], errors: [] },
   ops: { processing: [], success: [], errors: [] },
-  inpi: { processing: [], success: [], errors: [] }
+  inpi: { processing: [], success: [], errors: [] },
+  bigquery: { processing: [], success: [], errors: [] }
 };
 
 function formatDate(value?: string | null): string {
@@ -203,7 +216,7 @@ function RpiTable({ rows, onRetry }: { rows: RpiJob[]; onRetry?: (id: string) =>
   );
 }
 
-function DocsTable({ rows, onRetry }: { rows: DocJob[]; onRetry?: (id: string) => void }) {
+function DocsTable({ rows, onRetry, onSendBigQuery }: { rows: DocJob[]; onRetry?: (id: string) => void; onSendBigQuery?: (publicationOrPatent: string) => void }) {
   if (rows.length === 0) {
     return <div className="p-8 text-sm text-muted-foreground">Sem registros.</div>;
   }
@@ -234,9 +247,20 @@ function DocsTable({ rows, onRetry }: { rows: DocJob[]; onRetry?: (id: string) =
             <TableCell className="text-xs text-muted-foreground max-w-[320px] truncate" title={row.error || ""}>{row.error || "-"}</TableCell>
             <TableCell className="text-xs text-muted-foreground">{formatDate(row.finished_at)}</TableCell>
             <TableCell className="text-right">
-              {onRetry && (row.status === "failed" || row.status === "not_found") && (
-                <Button size="sm" variant="outline" onClick={() => onRetry(row.id)}>Reprocessar</Button>
-              )}
+              <div className="flex gap-2 justify-end">
+                {onRetry && (row.status === "failed" || row.status === "not_found") && (
+                  <Button size="sm" variant="outline" onClick={() => onRetry(row.id)}>Reprocessar</Button>
+                )}
+                {onSendBigQuery && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => onSendBigQuery(row.publication_number || row.patent?.numero_publicacao || row.patent_id)}
+                  >
+                    BigQuery
+                  </Button>
+                )}
+              </div>
             </TableCell>
           </TableRow>
         ))}
@@ -245,7 +269,7 @@ function DocsTable({ rows, onRetry }: { rows: DocJob[]; onRetry?: (id: string) =
   );
 }
 
-function OpsTable({ rows, onRetry }: { rows: OpsJob[]; onRetry?: (id: string) => void }) {
+function OpsTable({ rows, onRetry, onSendBigQuery }: { rows: OpsJob[]; onRetry?: (id: string) => void; onSendBigQuery?: (patentNumber: string) => void }) {
   if (rows.length === 0) return <div className="p-8 text-sm text-muted-foreground">Sem registros.</div>;
   return (
     <Table>
@@ -274,9 +298,16 @@ function OpsTable({ rows, onRetry }: { rows: OpsJob[]; onRetry?: (id: string) =>
             <TableCell className="text-xs text-muted-foreground max-w-[320px] truncate" title={row.error || ""}>{row.error || "-"}</TableCell>
             <TableCell className="text-xs text-muted-foreground">{formatDate(row.finished_at)}</TableCell>
             <TableCell className="text-right">
-              {onRetry && (row.status === "failed" || row.status === "not_found") && (
-                <Button size="sm" variant="outline" onClick={() => onRetry(row.id)}>Reprocessar</Button>
-              )}
+              <div className="flex gap-2 justify-end">
+                {onRetry && (row.status === "failed" || row.status === "not_found") && (
+                  <Button size="sm" variant="outline" onClick={() => onRetry(row.id)}>Reprocessar</Button>
+                )}
+                {onSendBigQuery && (
+                  <Button size="sm" variant="secondary" onClick={() => onSendBigQuery(row.patent_number)}>
+                    BigQuery
+                  </Button>
+                )}
+              </div>
             </TableCell>
           </TableRow>
         ))}
@@ -285,7 +316,7 @@ function OpsTable({ rows, onRetry }: { rows: OpsJob[]; onRetry?: (id: string) =>
   );
 }
 
-function InpiTable({ rows, onRetry }: { rows: InpiJob[]; onRetry?: (id: string) => void }) {
+function InpiTable({ rows, onRetry, onSendBigQuery }: { rows: InpiJob[]; onRetry?: (id: string) => void; onSendBigQuery?: (patentNumber: string) => void }) {
   if (rows.length === 0) return <div className="p-8 text-sm text-muted-foreground">Sem registros.</div>;
   return (
     <Table>
@@ -314,9 +345,16 @@ function InpiTable({ rows, onRetry }: { rows: InpiJob[]; onRetry?: (id: string) 
             <TableCell className="text-xs text-muted-foreground">{formatDate(row.finished_at)}</TableCell>
             <TableCell className="text-xs text-muted-foreground max-w-[320px] truncate" title={row.error || ""}>{row.error || "-"}</TableCell>
             <TableCell className="text-right">
-              {onRetry && (row.status === "failed" || row.status === "failed_permanent") && (
-                <Button size="sm" variant="outline" onClick={() => onRetry(row.id)}>Reprocessar</Button>
-              )}
+              <div className="flex gap-2 justify-end">
+                {onRetry && (row.status === "failed" || row.status === "failed_permanent") && (
+                  <Button size="sm" variant="outline" onClick={() => onRetry(row.id)}>Reprocessar</Button>
+                )}
+                {onSendBigQuery && (
+                  <Button size="sm" variant="secondary" onClick={() => onSendBigQuery(row.patent_number)}>
+                    BigQuery
+                  </Button>
+                )}
+              </div>
             </TableCell>
           </TableRow>
         ))}
@@ -333,16 +371,19 @@ export default function BackgroundWorkers() {
     docsPaused: false,
     opsPaused: false,
     inpiPaused: false,
+    bqPaused: false,
     rpiRunning: false,
     docRunning: false,
     opsRunning: false,
-    inpiRunning: false
+    inpiRunning: false,
+    bqRunning: false
   });
   const [mainTab, setMainTab] = useState("rpi");
   const [rpiTab, setRpiTab] = useState("processing");
   const [docsTab, setDocsTab] = useState("processing");
   const [opsTab, setOpsTab] = useState("processing");
   const [inpiTab, setInpiTab] = useState("processing");
+  const [bqTab, setBqTab] = useState("processing");
   const [enqueueFrom, setEnqueueFrom] = useState("");
   const [enqueueTo, setEnqueueTo] = useState("");
   const [filterFrom, setFilterFrom] = useState("");
@@ -363,7 +404,10 @@ export default function BackgroundWorkers() {
     opsErrors: data.ops.counts?.errors ?? data.ops.errors.length,
     inpiProcessing: data.inpi.counts?.processing ?? data.inpi.processing.length,
     inpiSuccess: data.inpi.counts?.success ?? data.inpi.success.length,
-    inpiErrors: data.inpi.counts?.errors ?? data.inpi.errors.length
+    inpiErrors: data.inpi.counts?.errors ?? data.inpi.errors.length,
+    bqProcessing: data.bigquery.counts?.processing ?? data.bigquery.processing.length,
+    bqSuccess: data.bigquery.counts?.success ?? data.bigquery.success.length,
+    bqErrors: data.bigquery.counts?.errors ?? data.bigquery.errors.length
   }), [data]);
 
   const fetchQueues = async () => {
@@ -390,7 +434,7 @@ export default function BackgroundWorkers() {
     }
   };
 
-  const controlWorkers = async (queue: "rpi" | "docs" | "ops" | "inpi" | "all", action: "pause" | "resume") => {
+  const controlWorkers = async (queue: "rpi" | "docs" | "ops" | "inpi" | "bigquery" | "all", action: "pause" | "resume") => {
     setLoading(true);
     try {
       await axios.post(`${API_URL}/background-workers/control`, { queue, action });
@@ -418,6 +462,25 @@ export default function BackgroundWorkers() {
   const retryInpiJob = async (id: string) => {
     await axios.post(`${API_URL}/background-workers/inpi/retry/${id}`);
     await fetchQueues();
+  };
+
+  const retryBigQueryJob = async (id: string) => {
+    await axios.post(`${API_URL}/background-workers/bigquery/retry/${id}`);
+    await fetchQueues();
+  };
+
+  const sendToBigQuery = async (patentNumber: string, source: "docs" | "ops" | "inpi") => {
+    setLoading(true);
+    try {
+      const response = await axios.post(`${API_URL}/background-workers/bigquery/enqueue`, {
+        patentNumbers: [patentNumber],
+        source
+      });
+      setActionMessage(`BigQuery enfileirado: ${response.data?.enqueued ?? 0}`);
+      await fetchQueues();
+    } finally {
+      setLoading(false);
+    }
   };
 
   const retryAllRpiErrors = async (preferBigQuery = false) => {
@@ -462,6 +525,29 @@ export default function BackgroundWorkers() {
       const ids = data.inpi.errors.map((row) => row.id);
       const response = await axios.post(`${API_URL}/background-workers/inpi/retry-errors`, { ids });
       setActionMessage(`INPI reprocessados: ${response.data?.updated ?? 0}`);
+      await fetchQueues();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const retryAllBigQueryErrors = async () => {
+    setLoading(true);
+    try {
+      const ids = data.bigquery.errors.map((row) => row.id);
+      const response = await axios.post(`${API_URL}/background-workers/bigquery/retry-errors`, { ids });
+      setActionMessage(`BigQuery reprocessados: ${response.data?.updated ?? 0}`);
+      await fetchQueues();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const enqueueBigQueryFromErrors = async (source: "docs" | "ops" | "inpi" | "all") => {
+    setLoading(true);
+    try {
+      const response = await axios.post(`${API_URL}/background-workers/bigquery/enqueue-from-errors`, { source });
+      setActionMessage(`BigQuery por erro (${source}): selecionados=${response.data?.selected ?? 0}, enfileirados=${response.data?.enqueued ?? 0}`);
       await fetchQueues();
     } finally {
       setLoading(false);
@@ -551,12 +637,12 @@ export default function BackgroundWorkers() {
           <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
-              onClick={() => controlWorkers("all", state.rpiPaused && state.docsPaused && state.opsPaused && state.inpiPaused ? "resume" : "pause")}
+              onClick={() => controlWorkers("all", state.rpiPaused && state.docsPaused && state.opsPaused && state.inpiPaused && state.bqPaused ? "resume" : "pause")}
               disabled={loading}
               className="gap-2"
             >
-              {state.rpiPaused && state.docsPaused && state.opsPaused && state.inpiPaused ? <PlayCircle className="w-4 h-4" /> : <PauseCircle className="w-4 h-4" />}
-              {state.rpiPaused && state.docsPaused && state.opsPaused && state.inpiPaused ? "Retomar Workers" : "Pausar Workers"}
+              {state.rpiPaused && state.docsPaused && state.opsPaused && state.inpiPaused && state.bqPaused ? <PlayCircle className="w-4 h-4" /> : <PauseCircle className="w-4 h-4" />}
+              {state.rpiPaused && state.docsPaused && state.opsPaused && state.inpiPaused && state.bqPaused ? "Retomar Workers" : "Pausar Workers"}
             </Button>
             <Button variant="outline" onClick={bootstrapRpi} disabled={loading} className="gap-2">
               <Files className="w-4 h-4" />
@@ -652,6 +738,10 @@ export default function BackgroundWorkers() {
               <Files className="w-4 h-4" />
               Fila INPI
             </TabsTrigger>
+            <TabsTrigger value="bigquery" className="gap-2">
+              <Files className="w-4 h-4" />
+              Fila BigQuery
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="rpi" className="space-y-4">
@@ -738,12 +828,15 @@ export default function BackgroundWorkers() {
                   <TabsContent value="processing"><DocsTable rows={data.docs.processing} /></TabsContent>
                   <TabsContent value="success"><DocsTable rows={data.docs.success} /></TabsContent>
                   <TabsContent value="errors" className="space-y-3">
-                    <div className="flex justify-end">
+                    <div className="flex justify-end gap-2">
+                      <Button variant="secondary" size="sm" disabled={loading || data.docs.errors.length === 0} onClick={() => enqueueBigQueryFromErrors("docs")}>
+                        Enviar erros para BigQuery
+                      </Button>
                       <Button variant="outline" size="sm" disabled={loading || data.docs.errors.length === 0} onClick={() => retryAllDocsErrors()}>
                         Reprocessar todos os erros
                       </Button>
                     </div>
-                    <DocsTable rows={data.docs.errors} onRetry={retryDocsJob} />
+                    <DocsTable rows={data.docs.errors} onRetry={retryDocsJob} onSendBigQuery={(patent) => sendToBigQuery(patent, "docs")} />
                   </TabsContent>
                 </Tabs>
               </CardContent>
@@ -786,12 +879,15 @@ export default function BackgroundWorkers() {
                   <TabsContent value="processing"><OpsTable rows={data.ops.processing} /></TabsContent>
                   <TabsContent value="success"><OpsTable rows={data.ops.success} /></TabsContent>
                   <TabsContent value="errors" className="space-y-3">
-                    <div className="flex justify-end">
+                    <div className="flex justify-end gap-2">
+                      <Button variant="secondary" size="sm" disabled={loading || data.ops.errors.length === 0} onClick={() => enqueueBigQueryFromErrors("ops")}>
+                        Enviar erros para BigQuery
+                      </Button>
                       <Button variant="outline" size="sm" disabled={loading || data.ops.errors.length === 0} onClick={() => retryAllOpsErrors(true)}>
                         Reprocessar todos (BigQuery)
                       </Button>
                     </div>
-                    <OpsTable rows={data.ops.errors} onRetry={retryOpsJob} />
+                    <OpsTable rows={data.ops.errors} onRetry={retryOpsJob} onSendBigQuery={(patent) => sendToBigQuery(patent, "ops")} />
                   </TabsContent>
                 </Tabs>
               </CardContent>
@@ -833,12 +929,50 @@ export default function BackgroundWorkers() {
                   <TabsContent value="processing"><InpiTable rows={data.inpi.processing} /></TabsContent>
                   <TabsContent value="success"><InpiTable rows={data.inpi.success} /></TabsContent>
                   <TabsContent value="errors" className="space-y-3">
-                    <div className="flex justify-end">
+                    <div className="flex justify-end gap-2">
+                      <Button variant="secondary" size="sm" disabled={loading || data.inpi.errors.length === 0} onClick={() => enqueueBigQueryFromErrors("inpi")}>
+                        Enviar erros para BigQuery
+                      </Button>
                       <Button variant="outline" size="sm" disabled={loading || data.inpi.errors.length === 0} onClick={() => retryAllInpiErrors()}>
                         Reprocessar todos os erros
                       </Button>
                     </div>
-                    <InpiTable rows={data.inpi.errors} onRetry={retryInpiJob} />
+                    <InpiTable rows={data.inpi.errors} onRetry={retryInpiJob} onSendBigQuery={(patent) => sendToBigQuery(patent, "inpi")} />
+                  </TabsContent>
+                </Tabs>
+              </CardContent>
+            </Card>
+          </TabsContent>
+          <TabsContent value="bigquery" className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Card><CardHeader className="pb-2"><CardDescription>Processando</CardDescription><CardTitle className="text-2xl flex items-center gap-2"><Clock className="w-5 h-5" />{counters.bqProcessing}</CardTitle></CardHeader></Card>
+              <Card><CardHeader className="pb-2"><CardDescription>Sucesso</CardDescription><CardTitle className="text-2xl flex items-center gap-2"><CheckCircle2 className="w-5 h-5 text-emerald-600" />{counters.bqSuccess}</CardTitle></CardHeader></Card>
+              <Card><CardHeader className="pb-2"><CardDescription>Erros</CardDescription><CardTitle className="text-2xl flex items-center gap-2"><AlertCircle className="w-5 h-5 text-red-600" />{counters.bqErrors}</CardTitle></CardHeader></Card>
+            </div>
+            <Card>
+              <CardHeader>
+                <CardTitle>Fila BigQuery</CardTitle>
+                <CardDescription>Reprocessamento bibliográfico alternativo para falhas de OPS/Docs/INPI.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Tabs value={bqTab} onValueChange={setBqTab}>
+                  <TabsList>
+                    <TabsTrigger value="processing">Processando</TabsTrigger>
+                    <TabsTrigger value="success">Sucesso</TabsTrigger>
+                    <TabsTrigger value="errors">Erros</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="processing"><OpsTable rows={data.bigquery.processing} /></TabsContent>
+                  <TabsContent value="success"><OpsTable rows={data.bigquery.success} /></TabsContent>
+                  <TabsContent value="errors" className="space-y-3">
+                    <div className="flex justify-end gap-2">
+                      <Button variant="secondary" size="sm" disabled={loading} onClick={() => enqueueBigQueryFromErrors("all")}>
+                        Enfileirar de todos os erros
+                      </Button>
+                      <Button variant="outline" size="sm" disabled={loading || data.bigquery.errors.length === 0} onClick={() => retryAllBigQueryErrors()}>
+                        Reprocessar todos os erros
+                      </Button>
+                    </div>
+                    <OpsTable rows={data.bigquery.errors} onRetry={retryBigQueryJob} />
                   </TabsContent>
                 </Tabs>
               </CardContent>

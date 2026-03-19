@@ -16,14 +16,18 @@ import { prisma } from './db';
 import {
     debugBigQueryLookup,
     debugInpiLookup,
+    enqueueBigQueryFromFailedSources,
+    enqueueBigQueryReprocessing,
     enqueueInpiReprocessing,
     enqueueLastFiveYearsRpi,
     getBackgroundWorkerState,
+    retryAllBigQueryErrorJobs,
     retryAllDocumentErrorJobs,
     retryAllInpiErrorJobs,
     retryInpiJob,
     retryAllOpsErrorJobs,
     retryAllRpiErrorJobs,
+    retryBigQueryJob,
     retryDocumentJob,
     retryOpsBibliographicJob,
     retryRpiJob,
@@ -156,6 +160,12 @@ function emptyBackgroundQueuesPayload() {
             counts: { processing: 0, success: 0, errors: 0 }
         },
         inpi: {
+            processing: [],
+            success: [],
+            errors: [],
+            counts: { processing: 0, success: 0, errors: 0 }
+        },
+        bigquery: {
             processing: [],
             success: [],
             errors: [],
@@ -2769,7 +2779,7 @@ fastify.get('/patents/processed', async (request: any, reply) => {
 fastify.get('/background-workers/queues', async (request: any, reply) => {
     try {
         const limit = Math.min(200, Math.max(20, parseInt((request.query?.limit || '100') as string, 10)));
-        const [rpiProcessing, rpiSuccess, rpiErrors, docsProcessing, docsSuccess, docsErrors, opsProcessing, opsSuccess, opsErrors, inpiProcessing, inpiSuccess, inpiErrors, rpiProcessingCount, rpiSuccessCount, rpiErrorsCount, docsProcessingCount, docsSuccessCount, docsErrorsCount, opsProcessingCount, opsSuccessCount, opsErrorsCount, inpiProcessingCount, inpiSuccessCount, inpiErrorsCount] = await Promise.all([
+        const [rpiProcessing, rpiSuccess, rpiErrors, docsProcessing, docsSuccess, docsErrors, opsProcessing, opsSuccess, opsErrors, inpiProcessing, inpiSuccess, inpiErrors, bqProcessing, bqSuccess, bqErrors, rpiProcessingCount, rpiSuccessCount, rpiErrorsCount, docsProcessingCount, docsSuccessCount, docsErrorsCount, opsProcessingCount, opsSuccessCount, opsErrorsCount, inpiProcessingCount, inpiSuccessCount, inpiErrorsCount, bqProcessingCount, bqSuccessCount, bqErrorsCount] = await Promise.all([
         prisma.rpiImportJob.findMany({
             where: { status: { in: ['pending', 'running'] } },
             orderBy: [{ rpi_number: 'asc' }, { created_at: 'asc' }],
@@ -2839,6 +2849,21 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
                 orderBy: { finished_at: 'desc' },
                 take: limit
             }),
+            prismaAny.bigQueryBibliographicJob.findMany({
+                where: { status: { in: ['pending', 'running'] } },
+                orderBy: { created_at: 'asc' },
+                take: limit
+            }),
+            prismaAny.bigQueryBibliographicJob.findMany({
+                where: { status: 'completed' },
+                orderBy: { finished_at: 'desc' },
+                take: limit
+            }),
+            prismaAny.bigQueryBibliographicJob.findMany({
+                where: { status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing'] } },
+                orderBy: { finished_at: 'desc' },
+                take: limit
+            }),
         prisma.rpiImportJob.count({
             where: { status: { in: ['pending', 'running'] } }
         }),
@@ -2874,6 +2899,15 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
             }),
             prismaAny.inpiProcessingJob.count({
                 where: { status: { in: ['failed', 'failed_permanent'] } }
+        }),
+            prismaAny.bigQueryBibliographicJob.count({
+                where: { status: { in: ['pending', 'running'] } }
+            }),
+            prismaAny.bigQueryBibliographicJob.count({
+                where: { status: 'completed' }
+            }),
+            prismaAny.bigQueryBibliographicJob.count({
+                where: { status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing'] } }
         })
     ]);
 
@@ -2899,6 +2933,7 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
         source: extractSource(row.error) || (row.docdb_id ? 'ops_api' : null)
     }));
     const mapInpi = (rows: any[]) => rows.map((row) => ({ ...row, source: 'inpi' }));
+    const mapBigQuery = (rows: any[]) => rows.map((row) => ({ ...row, source: 'google_bigquery' }));
 
         return {
             rpi: {
@@ -2939,6 +2974,16 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
                     processing: inpiProcessingCount,
                     success: inpiSuccessCount,
                     errors: inpiErrorsCount
+                }
+            },
+            bigquery: {
+                processing: mapBigQuery(bqProcessing),
+                success: mapBigQuery(bqSuccess),
+                errors: mapBigQuery(bqErrors),
+                counts: {
+                    processing: bqProcessingCount,
+                    success: bqSuccessCount,
+                    errors: bqErrorsCount
                 }
             }
         };
@@ -3159,7 +3204,7 @@ fastify.post('/background-workers/inpi/enqueue', async (request: any, reply) => 
 });
 
 fastify.post('/background-workers/control', async (request: any, reply) => {
-    const { queue, action } = request.body as { queue?: 'rpi' | 'docs' | 'ops' | 'inpi' | 'all'; action?: 'pause' | 'resume' };
+    const { queue, action } = request.body as { queue?: 'rpi' | 'docs' | 'ops' | 'inpi' | 'bigquery' | 'all'; action?: 'pause' | 'resume' };
     if (!queue || !action) {
         return reply.code(400).send({ error: 'queue e action são obrigatórios' });
     }
@@ -3184,6 +3229,49 @@ fastify.post('/background-workers/inpi/retry-errors', async (request: any, reply
         return result;
     } catch (error) {
         return reply.code(500).send({ error: 'Falha ao reprocessar erros da fila INPI' });
+    }
+});
+
+fastify.post('/background-workers/bigquery/enqueue', async (request: any, reply) => {
+    try {
+        const patentNumbers = Array.isArray(request.body?.patentNumbers)
+            ? request.body.patentNumbers.filter((item: any) => typeof item === 'string' && item.trim().length > 0)
+            : [];
+        const sourceJobType = typeof request.body?.source === 'string' ? request.body.source : undefined;
+        const result = await enqueueBigQueryReprocessing(patentNumbers, sourceJobType);
+        return result;
+    } catch (error) {
+        return reply.code(500).send({ error: 'Falha ao enfileirar BigQuery' });
+    }
+});
+
+fastify.post('/background-workers/bigquery/enqueue-from-errors', async (request: any, reply) => {
+    try {
+        const source = (request.body?.source || 'all') as 'docs' | 'ops' | 'inpi' | 'all';
+        const result = await enqueueBigQueryFromFailedSources(source);
+        return result;
+    } catch (error) {
+        return reply.code(500).send({ error: 'Falha ao enfileirar BigQuery a partir de erros' });
+    }
+});
+
+fastify.post('/background-workers/bigquery/retry/:id', async (request: any, reply) => {
+    const { id } = request.params as { id: string };
+    try {
+        const job = await retryBigQueryJob(id);
+        return { id: job.id, status: job.status };
+    } catch (error) {
+        return reply.code(404).send({ error: 'Job BigQuery não encontrado' });
+    }
+});
+
+fastify.post('/background-workers/bigquery/retry-errors', async (request: any, reply) => {
+    try {
+        const ids = Array.isArray(request.body?.ids) ? request.body.ids.filter((item: any) => typeof item === 'string') : undefined;
+        const result = await retryAllBigQueryErrorJobs(ids);
+        return result;
+    } catch (error) {
+        return reply.code(500).send({ error: 'Falha ao reprocessar erros da fila BigQuery' });
     }
 });
 

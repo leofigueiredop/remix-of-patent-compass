@@ -53,10 +53,12 @@ let rpiRunning = false;
 let docRunning = false;
 let opsRunning = false;
 let inpiRunning = false;
+let bqRunning = false;
 let rpiPaused = false;
 let docsPaused = false;
 let opsPaused = false;
 let inpiPaused = false;
+let bqPaused = false;
 let latestRpiCache: { value: number; expiresAt: number } | null = null;
 let opsAccessToken: string | null = null;
 let opsTokenExpiration = 0;
@@ -1862,6 +1864,43 @@ async function fetchBibliographicDataWithFallbacks(patentNumber: string, attempt
     return null;
 }
 
+async function applyBibliographicData(patentNumber: string, biblio: OpsBibliographicData) {
+    await prismaAny.inpiPublication.updateMany({
+        where: { patent_number: patentNumber },
+        data: {
+            bibliographic_status: 'completed',
+            ops_docdb_id: biblio.docdbId,
+            ops_title: biblio.title || null,
+            ops_applicant: biblio.applicant || null,
+            ops_inventor: biblio.inventor || null,
+            ops_ipc: biblio.ipc || null,
+            ops_publication_date: biblio.publicationDate || null,
+            ops_error: biblio.source ? `source=${biblio.source}` : null,
+            ops_last_sync_at: new Date()
+        }
+    });
+
+    const linkedPatent = await prisma.inpiPatent.findFirst({
+        where: {
+            OR: [
+                { numero_publicacao: { contains: patentNumber, mode: 'insensitive' } },
+                { cod_pedido: patentNumber }
+            ]
+        }
+    });
+    if (linkedPatent) {
+        await prisma.inpiPatent.update({
+            where: { cod_pedido: linkedPatent.cod_pedido },
+            data: {
+                title: linkedPatent.title || biblio.title || undefined,
+                applicant: linkedPatent.applicant || biblio.applicant || undefined,
+                inventors: linkedPatent.inventors || biblio.inventor || undefined,
+                ipc_codes: linkedPatent.ipc_codes || biblio.ipc || undefined
+            }
+        });
+    }
+}
+
 async function processNextOpsBibliographicJob() {
     if (opsRunning || opsPaused) return;
     opsRunning = true;
@@ -1920,40 +1959,7 @@ async function processNextOpsBibliographicJob() {
                 return;
             }
 
-            await prismaAny.inpiPublication.updateMany({
-                where: { patent_number: job.patent_number },
-                data: {
-                    bibliographic_status: 'completed',
-                    ops_docdb_id: biblio.docdbId,
-                    ops_title: biblio.title || null,
-                    ops_applicant: biblio.applicant || null,
-                    ops_inventor: biblio.inventor || null,
-                    ops_ipc: biblio.ipc || null,
-                    ops_publication_date: biblio.publicationDate || null,
-                    ops_error: biblio.source ? `source=${biblio.source}` : null,
-                    ops_last_sync_at: new Date()
-                }
-            });
-
-            const linkedPatent = await prisma.inpiPatent.findFirst({
-                where: {
-                    OR: [
-                        { numero_publicacao: { contains: job.patent_number, mode: 'insensitive' } },
-                        { cod_pedido: job.patent_number }
-                    ]
-                }
-            });
-            if (linkedPatent) {
-                await prisma.inpiPatent.update({
-                    where: { cod_pedido: linkedPatent.cod_pedido },
-                    data: {
-                        title: linkedPatent.title || biblio.title || undefined,
-                        applicant: linkedPatent.applicant || biblio.applicant || undefined,
-                        inventors: linkedPatent.inventors || biblio.inventor || undefined,
-                        ipc_codes: linkedPatent.ipc_codes || biblio.ipc || undefined
-                    }
-                });
-            }
+            await applyBibliographicData(job.patent_number, biblio);
 
             await prismaAny.opsBibliographicJob.update({
                 where: { id: job.id },
@@ -1987,6 +1993,85 @@ async function processNextOpsBibliographicJob() {
         }
     } finally {
         opsRunning = false;
+    }
+}
+
+async function processNextBigQueryBibliographicJob() {
+    if (bqRunning || bqPaused || !BIGQUERY_ENABLED) return;
+    bqRunning = true;
+    try {
+        let job = await prismaAny.bigQueryBibliographicJob.findFirst({
+            where: { status: 'pending' },
+            orderBy: [{ created_at: 'asc' }]
+        });
+        if (!job) {
+            job = await prismaAny.bigQueryBibliographicJob.findFirst({
+                where: {
+                    status: 'failed',
+                    attempts: { lt: MAX_DOC_ATTEMPTS }
+                },
+                orderBy: [{ attempts: 'asc' }, { updated_at: 'asc' }, { created_at: 'asc' }]
+            });
+        }
+        if (!job) return;
+        const nextAttempt = job.attempts + 1;
+        await prismaAny.bigQueryBibliographicJob.update({
+            where: { id: job.id },
+            data: {
+                status: 'running',
+                started_at: new Date(),
+                attempts: { increment: 1 },
+                error: null
+            }
+        });
+
+        try {
+            const bqData = await fetchBigQueryBibliographicData(job.patent_number);
+            if (!bqData) {
+                const recentIndexing = isRecentPatentForIndexing(job.patent_number);
+                const status = recentIndexing ? 'waiting_indexing' : 'not_found';
+                const errorText = recentIndexing
+                    ? `Dados bibliográficos BigQuery ainda não indexados para ${job.patent_number}`
+                    : `Dados bibliográficos BigQuery não encontrados para ${job.patent_number}`;
+                await prismaAny.bigQueryBibliographicJob.update({
+                    where: { id: job.id },
+                    data: { status, error: errorText, finished_at: new Date() }
+                });
+                await prismaAny.inpiPublication.updateMany({
+                    where: { patent_number: job.patent_number },
+                    data: {
+                        bibliographic_status: recentIndexing ? 'pending' : 'not_found',
+                        ops_error: 'source=google_bigquery not_found',
+                        ops_last_sync_at: new Date()
+                    }
+                });
+                return;
+            }
+
+            const biblio = mapBigQueryToBiblio(job.patent_number, bqData);
+            await applyBibliographicData(job.patent_number, biblio);
+            await prismaAny.bigQueryBibliographicJob.update({
+                where: { id: job.id },
+                data: {
+                    status: 'completed',
+                    docdb_id: biblio.docdbId,
+                    error: 'source=google_bigquery',
+                    finished_at: new Date()
+                }
+            });
+        } catch (error: unknown) {
+            const message = truncateError(errorMessage(error, 'Erro ao consultar bibliografia no BigQuery'));
+            await prismaAny.bigQueryBibliographicJob.update({
+                where: { id: job.id },
+                data: {
+                    status: nextAttempt >= MAX_DOC_ATTEMPTS ? 'failed_permanent' : 'failed',
+                    error: message,
+                    finished_at: new Date()
+                }
+            });
+        }
+    } finally {
+        bqRunning = false;
     }
 }
 
@@ -2311,10 +2396,12 @@ export function getBackgroundWorkerState() {
         docsPaused,
         opsPaused,
         inpiPaused,
+        bqPaused,
         rpiRunning,
         docRunning,
         opsRunning,
         inpiRunning,
+        bqRunning,
         opsCircuitOpen: opsCircuitOpenUntil > Date.now(),
         opsCircuitOpenUntil: opsCircuitOpenUntil > Date.now() ? new Date(opsCircuitOpenUntil).toISOString() : null,
         bigQueryEnabled: BIGQUERY_ENABLED,
@@ -2382,11 +2469,12 @@ export async function debugInpiLookup(patentNumber: string) {
     return { patentNumber, ...result };
 }
 
-export function setBackgroundWorkerPause(queue: 'rpi' | 'docs' | 'ops' | 'inpi' | 'all', paused: boolean) {
+export function setBackgroundWorkerPause(queue: 'rpi' | 'docs' | 'ops' | 'inpi' | 'bigquery' | 'all', paused: boolean) {
     if (queue === 'all' || queue === 'rpi') rpiPaused = paused;
     if (queue === 'all' || queue === 'docs') docsPaused = paused;
     if (queue === 'all' || queue === 'ops') opsPaused = paused;
     if (queue === 'all' || queue === 'inpi') inpiPaused = paused;
+    if (queue === 'all' || queue === 'bigquery') bqPaused = paused;
     return getBackgroundWorkerState();
 }
 
@@ -2487,6 +2575,98 @@ export async function retryAllOpsErrorJobs(ids?: string[], preferBigQuery = fals
     });
     processNextOpsBibliographicJob().catch(() => undefined);
     return { updated: result.count };
+}
+
+export async function enqueueBigQueryReprocessing(patentNumbers?: string[], sourceJobType?: string) {
+    const values = Array.from(new Set((patentNumbers || [])
+        .map((item) => normalizeText(item).toUpperCase())
+        .filter(Boolean)));
+    if (!values.length) return { enqueued: 0 };
+    const result = await prismaAny.bigQueryBibliographicJob.createMany({
+        data: values.map((patentNumber) => ({
+            patent_number: patentNumber,
+            status: 'pending',
+            attempts: 0,
+            source_job_type: sourceJobType || null,
+            created_at: new Date()
+        })),
+        skipDuplicates: true
+    });
+    processNextBigQueryBibliographicJob().catch(() => undefined);
+    return { enqueued: result.count };
+}
+
+export async function retryBigQueryJob(jobId: string) {
+    const updated = await prismaAny.bigQueryBibliographicJob.update({
+        where: { id: jobId },
+        data: {
+            status: 'pending',
+            attempts: 0,
+            error: null,
+            started_at: null,
+            finished_at: null
+        }
+    });
+    processNextBigQueryBibliographicJob().catch(() => undefined);
+    return updated;
+}
+
+export async function retryAllBigQueryErrorJobs(ids?: string[]) {
+    const where = ids && ids.length > 0
+        ? { id: { in: Array.from(new Set(ids)) }, status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing'] } }
+        : { status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing'] } };
+    const result = await prismaAny.bigQueryBibliographicJob.updateMany({
+        where,
+        data: {
+            status: 'pending',
+            attempts: 0,
+            error: null,
+            started_at: null,
+            finished_at: null
+        }
+    });
+    processNextBigQueryBibliographicJob().catch(() => undefined);
+    return { updated: result.count };
+}
+
+export async function enqueueBigQueryFromFailedSources(source: 'docs' | 'ops' | 'inpi' | 'all' = 'all') {
+    const patentNumbers = new Set<string>();
+    if (source === 'all' || source === 'ops') {
+        const rows = await prismaAny.opsBibliographicJob.findMany({
+            where: { status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing'] } },
+            select: { patent_number: true },
+            take: 2000
+        });
+        rows.forEach((row: any) => {
+            const value = normalizeText(row.patent_number).toUpperCase();
+            if (value) patentNumbers.add(value);
+        });
+    }
+    if (source === 'all' || source === 'docs') {
+        const rows = await prisma.documentDownloadJob.findMany({
+            where: { status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing'] } },
+            select: { publication_number: true, patent_id: true },
+            take: 2000
+        });
+        rows.forEach((row: any) => {
+            const value = normalizeText(row.publication_number || row.patent_id).toUpperCase();
+            if (value) patentNumbers.add(value);
+        });
+    }
+    if (source === 'all' || source === 'inpi') {
+        const rows = await prismaAny.inpiProcessingJob.findMany({
+            where: { status: { in: ['failed', 'failed_permanent'] } },
+            select: { patent_number: true },
+            take: 2000
+        });
+        rows.forEach((row: any) => {
+            const value = normalizeText(row.patent_number).toUpperCase();
+            if (value) patentNumbers.add(value);
+        });
+    }
+    const numbers = Array.from(patentNumbers);
+    const result = await enqueueBigQueryReprocessing(numbers, source);
+    return { selected: numbers.length, enqueued: result.enqueued, source };
 }
 
 // INPI Worker - Processamento de dados completos do INPI
@@ -2639,6 +2819,7 @@ export async function startBackgroundWorkers() {
     processNextRpiImportJob().catch(() => undefined);
     processNextDocumentJob().catch(() => undefined);
     processNextOpsBibliographicJob().catch(() => undefined);
+    processNextBigQueryBibliographicJob().catch(() => undefined);
     setInterval(() => {
         processNextInpiJob().catch(() => undefined);
     }, 3000);
@@ -2651,6 +2832,9 @@ export async function startBackgroundWorkers() {
     setInterval(() => {
         processNextOpsBibliographicJob().catch(() => undefined);
     }, 6000);
+    setInterval(() => {
+        processNextBigQueryBibliographicJob().catch(() => undefined);
+    }, 6500);
     setInterval(() => {
         recoverStaleRunningJobs().catch(() => undefined);
     }, 60 * 1000);
