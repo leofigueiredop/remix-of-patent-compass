@@ -361,6 +361,20 @@ function buildBigQueryPublicationCandidates(parsed: ParsedPublicationNumber): st
     return Array.from(values);
 }
 
+function buildLooseNumberNeedles(value: string): string[] {
+    const normalized = normalizePublicationForBigQuery(value);
+    if (!normalized) return [];
+    const noBr = normalized.replace(/^BR/i, '');
+    const removeTrailingZero = (text: string) => text.endsWith('0') ? text.slice(0, -1) : text;
+    const values = new Set<string>([
+        normalized,
+        noBr,
+        removeTrailingZero(normalized),
+        removeTrailingZero(noBr)
+    ].filter((item) => item.length >= 6));
+    return Array.from(values);
+}
+
 async function getGoogleServiceAccount(): Promise<{ client_email: string; private_key: string } | null> {
     const rawJson = GOOGLE_SERVICE_ACCOUNT_JSON
         ? GOOGLE_SERVICE_ACCOUNT_JSON
@@ -546,6 +560,7 @@ async function fetchBigQueryBibliographicData(publicationNumber: string): Promis
         }
     }
     const docNoLeadingZeros = parsed.docNumber.replace(/^0+/, '') || parsed.docNumber;
+    const looseNeedles = buildLooseNumberNeedles(normalized);
     const publicationCandidates = buildBigQueryPublicationCandidates(parsed);
     const exactQuery = `
       SELECT
@@ -585,6 +600,7 @@ async function fetchBigQueryBibliographicData(publicationNumber: string): Promis
         AND (
           REPLACE(REPLACE(REPLACE(UPPER(IFNULL(t.publication_number, '')), '-', ''), ' ', ''), '/', '') = @docNumber
           OR REPLACE(REPLACE(REPLACE(UPPER(IFNULL(t.publication_number, '')), '-', ''), ' ', ''), '/', '') = @docNumberNoLeadingZeros
+          OR ${looseNeedles.length > 0 ? `(${looseNeedles.map((_, index) => `REPLACE(REPLACE(REPLACE(UPPER(IFNULL(t.publication_number, '')), '-', ''), ' ', ''), '/', '') LIKE @needle${index}`).join(' OR ')})` : 'FALSE'}
         )
         AND (
           @kindCode = ''
@@ -618,7 +634,12 @@ async function fetchBigQueryBibliographicData(publicationNumber: string): Promis
                     { name: 'country', parameterType: { type: 'STRING' }, parameterValue: { value: parsed.country } },
                     { name: 'docNumber', parameterType: { type: 'STRING' }, parameterValue: { value: parsed.docNumber } },
                     { name: 'docNumberNoLeadingZeros', parameterType: { type: 'STRING' }, parameterValue: { value: docNoLeadingZeros } },
-                    { name: 'kindCode', parameterType: { type: 'STRING' }, parameterValue: { value: parsed.kindCode } }
+                    { name: 'kindCode', parameterType: { type: 'STRING' }, parameterValue: { value: parsed.kindCode } },
+                    ...looseNeedles.map((needle, index) => ({
+                        name: `needle${index}`,
+                        parameterType: { type: 'STRING' },
+                        parameterValue: { value: `%${needle}%` }
+                    }))
                 ]
             });
             schemaFields = response?.schema?.fields || [];
@@ -1616,11 +1637,16 @@ function extractGooglePatentNumberCandidates(patentNumber: string): string[] {
     const normalized = normalizePublicationNumber(patentNumber).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
     if (!normalized) return [];
     const variants = new Set<string>([normalized]);
+    const noBr = normalized.replace(/^BR/i, '');
+    if (noBr) variants.add(noBr);
+    if (normalized.endsWith('0')) variants.add(normalized.slice(0, -1));
+    if (noBr.endsWith('0')) variants.add(noBr.slice(0, -1));
     const brMatch = normalized.match(/^BR(10|11)(\d{8,})$/);
     if (brMatch) {
         const doc = brMatch[2];
         if (doc.length > 1) {
             variants.add(`BR${brMatch[1]}${doc.slice(0, -1)}`);
+            variants.add(`${brMatch[1]}${doc.slice(0, -1)}`);
         }
     }
     return Array.from(variants);

@@ -547,11 +547,10 @@ function normalizePatentForWeb(publicationNumber?: string): string {
 function buildGooglePatentsUrl(publicationNumber?: string): string {
     const normalized = normalizePatentForWeb(publicationNumber);
     if (!normalized) return '';
-    const brMatch = normalized.match(/^BR(10|11)(\d{8,})$/);
-    const candidate = brMatch && brMatch[2].length > 1
-        ? `BR${brMatch[1]}${brMatch[2].slice(0, -1)}`
-        : normalized;
-    return `https://patents.google.com/patent/${candidate}/en`;
+    const noBr = normalized.replace(/^BR/i, '');
+    const noBrNoZero = noBr.endsWith('0') ? noBr.slice(0, -1) : noBr;
+    const query = noBrNoZero || noBr || normalized;
+    return `https://patents.google.com/?q=${encodeURIComponent(query)}`;
 }
 
 function buildEspacenetUiUrl(publicationNumber?: string): string {
