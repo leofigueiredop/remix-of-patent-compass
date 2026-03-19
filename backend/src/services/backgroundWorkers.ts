@@ -2453,178 +2453,76 @@ async function processNextDocumentJob() {
                 }
             };
 
-            const tryEspacenetPuppeteerFallback = async (reasonCode: string): Promise<boolean> => {
-                if (!ESPACENET_UI_FALLBACK_ENABLED || INPI_SCRAPE_FIRST_ENABLED) {
-                    return false;
-                }
-                try {
-                    const module = await import('./espacenetScraper');
-                    if (!module?.downloadEspacenetOriginalDocument) return false;
-                    const pdf = await module.downloadEspacenetOriginalDocument(publicationNumber);
-                    if (!pdf || pdf.length < 1024) return false;
-                    const safeBase = publicationNumber.replace(/[^\w.-]/g, '_');
-                    const baseKey = `patent-docs/${safeBase}`;
-                    const fullKey = `${baseKey}/full_document.pdf`;
-                    await uploadPdfToS3(fullKey, pdf);
-                    await prisma.documentDownloadJob.update({
-                        where: { id: job.id },
-                        data: {
-                            status: 'completed',
-                            storage_key: fullKey,
-                            finished_at: new Date(),
-                            publication_number: publicationNumber,
-                            error: truncateError(`${reasonCode} source=espacenet_puppeteer`)
-                        }
-                    });
-                    documentJobLog({
-                        jobId: job.id,
-                        patentId: job.patent_id,
-                        publicationNumber,
-                        status: 'completed',
-                        code: `${reasonCode}_ESPACENET_PUPPETEER`,
-                        storageKey: fullKey
-                    });
-                    return true;
-                } catch (error) {
-                    documentJobLog({
-                        jobId: job.id,
-                        patentId: job.patent_id,
-                        publicationNumber,
-                        status: 'failed',
-                        code: `${reasonCode}_ESPACENET_PUPPETEER_FAILED`,
-                        detail: serializeUnknownError(error)
-                    });
-                    return false;
-                }
-            };
-
             const googlePrimaryRecovered = await tryGooglePatentsFallback('DOC_PRIMARY');
             if (googlePrimaryRecovered) return;
-
-            const docdbId = await resolveDocdbId(publicationNumber);
-            if (!docdbId) {
-                const publicationBiblio = await prismaAny.inpiPublication.findFirst({
-                    where: { patent_number: publicationNumber, bibliographic_status: 'completed' },
-                    orderBy: { created_at: 'desc' },
-                    select: {
-                        ops_title: true,
-                        ops_applicant: true,
-                        ops_inventor: true,
-                        ops_ipc: true,
-                        ops_publication_date: true
-                    }
-                }).catch(() => null);
-                const patentBiblio = await prisma.inpiPatent.findUnique({
+            const publicationBiblio = await prismaAny.inpiPublication.findFirst({
+                where: { patent_number: publicationNumber, bibliographic_status: 'completed' },
+                orderBy: { created_at: 'desc' },
+                select: {
+                    ops_title: true,
+                    ops_applicant: true,
+                    ops_inventor: true,
+                    ops_ipc: true,
+                    ops_publication_date: true
+                }
+            }).catch(() => null);
+            const patentBiblio = await prisma.inpiPatent.findUnique({
+                where: { cod_pedido: job.patent_id },
+                select: {
+                    title: true,
+                    resumo_detalhado: true,
+                    applicant: true,
+                    inventors: true,
+                    ipc_codes: true,
+                    filing_date: true
+                }
+            }).catch(() => null);
+            const hasDetailedAbstract = Boolean(normalizeText(patentBiblio?.resumo_detalhado || ''));
+            const hasStoredBiblio = hasBasicBibliographicData({
+                title: publicationBiblio?.ops_title || patentBiblio?.title,
+                applicant: publicationBiblio?.ops_applicant || patentBiblio?.applicant,
+                inventor: publicationBiblio?.ops_inventor || patentBiblio?.inventors,
+                ipc: publicationBiblio?.ops_ipc || patentBiblio?.ipc_codes,
+                filingDate: publicationBiblio?.ops_publication_date || patentBiblio?.filing_date
+            });
+            let fallbackBiblio: BigQueryBibliographicData | null = null;
+            if (!hasStoredBiblio && !hasDetailedAbstract) {
+                const googleBiblio = await fetchGooglePatentsBibliographicData(publicationNumber);
+                fallbackBiblio = googleBiblio ? mapGoogleBiblioToSearchData(googleBiblio) : null;
+            }
+            if (fallbackBiblio) {
+                await prisma.inpiPatent.update({
                     where: { cod_pedido: job.patent_id },
-                    select: {
-                        title: true,
-                        resumo_detalhado: true,
-                        applicant: true,
-                        inventors: true,
-                        ipc_codes: true,
-                        filing_date: true
+                    data: {
+                        title: fallbackBiblio.title || undefined,
+                        abstract: fallbackBiblio.abstract || undefined,
+                        resumo_detalhado: fallbackBiblio.detailedAbstract || fallbackBiblio.abstract || undefined,
+                        applicant: fallbackBiblio.applicant || undefined,
+                        inventors: fallbackBiblio.inventors || undefined,
+                        ipc_codes: fallbackBiblio.ipc || undefined
                     }
-                }).catch(() => null);
-                const hasDetailedAbstract = Boolean(normalizeText(patentBiblio?.resumo_detalhado || ''));
-                const hasStoredBiblio = hasBasicBibliographicData({
-                    title: publicationBiblio?.ops_title || patentBiblio?.title,
-                    applicant: publicationBiblio?.ops_applicant || patentBiblio?.applicant,
-                    inventor: publicationBiblio?.ops_inventor || patentBiblio?.inventors,
-                    ipc: publicationBiblio?.ops_ipc || patentBiblio?.ipc_codes,
-                    filingDate: publicationBiblio?.ops_publication_date || patentBiblio?.filing_date
-                });
-                let fallbackBiblio: BigQueryBibliographicData | null = null;
-                if (!hasStoredBiblio && !hasDetailedAbstract) {
-                    const googleBiblio = await fetchGooglePatentsBibliographicData(publicationNumber);
-                    fallbackBiblio = googleBiblio ? mapGoogleBiblioToSearchData(googleBiblio) : null;
-                }
-                if (fallbackBiblio) {
-                    await prisma.inpiPatent.update({
-                        where: { cod_pedido: job.patent_id },
-                        data: {
-                            title: fallbackBiblio.title || undefined,
-                            abstract: fallbackBiblio.abstract || undefined,
-                            resumo_detalhado: fallbackBiblio.detailedAbstract || fallbackBiblio.abstract || undefined,
-                            applicant: fallbackBiblio.applicant || undefined,
-                            inventors: fallbackBiblio.inventors || undefined,
-                            ipc_codes: fallbackBiblio.ipc || undefined
-                        }
-                    }).catch(() => undefined);
-                    await prismaAny.inpiPublication.updateMany({
-                        where: { patent_number: publicationNumber },
-                        data: {
-                            bibliographic_status: 'completed',
-                            ops_title: fallbackBiblio.title || null,
-                            ops_applicant: fallbackBiblio.applicant || null,
-                            ops_inventor: fallbackBiblio.inventors || null,
-                            ops_ipc: fallbackBiblio.ipc || null,
-                            ops_publication_date: fallbackBiblio.publicationDate || fallbackBiblio.filingDate || null,
-                            ops_error: `source=${fallbackBiblio.source || 'google_patents'}`,
-                            ops_last_sync_at: new Date()
-                        }
-                    }).catch(() => undefined);
-                }
-                const googleRecovered = await tryGooglePatentsFallback('DOC_DOCDB_MISSING');
-                if (googleRecovered) return;
-                const espacenetRecovered = await tryEspacenetPuppeteerFallback('DOC_DOCDB_MISSING');
-                if (espacenetRecovered) return;
-                const recentIndexing = isRecentPatentForIndexing(publicationNumber);
-                const status = recentIndexing ? 'waiting_indexing' : 'not_found';
-                const code = recentIndexing
-                    ? (fallbackBiblio ? 'DOC_DOCDB_PENDING_INDEX_ENRICHED' : 'DOC_DOCDB_PENDING_INDEX')
-                    : (fallbackBiblio ? 'DOC_DOCDB_NOT_FOUND_ENRICHED' : 'DOC_DOCDB_NOT_FOUND');
-                const errorText = `${code} publication=${publicationNumber}`;
-                await prisma.documentDownloadJob.update({
-                    where: { id: job.id },
-                    data: { status, error: truncateError(errorText), finished_at: new Date() }
-                });
-                documentJobLog({ jobId: job.id, patentId: job.patent_id, publicationNumber, status, code });
-                return;
+                }).catch(() => undefined);
+                await prismaAny.inpiPublication.updateMany({
+                    where: { patent_number: publicationNumber },
+                    data: {
+                        bibliographic_status: 'completed',
+                        ops_title: fallbackBiblio.title || null,
+                        ops_applicant: fallbackBiblio.applicant || null,
+                        ops_inventor: fallbackBiblio.inventors || null,
+                        ops_ipc: fallbackBiblio.ipc || null,
+                        ops_publication_date: fallbackBiblio.publicationDate || fallbackBiblio.filingDate || null,
+                        ops_error: `source=${fallbackBiblio.source || 'google_patents'}`,
+                        ops_last_sync_at: new Date()
+                    }
+                }).catch(() => undefined);
             }
-            const instances = await fetchDocumentInstances(docdbId);
-            const fullDoc = instances.find((item) => item['@desc'] === 'FullDocument' && typeof item['@link'] === 'string');
-            if (!fullDoc?.['@link']) {
-                const googleRecovered = await tryGooglePatentsFallback('DOC_FULLDOCUMENT_MISSING');
-                if (googleRecovered) return;
-                const espacenetRecovered = await tryEspacenetPuppeteerFallback('DOC_FULLDOCUMENT_MISSING');
-                if (espacenetRecovered) return;
-                const errorText = `DOC_FULLDOCUMENT_NOT_AVAILABLE docdb=${docdbId}`;
-                await prisma.documentDownloadJob.update({
-                    where: { id: job.id },
-                    data: { status: 'not_found', error: truncateError(errorText), finished_at: new Date() }
-                });
-                documentJobLog({ jobId: job.id, patentId: job.patent_id, publicationNumber, docdbId, status: 'not_found', code: 'DOC_FULLDOCUMENT_NOT_AVAILABLE' });
-                return;
-            }
-            const fullPages = Math.max(1, Number(fullDoc['@number-of-pages'] || '1'));
-            const fullPdf = await downloadOpsPdfByLink(fullDoc['@link'], `1-${fullPages}`);
-            const safeBase = publicationNumber.replace(/[^\w.-]/g, '_');
-            const baseKey = `patent-docs/${safeBase}`;
-            const fullKey = `${baseKey}/full_document.pdf`;
-            await uploadPdfToS3(fullKey, fullPdf);
-
-            const drawing = instances.find((item) => item['@desc'] === 'Drawing' && typeof item['@link'] === 'string');
-            if (drawing?.['@link']) {
-                const pages = Math.max(1, Number(drawing['@number-of-pages'] || '1'));
-                const pdf = await downloadOpsPdfByLink(drawing['@link'], `1-${pages}`);
-                await uploadPdfToS3(`${baseKey}/drawings.pdf`, pdf);
-            }
-            const firstPage = instances.find((item) => item['@desc'] === 'FirstPageClipping' && typeof item['@link'] === 'string');
-            if (firstPage?.['@link']) {
-                const pdf = await downloadOpsPdfByLink(firstPage['@link'], '1');
-                await uploadPdfToS3(`${baseKey}/first_page.pdf`, pdf);
-            }
-
+            const errorText = `DOC_GOOGLE_PATENTS_NOT_FOUND publication=${publicationNumber} source=google_patents`;
             await prisma.documentDownloadJob.update({
                 where: { id: job.id },
-                data: {
-                    status: 'completed',
-                    storage_key: fullKey,
-                    finished_at: new Date(),
-                    publication_number: publicationNumber
-                }
+                data: { status: 'not_found', error: truncateError(errorText), finished_at: new Date() }
             });
-            documentJobLog({ jobId: job.id, patentId: job.patent_id, publicationNumber, docdbId, status: 'completed', code: 'DOC_DOWNLOADED' });
+            documentJobLog({ jobId: job.id, patentId: job.patent_id, publicationNumber, status: 'not_found', code: 'DOC_GOOGLE_PATENTS_NOT_FOUND' });
+            return;
         } catch (error: unknown) {
             const raw = serializeUnknownError(error);
             const message = truncateError(`DOC_RUNTIME_ERROR ${raw}`);

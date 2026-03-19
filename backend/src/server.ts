@@ -3093,7 +3093,7 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
     const mapRpi = (rows: any[]) => rows.map((row) => ({ ...row, source: 'rpi_xml' }));
     const mapDocs = (rows: any[]) => rows.map((row) => ({
         ...row,
-        source: row.storage_key ? 'bucket' : (extractSource(row.error) || (row.status === 'not_found' ? 'ops_api' : null))
+        source: row.storage_key ? 'bucket' : (extractSource(row.error) || (row.status === 'not_found' ? 'google_patents' : null))
     }));
     const mapOps = (rows: any[]) => rows.map((row) => ({
         ...row,
