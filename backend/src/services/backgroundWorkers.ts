@@ -1693,7 +1693,7 @@ function extractGooglePatentNumberCandidates(patentNumber: string): string[] {
     const normalized = raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
     const normalizedWithoutCheckDigit = withoutCheckDigit.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
     if (!normalized) return [];
-    const variants = new Set<string>([normalized, normalizedWithoutCheckDigit]);
+    const variants = new Set<string>([normalizedWithoutCheckDigit, normalized]);
     const noBr = normalized.replace(/^BR/i, '');
     if (noBr) variants.add(noBr);
     if (normalized.endsWith('0')) variants.add(normalized.slice(0, -1));
@@ -1706,7 +1706,7 @@ function extractGooglePatentNumberCandidates(patentNumber: string): string[] {
             variants.add(`${brMatch[1]}${doc.slice(0, -1)}`);
         }
     }
-    return Array.from(variants);
+    return Array.from(variants).filter(Boolean);
 }
 
 function extractGooglePatentAbstract($: ReturnType<typeof cheerio.load>): string {
@@ -1759,95 +1759,167 @@ function extractGooglePortugueseUrl($: ReturnType<typeof cheerio.load>, pageUrl:
     return href.startsWith('http') ? href : `https://patents.google.com${href.startsWith('/') ? '' : '/'}${href}`;
 }
 
-async function resolveGooglePatentDetailUrl(patentNumber: string): Promise<string | null> {
+type GooglePatentBrowserSnapshot = {
+    detailUrl: string;
+    detailHtml: string;
+    portugueseUrl?: string;
+    portugueseHtml?: string;
+    pdfCandidates: string[];
+};
+
+async function openGooglePatentViaBrowser(patentNumber: string): Promise<GooglePatentBrowserSnapshot | null> {
     const candidates = extractGooglePatentNumberCandidates(patentNumber);
-    for (const candidate of candidates) {
-        const detailUrl = `https://patents.google.com/patent/${candidate}/en`;
-        await waitGooglePatentsThrottle();
-        lastGooglePatentsRequestAt = Date.now();
-        const response = await axios.get(detailUrl, {
-            timeout: 30000,
-            validateStatus: () => true,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+    if (candidates.length === 0) return null;
+    const { default: puppeteer } = await import('puppeteer');
+    const browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36');
+    try {
+        let detailUrl = '';
+        let detailHtml = '';
+        for (const candidate of candidates) {
+            await waitGooglePatentsThrottle();
+            lastGooglePatentsRequestAt = Date.now();
+            await page.goto('https://patents.google.com/', { waitUntil: 'domcontentloaded', timeout: 45000 });
+            await page.evaluate((value) => {
+                const input = document.querySelector<HTMLInputElement>('input[type="search"], input[aria-label*="Search"], input[name="q"]');
+                if (!input) return;
+                input.focus();
+                input.value = '';
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.value = value;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            }, candidate);
+            await page.keyboard.press('Enter');
+            await sleep(1600 + Math.floor(Math.random() * 600));
+            let currentUrl = page.url();
+            if (!currentUrl.includes('/patent/')) {
+                await page.evaluate(() => {
+                    const firstLink = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="/patent/"]'))
+                        .find((item) => Boolean(item.href));
+                    if (firstLink) firstLink.click();
+                });
+                await sleep(1400 + Math.floor(Math.random() * 500));
+                currentUrl = page.url();
             }
+            if (!currentUrl.includes('/patent/')) continue;
+            const html = await page.content();
+            if (!html || /security verification|just a moment/i.test(html)) continue;
+            detailUrl = currentUrl;
+            detailHtml = html;
+            break;
+        }
+        if (!detailUrl || !detailHtml) return null;
+
+        const switchedToPortuguese = await page.evaluate(() => {
+            const langLink = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]'))
+                .find((item) => /portuguese|português/i.test((item.textContent || '').toLowerCase()));
+            if (!langLink) return false;
+            langLink.click();
+            return true;
         });
-        if (response.status < 200 || response.status >= 300) continue;
-        const html = typeof response.data === 'string' ? response.data : '';
-        if (!html || /security verification|just a moment/i.test(html)) continue;
-        if (html.includes('/patent/')) return detailUrl;
-    }
-    for (const candidate of candidates) {
-        const searchUrl = `https://patents.google.com/?q=${encodeURIComponent(candidate)}`;
-        await waitGooglePatentsThrottle();
-        lastGooglePatentsRequestAt = Date.now();
-        const response = await axios.get(searchUrl, {
-            timeout: 30000,
-            validateStatus: () => true,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+        let portugueseUrl: string | undefined;
+        let portugueseHtml: string | undefined;
+        if (switchedToPortuguese) {
+            await sleep(1200 + Math.floor(Math.random() * 500));
+            portugueseUrl = page.url();
+            const html = await page.content();
+            if (html && !/security verification|just a moment/i.test(html)) {
+                portugueseHtml = html;
             }
+        }
+
+        const browserCandidates = await page.evaluate(() => {
+            const out: string[] = [];
+            const add = (value?: string | null) => {
+                if (!value) return;
+                out.push(value);
+            };
+            add(document.querySelector('meta[name="citation_pdf_url"]')?.getAttribute('content'));
+            const nodes = Array.from(document.querySelectorAll<HTMLElement>('a[href], button[data-href], button[href]'));
+            for (const node of nodes) {
+                const text = (node.textContent || '').toLowerCase();
+                const aria = (node.getAttribute('aria-label') || '').toLowerCase();
+                const href = node.getAttribute('href') || node.getAttribute('data-href') || '';
+                if (text.includes('download pdf') || aria.includes('download pdf')) add(href);
+                if (/pdf|download|patentimages/i.test(href)) add(href);
+            }
+            return out;
         });
-        if (response.status < 200 || response.status >= 300) continue;
-        const html = typeof response.data === 'string' ? response.data : '';
-        if (!html || /security verification|just a moment/i.test(html)) continue;
-        const $ = cheerio.load(html);
-        const firstPatentHref = $('a[href^="/patent/"]').first().attr('href') || '';
-        const normalized = normalizeText(firstPatentHref);
-        if (!normalized) continue;
-        return normalized.startsWith('http') ? normalized : `https://patents.google.com${normalized}`;
+        const base = portugueseUrl || detailUrl;
+        const pdfCandidates = new Set<string>();
+        const addAbsolute = (raw?: string) => {
+            const href = normalizeText(raw || '');
+            if (!href) return;
+            try {
+                const absolute = new URL(href, base).toString();
+                pdfCandidates.add(absolute);
+            } catch {
+                return;
+            }
+        };
+        browserCandidates.forEach((item) => addAbsolute(item));
+        addAbsolute(`${detailUrl}${detailUrl.includes('?') ? '&' : '?'}download=pdf`);
+        if (portugueseUrl) addAbsolute(`${portugueseUrl}${portugueseUrl.includes('?') ? '&' : '?'}download=pdf`);
+
+        return {
+            detailUrl,
+            detailHtml,
+            portugueseUrl,
+            portugueseHtml,
+            pdfCandidates: Array.from(pdfCandidates)
+        };
+    } finally {
+        await page.close().catch(() => undefined);
+        await browser.close().catch(() => undefined);
     }
-    return null;
 }
 
 async function fetchGooglePatentsBibliographicData(patentNumber: string): Promise<OpsBibliographicData | null> {
     if (!GOOGLE_PATENTS_FALLBACK_ENABLED) return null;
-    const detailUrl = await resolveGooglePatentDetailUrl(patentNumber);
-    if (!detailUrl) return null;
-    await waitGooglePatentsThrottle();
-    lastGooglePatentsRequestAt = Date.now();
-    const response = await axios.get(detailUrl, {
-        timeout: 30000,
-        validateStatus: () => true,
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
-        }
-    });
-    if (response.status < 200 || response.status >= 300) return null;
-    const html = typeof response.data === 'string' ? response.data : '';
-    if (!html || /security verification|just a moment/i.test(html)) return null;
-    const $ = cheerio.load(html);
-    const portugueseUrl = extractGooglePortugueseUrl($, detailUrl);
-    let extractionUrl = detailUrl;
-    let extraction$ = $;
-    if (portugueseUrl) {
-        await waitGooglePatentsThrottle();
-        lastGooglePatentsRequestAt = Date.now();
-        const ptResponse = await axios.get(portugueseUrl, {
-            timeout: 30000,
-            validateStatus: () => true,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
-            }
-        });
-        const ptHtml = typeof ptResponse.data === 'string' ? ptResponse.data : '';
-        if (ptResponse.status >= 200 && ptResponse.status < 300 && ptHtml && !/security verification|just a moment/i.test(ptHtml)) {
-            extractionUrl = portugueseUrl;
-            extraction$ = cheerio.load(ptHtml);
-        }
-    }
+    const snapshot = await openGooglePatentViaBrowser(patentNumber);
+    if (!snapshot) return null;
+    const extractionHtml = snapshot.portugueseHtml || snapshot.detailHtml;
+    const extractionUrl = snapshot.portugueseUrl || snapshot.detailUrl;
+    const extraction$ = cheerio.load(extractionHtml);
+    const fallback$ = cheerio.load(snapshot.detailHtml);
     const title = normalizeText(extraction$('meta[name="DC.title"]').attr('content') || extraction$('h1').first().text() || extraction$('title').text());
-    const applicant = normalizeText(extraction$('meta[scheme="assignee"]').attr('content') || extraction$('dd[itemprop="assigneeOriginal"] span[itemprop="name"]').first().text());
-    const inventor = normalizeText(extraction$('meta[scheme="inventor"]').attr('content') || extraction$('dd[itemprop="inventor"] span[itemprop="name"]').first().text());
-    const publicationDate = normalizeText(extraction$('meta[scheme="publication-date"]').attr('content') || extraction$('time[itemprop="publicationDate"]').attr('datetime') || '');
+    const applicant = normalizeText(
+        extraction$('meta[scheme="assignee"]').attr('content')
+        || extraction$('dd[itemprop="assigneeOriginal"] span[itemprop="name"]').first().text()
+        || fallback$('meta[scheme="assignee"]').attr('content')
+        || fallback$('dd[itemprop="assigneeOriginal"] span[itemprop="name"]').first().text()
+    );
+    const inventor = normalizeText(
+        extraction$('meta[scheme="inventor"]').attr('content')
+        || extraction$('dd[itemprop="inventor"] span[itemprop="name"]').first().text()
+        || fallback$('meta[scheme="inventor"]').attr('content')
+        || fallback$('dd[itemprop="inventor"] span[itemprop="name"]').first().text()
+    );
+    const publicationDate = normalizeText(
+        extraction$('meta[scheme="publication-date"]').attr('content')
+        || extraction$('time[itemprop="publicationDate"]').attr('datetime')
+        || fallback$('meta[scheme="publication-date"]').attr('content')
+        || fallback$('time[itemprop="publicationDate"]').attr('datetime')
+        || ''
+    );
     const ipc = extraction$('span[itemprop="Code"], td[itemprop="Code"]')
         .toArray()
         .map((el) => normalizeText(extraction$(el).text()))
         .filter(Boolean)
         .slice(0, 20)
         .join(', ');
-    const abstract = extractGooglePatentAbstract(extraction$);
-    const pdfUrl = extractGooglePatentPdfUrl(extraction$, extractionUrl);
+    const fallbackIpc = fallback$('span[itemprop="Code"], td[itemprop="Code"]')
+        .toArray()
+        .map((el) => normalizeText(fallback$(el).text()))
+        .filter(Boolean)
+        .slice(0, 20)
+        .join(', ');
+    const abstract = extractGooglePatentAbstract(extraction$) || extractGooglePatentAbstract(fallback$);
+    const pdfUrl = snapshot.pdfCandidates[0] || extractGooglePatentPdfUrl(extraction$, extractionUrl);
     if (!title && !applicant && !inventor && !ipc && !abstract) return null;
     return {
         docdbId: normalizePublicationNumber(patentNumber),
@@ -1856,7 +1928,7 @@ async function fetchGooglePatentsBibliographicData(patentNumber: string): Promis
         detailedAbstract: abstract || undefined,
         applicant: applicant || undefined,
         inventor: inventor || undefined,
-        ipc: ipc || undefined,
+        ipc: ipc || fallbackIpc || undefined,
         publicationDate: publicationDate || undefined,
         googlePatentsUrl: extractionUrl,
         pdfUrl,
@@ -1917,22 +1989,9 @@ async function tryDownloadPdfFromGoogleUrl(url: string): Promise<Buffer | null> 
 
 async function downloadGooglePatentsFullDocument(patentNumber: string): Promise<Buffer | null> {
     if (!GOOGLE_PATENTS_FALLBACK_ENABLED) return null;
-    const detailUrl = await resolveGooglePatentDetailUrl(patentNumber);
-    if (!detailUrl) return null;
-    await waitGooglePatentsThrottle();
-    lastGooglePatentsRequestAt = Date.now();
-    const pageResponse = await axios.get(detailUrl, {
-        timeout: 30000,
-        validateStatus: () => true,
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
-        }
-    });
-    if (pageResponse.status < 200 || pageResponse.status >= 300) return null;
-    const html = typeof pageResponse.data === 'string' ? pageResponse.data : '';
-    if (!html || /security verification|just a moment/i.test(html)) return null;
-    const $ = cheerio.load(html);
-    const portugueseUrl = extractGooglePortugueseUrl($, detailUrl);
+    const snapshot = await openGooglePatentViaBrowser(patentNumber);
+    if (!snapshot) return null;
+    const detailUrl = snapshot.detailUrl;
     const candidateLinks = new Set<string>();
     const addLink = (value?: string | null) => {
         const href = normalizeText(value || '');
@@ -1941,20 +2000,22 @@ async function downloadGooglePatentsFullDocument(patentNumber: string): Promise<
             candidateLinks.add(href.startsWith('http') ? href : `https://patents.google.com${href.startsWith('/') ? '' : '/'}${href}`);
         }
     };
-    addLink($('meta[name="citation_pdf_url"]').attr('content'));
-    $('a[href], button[data-href]').each((_, el) => {
-        const text = normalizeText($(el).text()).toLowerCase();
-        const aria = normalizeText($(el).attr('aria-label') || '').toLowerCase();
+    snapshot.pdfCandidates.forEach((item) => addLink(item));
+    const ptOrEn$ = cheerio.load(snapshot.portugueseHtml || snapshot.detailHtml);
+    addLink(ptOrEn$('meta[name="citation_pdf_url"]').attr('content'));
+    ptOrEn$('a[href], button[data-href]').each((_, el) => {
+        const text = normalizeText(ptOrEn$(el).text()).toLowerCase();
+        const aria = normalizeText(ptOrEn$(el).attr('aria-label') || '').toLowerCase();
         if (text.includes('download pdf') || aria.includes('download pdf')) {
-            addLink($(el).attr('href') || $(el).attr('data-href'));
+            addLink(ptOrEn$(el).attr('href') || ptOrEn$(el).attr('data-href'));
         } else {
-            addLink($(el).attr('href'));
+            addLink(ptOrEn$(el).attr('href'));
         }
     });
     addLink(`${detailUrl}?download=pdf`);
-    if (portugueseUrl) {
-        addLink(portugueseUrl);
-        addLink(`${portugueseUrl}?download=pdf`);
+    if (snapshot.portugueseUrl) {
+        addLink(snapshot.portugueseUrl);
+        addLink(`${snapshot.portugueseUrl}?download=pdf`);
     }
     for (const link of Array.from(candidateLinks)) {
         const pdf = await tryDownloadPdfFromGoogleUrl(link);
