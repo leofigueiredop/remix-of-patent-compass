@@ -559,11 +559,29 @@ function buildGooglePatentsUrl(publicationNumber?: string): string {
     const normalized = normalizePatentForWeb(publicationNumber);
     if (!normalized) return '';
     const compact = normalized.replace(/[^A-Z0-9]/gi, '').toUpperCase();
-    const compactWithoutCheckDigit = compact.startsWith('BR') ? compact.replace(/(BR(?:10|11)\d+)[0-9X]$/, '$1') : compact;
-    const noBr = compactWithoutCheckDigit.replace(/^BR/i, '');
-    const noBrNoZero = noBr.endsWith('0') ? noBr.slice(0, -1) : noBr;
-    const query = noBrNoZero || noBr || normalized;
-    return `https://patents.google.com/?q=${encodeURIComponent(query)}`;
+    
+    // Strip check digit for ALL Brazilian patents (BR followed by 10, 11, 12, 13)
+    let finalQuery = compact;
+    const brMatch = compact.match(/^BR(10|11|12|13)(\d+)$/);
+    const hasHyphenCheckDigit = publicationNumber ? /-[0-9X]$/i.test(publicationNumber.trim()) : false;
+    
+    if (brMatch) {
+        // If it was parsed from something without hyphen check digit, but has 15 chars (BR + 13 digits), strip the last digit.
+        if (!hasHyphenCheckDigit && brMatch[2].length > 10) {
+            finalQuery = `BR${brMatch[1]}${brMatch[2].slice(0, -1)}`;
+        } else if (hasHyphenCheckDigit) {
+            // It already didn't include the check digit because compact removed hyphen and everything after if we used split, 
+            // wait, `compact` removed hyphens, so the check digit IS in `compact`. We need to strip it.
+            finalQuery = compact.slice(0, -1);
+        }
+    }
+    
+    // Always remove 'BR' for Google Patents search to be broader, or keep it.
+    // Google Patents works well with just the number.
+    const noBr = finalQuery.replace(/^BR/i, '');
+    const query = noBr || finalQuery;
+    
+    return `https://patents.google.com/patent/BR${query}/en`;
 }
 
 function buildPublicationSearchNeedles(value: string): string[] {
