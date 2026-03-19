@@ -27,7 +27,11 @@ export default function Login() {
       }
       navigate("/research/dashboard");
     } catch (err: any) {
-      const msg = err.response?.data?.error || "Erro ao conectar com o servidor";
+      const status = err.response?.status;
+      const msg =
+        status === 401
+          ? "Credenciais inválidas. Confirme e-mail/senha e tente novamente."
+          : err.response?.data?.error || "Erro ao conectar com o servidor";
       setError(msg);
     } finally {
       setLoading(false);
