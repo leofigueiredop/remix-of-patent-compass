@@ -367,9 +367,6 @@ async function initBrowser() {
     const args = [
         '--no-sandbox',
         '--disable-setuid-sandbox',
-        '--no-zygote',
-        '--single-process',
-        '--disable-seccomp-filter-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu',
         '--disable-software-rasterizer',
@@ -377,7 +374,8 @@ async function initBrowser() {
         '--disable-background-networking',
         '--disable-web-security',
         '--disable-features=IsolateOrigins,site-per-process',
-        '--window-size=1280,1024'
+        '--window-size=1280,1024',
+        '--headless=new'
     ];
     const launchErrors: string[] = [];
     const launchModes: Array<{ pipe: boolean; dumpio: boolean; label: string }> = [

@@ -25,9 +25,11 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     ffmpeg \
     curl \
     chromium \
+    chromium-common \
     ca-certificates \
     fonts-liberation \
     libasound2 \
+    libatspi2.0-0 \
     libatk-bridge2.0-0 \
     libatk1.0-0 \
     libcairo2 \
@@ -47,7 +49,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     libxdamage1 \
     libxext6 \
     libxfixes3 \
+    libxkbcommon0 \
     libxrandr2 \
+    libxshmfence1 \
     xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 RUN ln -sf /usr/bin/chromium /usr/bin/chromium-browser \
