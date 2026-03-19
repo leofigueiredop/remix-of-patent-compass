@@ -165,7 +165,7 @@ function statusBadge(status: string) {
 
 function sourceLabel(value?: string | null) {
   if (!value) return "-";
-  if (value === "google_bigquery") return "Google BigQuery";
+  if (value === "google_bigquery") return "Google Patents";
   if (value === "google_patents") return "Google Patents";
   if (value === "ops_api") return "OPS";
   if (value === "inpi") return "INPI";
@@ -216,7 +216,7 @@ function RpiTable({ rows, onRetry }: { rows: RpiJob[]; onRetry?: (id: string) =>
   );
 }
 
-function DocsTable({ rows, onRetry, onSendBigQuery }: { rows: DocJob[]; onRetry?: (id: string) => void; onSendBigQuery?: (publicationOrPatent: string) => void }) {
+function DocsTable({ rows, onRetry }: { rows: DocJob[]; onRetry?: (id: string) => void }) {
   if (rows.length === 0) {
     return <div className="p-8 text-sm text-muted-foreground">Sem registros.</div>;
   }
@@ -251,15 +251,6 @@ function DocsTable({ rows, onRetry, onSendBigQuery }: { rows: DocJob[]; onRetry?
                 {onRetry && (row.status === "failed" || row.status === "not_found") && (
                   <Button size="sm" variant="outline" onClick={() => onRetry(row.id)}>Reprocessar</Button>
                 )}
-                {onSendBigQuery && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => onSendBigQuery(row.publication_number || row.patent?.numero_publicacao || row.patent_id)}
-                  >
-                    BigQuery
-                  </Button>
-                )}
               </div>
             </TableCell>
           </TableRow>
@@ -269,7 +260,7 @@ function DocsTable({ rows, onRetry, onSendBigQuery }: { rows: DocJob[]; onRetry?
   );
 }
 
-function OpsTable({ rows, onRetry, onSendBigQuery }: { rows: OpsJob[]; onRetry?: (id: string) => void; onSendBigQuery?: (patentNumber: string) => void }) {
+function OpsTable({ rows, onRetry }: { rows: OpsJob[]; onRetry?: (id: string) => void }) {
   if (rows.length === 0) return <div className="p-8 text-sm text-muted-foreground">Sem registros.</div>;
   return (
     <Table>
@@ -302,11 +293,6 @@ function OpsTable({ rows, onRetry, onSendBigQuery }: { rows: OpsJob[]; onRetry?:
                 {onRetry && (row.status === "failed" || row.status === "not_found") && (
                   <Button size="sm" variant="outline" onClick={() => onRetry(row.id)}>Reprocessar</Button>
                 )}
-                {onSendBigQuery && (
-                  <Button size="sm" variant="secondary" onClick={() => onSendBigQuery(row.patent_number)}>
-                    BigQuery
-                  </Button>
-                )}
               </div>
             </TableCell>
           </TableRow>
@@ -316,7 +302,7 @@ function OpsTable({ rows, onRetry, onSendBigQuery }: { rows: OpsJob[]; onRetry?:
   );
 }
 
-function InpiTable({ rows, onRetry, onSendBigQuery }: { rows: InpiJob[]; onRetry?: (id: string) => void; onSendBigQuery?: (patentNumber: string) => void }) {
+function InpiTable({ rows, onRetry }: { rows: InpiJob[]; onRetry?: (id: string) => void }) {
   if (rows.length === 0) return <div className="p-8 text-sm text-muted-foreground">Sem registros.</div>;
   return (
     <Table>
@@ -348,11 +334,6 @@ function InpiTable({ rows, onRetry, onSendBigQuery }: { rows: InpiJob[]; onRetry
               <div className="flex gap-2 justify-end">
                 {onRetry && (row.status === "failed" || row.status === "failed_permanent") && (
                   <Button size="sm" variant="outline" onClick={() => onRetry(row.id)}>Reprocessar</Button>
-                )}
-                {onSendBigQuery && (
-                  <Button size="sm" variant="secondary" onClick={() => onSendBigQuery(row.patent_number)}>
-                    BigQuery
-                  </Button>
                 )}
               </div>
             </TableCell>
@@ -455,7 +436,7 @@ export default function BackgroundWorkers() {
   };
 
   const retryOpsJob = async (id: string) => {
-    await axios.post(`${API_URL}/background-workers/ops/retry/${id}`, { preferBigQuery: true });
+    await axios.post(`${API_URL}/background-workers/ops/retry/${id}`, { preferBigQuery: false });
     await fetchQueues();
   };
 
@@ -465,22 +446,8 @@ export default function BackgroundWorkers() {
   };
 
   const retryBigQueryJob = async (id: string) => {
-    await axios.post(`${API_URL}/background-workers/bigquery/retry/${id}`);
+    await axios.post(`${API_URL}/background-workers/google-patents/retry/${id}`);
     await fetchQueues();
-  };
-
-  const sendToBigQuery = async (patentNumber: string, source: "docs" | "ops" | "inpi") => {
-    setLoading(true);
-    try {
-      const response = await axios.post(`${API_URL}/background-workers/bigquery/enqueue`, {
-        patentNumbers: [patentNumber],
-        source
-      });
-      setActionMessage(`BigQuery enfileirado: ${response.data?.enqueued ?? 0}`);
-      await fetchQueues();
-    } finally {
-      setLoading(false);
-    }
   };
 
   const retryAllRpiErrors = async (preferBigQuery = false) => {
@@ -535,19 +502,8 @@ export default function BackgroundWorkers() {
     setLoading(true);
     try {
       const ids = data.bigquery.errors.map((row) => row.id);
-      const response = await axios.post(`${API_URL}/background-workers/bigquery/retry-errors`, { ids });
-      setActionMessage(`BigQuery reprocessados: ${response.data?.updated ?? 0}`);
-      await fetchQueues();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const enqueueBigQueryFromErrors = async (source: "docs" | "ops" | "inpi" | "all") => {
-    setLoading(true);
-    try {
-      const response = await axios.post(`${API_URL}/background-workers/bigquery/enqueue-from-errors`, { source });
-      setActionMessage(`BigQuery por erro (${source}): selecionados=${response.data?.selected ?? 0}, enfileirados=${response.data?.enqueued ?? 0}`);
+      const response = await axios.post(`${API_URL}/background-workers/google-patents/retry-errors`, { ids });
+      setActionMessage(`Google Patents reprocessados: ${response.data?.updated ?? 0}`);
       await fetchQueues();
     } finally {
       setLoading(false);
@@ -740,7 +696,7 @@ export default function BackgroundWorkers() {
             </TabsTrigger>
             <TabsTrigger value="bigquery" className="gap-2">
               <Files className="w-4 h-4" />
-              Fila BigQuery
+              Fila Google Patents
             </TabsTrigger>
           </TabsList>
 
@@ -829,14 +785,11 @@ export default function BackgroundWorkers() {
                   <TabsContent value="success"><DocsTable rows={data.docs.success} /></TabsContent>
                   <TabsContent value="errors" className="space-y-3">
                     <div className="flex justify-end gap-2">
-                      <Button variant="secondary" size="sm" disabled={loading || data.docs.errors.length === 0} onClick={() => enqueueBigQueryFromErrors("docs")}>
-                        Enviar erros para BigQuery
-                      </Button>
                       <Button variant="outline" size="sm" disabled={loading || data.docs.errors.length === 0} onClick={() => retryAllDocsErrors()}>
                         Reprocessar todos os erros
                       </Button>
                     </div>
-                    <DocsTable rows={data.docs.errors} onRetry={retryDocsJob} onSendBigQuery={(patent) => sendToBigQuery(patent, "docs")} />
+                    <DocsTable rows={data.docs.errors} onRetry={retryDocsJob} />
                   </TabsContent>
                 </Tabs>
               </CardContent>
@@ -867,7 +820,7 @@ export default function BackgroundWorkers() {
             <Card>
               <CardHeader>
                 <CardTitle>Fila Bibliográfica OPS</CardTitle>
-                <CardDescription>Enriquecimento bibliográfico para despachos que não são 3.1/16.1.</CardDescription>
+                <CardDescription>Enriquecimento bibliográfico para despachos que não são 3.1/16.1/1.3.</CardDescription>
               </CardHeader>
               <CardContent>
                 <Tabs value={opsTab} onValueChange={setOpsTab}>
@@ -880,14 +833,11 @@ export default function BackgroundWorkers() {
                   <TabsContent value="success"><OpsTable rows={data.ops.success} /></TabsContent>
                   <TabsContent value="errors" className="space-y-3">
                     <div className="flex justify-end gap-2">
-                      <Button variant="secondary" size="sm" disabled={loading || data.ops.errors.length === 0} onClick={() => enqueueBigQueryFromErrors("ops")}>
-                        Enviar erros para BigQuery
-                      </Button>
-                      <Button variant="outline" size="sm" disabled={loading || data.ops.errors.length === 0} onClick={() => retryAllOpsErrors(true)}>
-                        Reprocessar todos (BigQuery)
+                      <Button variant="outline" size="sm" disabled={loading || data.ops.errors.length === 0} onClick={() => retryAllOpsErrors(false)}>
+                        Reprocessar todos (Google Patents)
                       </Button>
                     </div>
-                    <OpsTable rows={data.ops.errors} onRetry={retryOpsJob} onSendBigQuery={(patent) => sendToBigQuery(patent, "ops")} />
+                    <OpsTable rows={data.ops.errors} onRetry={retryOpsJob} />
                   </TabsContent>
                 </Tabs>
               </CardContent>
@@ -930,14 +880,11 @@ export default function BackgroundWorkers() {
                   <TabsContent value="success"><InpiTable rows={data.inpi.success} /></TabsContent>
                   <TabsContent value="errors" className="space-y-3">
                     <div className="flex justify-end gap-2">
-                      <Button variant="secondary" size="sm" disabled={loading || data.inpi.errors.length === 0} onClick={() => enqueueBigQueryFromErrors("inpi")}>
-                        Enviar erros para BigQuery
-                      </Button>
                       <Button variant="outline" size="sm" disabled={loading || data.inpi.errors.length === 0} onClick={() => retryAllInpiErrors()}>
                         Reprocessar todos os erros
                       </Button>
                     </div>
-                    <InpiTable rows={data.inpi.errors} onRetry={retryInpiJob} onSendBigQuery={(patent) => sendToBigQuery(patent, "inpi")} />
+                    <InpiTable rows={data.inpi.errors} onRetry={retryInpiJob} />
                   </TabsContent>
                 </Tabs>
               </CardContent>
@@ -951,7 +898,7 @@ export default function BackgroundWorkers() {
             </div>
             <Card>
               <CardHeader>
-                <CardTitle>Fila BigQuery</CardTitle>
+                <CardTitle>Fila Google Patents</CardTitle>
                 <CardDescription>Reprocessamento bibliográfico alternativo para falhas de OPS/Docs/INPI.</CardDescription>
               </CardHeader>
               <CardContent>
@@ -965,9 +912,6 @@ export default function BackgroundWorkers() {
                   <TabsContent value="success"><OpsTable rows={data.bigquery.success} /></TabsContent>
                   <TabsContent value="errors" className="space-y-3">
                     <div className="flex justify-end gap-2">
-                      <Button variant="secondary" size="sm" disabled={loading} onClick={() => enqueueBigQueryFromErrors("all")}>
-                        Enfileirar de todos os erros
-                      </Button>
                       <Button variant="outline" size="sm" disabled={loading || data.bigquery.errors.length === 0} onClick={() => retryAllBigQueryErrors()}>
                         Reprocessar todos os erros
                       </Button>

@@ -15,6 +15,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from './db';
 import {
     debugBigQueryLookup,
+    debugGooglePatentsLookup,
     debugInpiLookup,
     enqueueBigQueryFromFailedSources,
     enqueueBigQueryReprocessing,
@@ -557,10 +558,23 @@ function normalizePatentForWeb(publicationNumber?: string): string {
 function buildGooglePatentsUrl(publicationNumber?: string): string {
     const normalized = normalizePatentForWeb(publicationNumber);
     if (!normalized) return '';
-    const noBr = normalized.replace(/^BR/i, '');
+    const compact = normalized.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    const compactWithoutCheckDigit = compact.startsWith('BR') ? compact.replace(/(BR(?:10|11)\d+)[0-9X]$/, '$1') : compact;
+    const noBr = compactWithoutCheckDigit.replace(/^BR/i, '');
     const noBrNoZero = noBr.endsWith('0') ? noBr.slice(0, -1) : noBr;
     const query = noBrNoZero || noBr || normalized;
     return `https://patents.google.com/?q=${encodeURIComponent(query)}`;
+}
+
+function buildPublicationSearchNeedles(value: string): string[] {
+    const raw = normalizeStringField(value).toUpperCase();
+    if (!raw) return [];
+    const compact = raw.replace(/[^A-Z0-9]/g, '');
+    const withoutCheckDigitRaw = raw.replace(/-([0-9X])$/, '');
+    const withoutCheckDigitCompact = compact.startsWith('BR')
+        ? compact.replace(/(BR(?:10|11)\d+)[0-9X]$/, '$1')
+        : compact;
+    return Array.from(new Set([raw, compact, withoutCheckDigitRaw, withoutCheckDigitCompact].filter(Boolean)));
 }
 
 function buildEspacenetUiUrl(publicationNumber?: string): string {
@@ -589,11 +603,12 @@ async function searchLocalPatentBase(input: LocalPatentSearchInput): Promise<{
     const andClauses: any[] = [];
 
     if (normalizedNumber) {
+        const numberNeedles = buildPublicationSearchNeedles(normalizedNumber);
         andClauses.push({
-            OR: [
-                { numero_publicacao: { contains: normalizedNumber, mode: 'insensitive' } },
-                { cod_pedido: { contains: normalizedNumber, mode: 'insensitive' } }
-            ]
+            OR: numberNeedles.flatMap((needle) => ([
+                { numero_publicacao: { contains: needle, mode: 'insensitive' } },
+                { cod_pedido: { contains: needle, mode: 'insensitive' } }
+            ]))
         });
     }
     if (normalizedTitular) {
@@ -1881,7 +1896,9 @@ const ALLOWED_PATENT_DOCUMENT_HOSTS = [
     'busca.inpi.gov.br',
     'worldwide.espacenet.com',
     'ops.epo.org',
-    'register.epo.org'
+    'register.epo.org',
+    'patents.google.com',
+    'patentimages.storage.googleapis.com'
 ];
 
 function isAllowedPatentDocumentUrl(value: string): boolean {
@@ -1897,6 +1914,13 @@ function isAllowedPatentDocumentUrl(value: string): boolean {
 function extractPdfCandidatesFromHtml(html: string, baseUrl: string): string[] {
     const $ = cheerio.load(html);
     const candidates = new Set<string>();
+    let baseHost = '';
+    try {
+        baseHost = new URL(baseUrl).hostname;
+    } catch {
+        baseHost = '';
+    }
+    const googleHost = baseHost === 'patents.google.com' || baseHost.endsWith('.patents.google.com');
 
     const addCandidate = (rawValue?: string) => {
         if (!rawValue) return;
@@ -1904,7 +1928,7 @@ function extractPdfCandidatesFromHtml(html: string, baseUrl: string): string[] {
             const normalized = new URL(rawValue.trim(), baseUrl).toString();
             if (!isAllowedPatentDocumentUrl(normalized)) return;
             const lower = normalized.toLowerCase();
-            if (!lower.includes('.pdf') && !lower.includes('pdf')) return;
+            if (!lower.includes('.pdf') && !lower.includes('pdf') && !(googleHost && lower.includes('/patent/'))) return;
             candidates.add(normalized);
         } catch {
             return;
@@ -1916,6 +1940,17 @@ function extractPdfCandidatesFromHtml(html: string, baseUrl: string): string[] {
         addCandidate($(el).attr('src'));
         addCandidate($(el).attr('data'));
     });
+    $('a[href], button[data-href], button[href]').each((_, el) => {
+        const text = String($(el).text() || '').toLowerCase();
+        const aria = String($(el).attr('aria-label') || '').toLowerCase();
+        if (text.includes('download pdf') || aria.includes('download pdf')) {
+            addCandidate($(el).attr('href'));
+            addCandidate($(el).attr('data-href'));
+        }
+    });
+    if (googleHost) {
+        addCandidate(`${baseUrl}?download=pdf`);
+    }
 
     return Array.from(candidates).slice(0, 20);
 }
@@ -1929,7 +1964,83 @@ function getFilenameFromHeaders(contentDisposition: string | undefined, fallback
     return fallback;
 }
 
-async function fetchPatentPdf(url: string, fallbackName: string): Promise<{ buffer: Buffer; filename: string }> {
+async function resolveGooglePdfCandidatesViaBrowser(seedUrl: string, publicationNumber?: string): Promise<string[]> {
+    const { default: puppeteer } = await import('puppeteer');
+    const browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    try {
+        const targetNumber = String(publicationNumber || '').trim();
+        await page.goto('https://patents.google.com/', { waitUntil: 'domcontentloaded', timeout: 45000 });
+        if (targetNumber) {
+            await page.evaluate((value) => {
+                const input = document.querySelector<HTMLInputElement>('input[type="search"], input[aria-label*="Search"], input[name="q"]');
+                if (input) {
+                    input.focus();
+                    input.value = value;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+            }, targetNumber);
+            await page.keyboard.press('Enter');
+            await new Promise((resolve) => setTimeout(resolve, 1800));
+        } else {
+            await page.goto(seedUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        }
+        let currentUrl = page.url();
+        if (!currentUrl.includes('/patent/')) {
+            const found = await page.evaluate(() => {
+                const link = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="/patent/"]')).find((item) => Boolean(item.href));
+                if (!link) return '';
+                link.click();
+                return link.href;
+            });
+            if (found) {
+                await new Promise((resolve) => setTimeout(resolve, 1800));
+                currentUrl = page.url();
+            }
+        }
+        await page.evaluate(() => {
+            const langLink = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]')).find((item) => /portuguese|português/i.test((item.textContent || '').toLowerCase()));
+            if (langLink) langLink.click();
+        });
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        currentUrl = page.url();
+        const links = await page.evaluate(() => {
+            const out: string[] = [];
+            const add = (value?: string | null) => {
+                if (!value) return;
+                out.push(value);
+            };
+            const nodes = Array.from(document.querySelectorAll<HTMLElement>('a[href], button[data-href], button[href]'));
+            for (const node of nodes) {
+                const text = (node.textContent || '').toLowerCase();
+                const aria = (node.getAttribute('aria-label') || '').toLowerCase();
+                const href = node.getAttribute('href') || node.getAttribute('data-href') || '';
+                if (text.includes('download pdf') || aria.includes('download pdf')) add(href);
+                if (/pdf|download/i.test(href)) add(href);
+            }
+            return out;
+        });
+        const normalized = new Set<string>();
+        for (const link of links) {
+            try {
+                const absolute = new URL(link, currentUrl).toString();
+                if (isAllowedPatentDocumentUrl(absolute)) normalized.add(absolute);
+            } catch {
+                continue;
+            }
+        }
+        normalized.add(`${currentUrl}${currentUrl.includes('?') ? '&' : '?'}download=pdf`);
+        return Array.from(normalized);
+    } finally {
+        await page.close().catch(() => undefined);
+        await browser.close().catch(() => undefined);
+    }
+}
+
+async function fetchPatentPdf(url: string, fallbackName: string, publicationNumber?: string): Promise<{ buffer: Buffer; filename: string }> {
     if (!isAllowedPatentDocumentUrl(url)) {
         throw new Error('URL de documento não permitida');
     }
@@ -2021,6 +2132,31 @@ async function fetchPatentPdf(url: string, fallbackName: string): Promise<{ buff
     }
 
     // Fallback for non-INPI URLs
+    const browserCandidates = url.includes('patents.google.com')
+        ? await resolveGooglePdfCandidatesViaBrowser(url, publicationNumber).catch(() => [])
+        : [];
+    for (const candidate of browserCandidates) {
+        const response = await axios.get(candidate, {
+            responseType: 'arraybuffer',
+            timeout: 45000,
+            maxRedirects: 5,
+            headers: {
+                'User-Agent': 'Mozilla/5.0',
+                'Accept': 'application/pdf,text/html;q=0.9,*/*;q=0.8'
+            },
+            validateStatus: (status) => status >= 200 && status < 400
+        });
+        const contentType = String(response.headers['content-type'] || '').toLowerCase();
+        const contentDisposition = response.headers['content-disposition'] as string | undefined;
+        const buffer = Buffer.from(response.data);
+        if (contentType.includes('application/pdf') || buffer.slice(0, 4).toString() === '%PDF') {
+            return {
+                buffer,
+                filename: getFilenameFromHeaders(contentDisposition, fallbackName)
+            };
+        }
+    }
+
     const initialResponse = await axios.get(url, {
         responseType: 'arraybuffer',
         timeout: 30000,
@@ -2060,11 +2196,39 @@ async function fetchPatentPdf(url: string, fallbackName: string): Promise<{ buff
         });
         const contentType = String(pdfResponse.headers['content-type'] || '').toLowerCase();
         const contentDisposition = pdfResponse.headers['content-disposition'] as string | undefined;
-        if (!contentType.includes('application/pdf')) continue;
-        return {
-            buffer: Buffer.from(pdfResponse.data),
-            filename: getFilenameFromHeaders(contentDisposition, fallbackName)
-        };
+        const buffer = Buffer.from(pdfResponse.data);
+        const magic = buffer.slice(0, 4).toString();
+        if (contentType.includes('application/pdf') || magic === '%PDF') {
+            return {
+                buffer,
+                filename: getFilenameFromHeaders(contentDisposition, fallbackName)
+            };
+        }
+        if (!contentType.includes('html')) continue;
+        const nestedHtml = buffer.toString('utf8');
+        const nestedCandidates = extractPdfCandidatesFromHtml(nestedHtml, candidate);
+        for (const nested of nestedCandidates) {
+            const nestedResponse = await axios.get(nested, {
+                responseType: 'arraybuffer',
+                timeout: 30000,
+                maxRedirects: 5,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0',
+                    'Accept': 'application/pdf,*/*;q=0.8'
+                },
+                validateStatus: (status) => status >= 200 && status < 400
+            });
+            const nestedType = String(nestedResponse.headers['content-type'] || '').toLowerCase();
+            const nestedDisposition = nestedResponse.headers['content-disposition'] as string | undefined;
+            const nestedBuffer = Buffer.from(nestedResponse.data);
+            const nestedMagic = nestedBuffer.slice(0, 4).toString();
+            if (nestedType.includes('application/pdf') || nestedMagic === '%PDF') {
+                return {
+                    buffer: nestedBuffer,
+                    filename: getFilenameFromHeaders(nestedDisposition, fallbackName)
+                };
+            }
+        }
     }
 
     throw new Error('PDF não encontrado para o documento solicitado');
@@ -2118,7 +2282,7 @@ fastify.get('/patent/document', async (request, reply) => {
 
     const fallbackName = `${(publicationNumber || 'patente').replace(/[^\w.-]/g, '_')}.pdf`;
     try {
-        const { buffer, filename } = await fetchPatentPdf(url, fallbackName);
+        const { buffer, filename } = await fetchPatentPdf(url, fallbackName, publicationNumber);
         reply.header('Content-Type', 'application/pdf');
         reply.header('Content-Disposition', `inline; filename="${filename}"`);
         return reply.send(buffer);
@@ -2698,11 +2862,14 @@ fastify.get('/patents/processed', async (request: any, reply) => {
         const skip = (parseInt(page, 10) - 1) * parseInt(pageSize, 10);
         const take = parseInt(pageSize, 10);
         const queryText = String(q || '').trim();
+        const queryNeedles = queryText ? buildPublicationSearchNeedles(queryText) : [];
         const whereClause: any = queryText
             ? {
                 OR: [
-                    { cod_pedido: { contains: queryText } },
-                    { numero_publicacao: { contains: queryText } },
+                    ...queryNeedles.flatMap((needle) => ([
+                        { cod_pedido: { contains: needle } },
+                        { numero_publicacao: { contains: needle } }
+                    ])),
                     { title: { contains: queryText } },
                     { applicant: { contains: queryText } },
                     { inventors: { contains: queryText } }
@@ -2933,7 +3100,7 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
         source: extractSource(row.error) || (row.docdb_id ? 'ops_api' : null)
     }));
     const mapInpi = (rows: any[]) => rows.map((row) => ({ ...row, source: 'inpi' }));
-    const mapBigQuery = (rows: any[]) => rows.map((row) => ({ ...row, source: 'google_bigquery' }));
+    const mapBigQuery = (rows: any[]) => rows.map((row) => ({ ...row, source: extractSource(row.error) || 'google_patents' }));
 
         return {
             rpi: {
@@ -3180,6 +3347,15 @@ fastify.get('/background-workers/bigquery/test', async (request: any, reply) => 
     return result;
 });
 
+fastify.get('/background-workers/google-patents/test', async (request: any, reply) => {
+    const publication = String(request.query?.publication || '').trim();
+    if (!publication) {
+        return reply.code(400).send({ error: 'publication é obrigatório' });
+    }
+    const result = await debugGooglePatentsLookup(publication);
+    return result;
+});
+
 fastify.get('/background-workers/inpi/test', async (request: any, reply) => {
     const patent = String(request.query?.patent || '').trim();
     if (!patent) {
@@ -3245,6 +3421,19 @@ fastify.post('/background-workers/bigquery/enqueue', async (request: any, reply)
     }
 });
 
+fastify.post('/background-workers/google-patents/enqueue', async (request: any, reply) => {
+    try {
+        const patentNumbers = Array.isArray(request.body?.patentNumbers)
+            ? request.body.patentNumbers.filter((item: any) => typeof item === 'string' && item.trim().length > 0)
+            : [];
+        const sourceJobType = typeof request.body?.source === 'string' ? request.body.source : undefined;
+        const result = await enqueueBigQueryReprocessing(patentNumbers, sourceJobType);
+        return result;
+    } catch (error) {
+        return reply.code(500).send({ error: 'Falha ao enfileirar Google Patents' });
+    }
+});
+
 fastify.post('/background-workers/bigquery/enqueue-from-errors', async (request: any, reply) => {
     try {
         const source = (request.body?.source || 'all') as 'docs' | 'ops' | 'inpi' | 'all';
@@ -3252,6 +3441,16 @@ fastify.post('/background-workers/bigquery/enqueue-from-errors', async (request:
         return result;
     } catch (error) {
         return reply.code(500).send({ error: 'Falha ao enfileirar BigQuery a partir de erros' });
+    }
+});
+
+fastify.post('/background-workers/google-patents/enqueue-from-errors', async (request: any, reply) => {
+    try {
+        const source = (request.body?.source || 'all') as 'docs' | 'ops' | 'inpi' | 'all';
+        const result = await enqueueBigQueryFromFailedSources(source);
+        return result;
+    } catch (error) {
+        return reply.code(500).send({ error: 'Falha ao enfileirar Google Patents a partir de erros' });
     }
 });
 
@@ -3265,6 +3464,16 @@ fastify.post('/background-workers/bigquery/retry/:id', async (request: any, repl
     }
 });
 
+fastify.post('/background-workers/google-patents/retry/:id', async (request: any, reply) => {
+    const { id } = request.params as { id: string };
+    try {
+        const job = await retryBigQueryJob(id);
+        return { id: job.id, status: job.status };
+    } catch (error) {
+        return reply.code(404).send({ error: 'Job Google Patents não encontrado' });
+    }
+});
+
 fastify.post('/background-workers/bigquery/retry-errors', async (request: any, reply) => {
     try {
         const ids = Array.isArray(request.body?.ids) ? request.body.ids.filter((item: any) => typeof item === 'string') : undefined;
@@ -3272,6 +3481,16 @@ fastify.post('/background-workers/bigquery/retry-errors', async (request: any, r
         return result;
     } catch (error) {
         return reply.code(500).send({ error: 'Falha ao reprocessar erros da fila BigQuery' });
+    }
+});
+
+fastify.post('/background-workers/google-patents/retry-errors', async (request: any, reply) => {
+    try {
+        const ids = Array.isArray(request.body?.ids) ? request.body.ids.filter((item: any) => typeof item === 'string') : undefined;
+        const result = await retryAllBigQueryErrorJobs(ids);
+        return result;
+    } catch (error) {
+        return reply.code(500).send({ error: 'Falha ao reprocessar erros da fila Google Patents' });
     }
 });
 
@@ -3298,7 +3517,7 @@ fastify.post('/background-workers/docs/retry/:id', async (request: any, reply) =
 fastify.post('/background-workers/ops/retry/:id', async (request: any, reply) => {
     const { id } = request.params as { id: string };
     try {
-        const preferBigQuery = request.body?.preferBigQuery === undefined ? true : Boolean(request.body?.preferBigQuery);
+        const preferBigQuery = request.body?.preferBigQuery === undefined ? false : Boolean(request.body?.preferBigQuery);
         const job = await retryOpsBibliographicJob(id, preferBigQuery);
         return { id: job.id, status: job.status };
     } catch (error) {

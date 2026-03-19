@@ -134,6 +134,7 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
   const drawingsPath = resolveAssetUrl(storageData?.drawingsPath || "");
   const firstPagePath = resolveAssetUrl(storageData?.firstPagePath || "");
   const externalFigurePath = resolveAssetUrl((detailedData?.figures?.[0] || patent?.figures?.[0] || ""));
+  const googlePatentDocumentUrl = detailedData?.googlePatentsUrl || patent?.googlePatentsUrl || "";
   const hasDrawings = Boolean(drawingsPath);
   const hasFirstPage = Boolean(firstPagePath || externalFigurePath);
   const formatStorageName = (pathValue: string) => pathValue.split("/").pop() || "documento.pdf";
@@ -257,7 +258,7 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
     const loadPdf = async () => {
       if (!open) return;
       const targetUrl = viewerMode === "doc"
-        ? fullDocumentPath
+        ? (fullDocumentPath || googlePatentDocumentUrl)
         : viewerMode === "drawings"
           ? drawingsPath
           : (firstPagePath || externalFigurePath);
@@ -302,7 +303,7 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
     return () => {
       active = false;
     };
-  }, [open, patent, viewerMode, fullDocumentPath, drawingsPath, firstPagePath, externalFigurePath, isStorageAssetUrl]);
+  }, [open, patent, viewerMode, fullDocumentPath, drawingsPath, firstPagePath, externalFigurePath, googlePatentDocumentUrl, isStorageAssetUrl]);
 
   const handleQueueScraping = async () => {
     if (!detailedData?.cod_pedido) return;

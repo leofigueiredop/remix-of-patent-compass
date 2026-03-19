@@ -39,9 +39,12 @@ const GOOGLE_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '
 const GOOGLE_SERVICE_ACCOUNT_FILE = process.env.GOOGLE_SERVICE_ACCOUNT_FILE || '';
 const BIGQUERY_BILLING_PROJECT = process.env.BIGQUERY_BILLING_PROJECT || BIGQUERY_PROJECT_ID;
 const BIGQUERY_ENABLED = Boolean(BIGQUERY_BILLING_PROJECT && (GOOGLE_SERVICE_ACCOUNT_JSON || GOOGLE_SERVICE_ACCOUNT_FILE));
-const BIGQUERY_FIRST_ENABLED = (process.env.BIGQUERY_FIRST_ENABLED || 'true').toLowerCase() === 'true';
+const BIGQUERY_FIRST_ENABLED = (process.env.BIGQUERY_FIRST_ENABLED || 'false').toLowerCase() === 'true';
+const GOOGLE_PATENTS_ONLY_ENABLED = true;
 const BIGQUERY_MAX_BYTES_BILLED = Math.max(10_000_000, parseInt(process.env.BIGQUERY_MAX_BYTES_BILLED || '500000000', 10));
 const BIGQUERY_CACHE_TTL_HOURS = Math.max(1, parseInt(process.env.BIGQUERY_CACHE_TTL_HOURS || '720', 10));
+const GOOGLE_PATENTS_MIN_INTERVAL_MS = Math.max(350, parseInt(process.env.GOOGLE_PATENTS_MIN_INTERVAL_MS || '1200', 10));
+const GOOGLE_PATENTS_JITTER_MS = Math.max(50, parseInt(process.env.GOOGLE_PATENTS_JITTER_MS || '450', 10));
 const S3_ENDPOINT = process.env.S3_ENDPOINT || '';
 const S3_REGION = process.env.S3_REGION || 'garage';
 const S3_ACCESS_KEY = process.env.S3_ACCESS_KEY || '';
@@ -66,6 +69,7 @@ let s3BucketReady = false;
 let lastOpsRequestAt = 0;
 let opsThrottleFailureCount = 0;
 let opsCircuitOpenUntil = 0;
+let lastGooglePatentsRequestAt = 0;
 let bigQueryAccessToken: string | null = null;
 let bigQueryAccessTokenExpiration = 0;
 
@@ -186,6 +190,14 @@ async function waitOpsThrottle() {
     }
 }
 
+async function waitGooglePatentsThrottle() {
+    const elapsed = Date.now() - lastGooglePatentsRequestAt;
+    const baseWait = GOOGLE_PATENTS_MIN_INTERVAL_MS - elapsed;
+    if (baseWait > 0) await sleep(baseWait);
+    const jitter = Math.floor(Math.random() * GOOGLE_PATENTS_JITTER_MS);
+    if (jitter > 0) await sleep(jitter);
+}
+
 async function waitOpsCircuitIfOpen() {
     const now = Date.now();
     if (opsCircuitOpenUntil > now) {
@@ -259,7 +271,7 @@ function normalizeDispatchCode(value?: string): string {
 
 function shouldQueueDocumentByDispatchCode(dispatchCode?: string): boolean {
     const normalized = normalizeDispatchCode(dispatchCode);
-    return normalized === '3.1' || normalized === '16.1';
+    return normalized === '3.1' || normalized === '16.1' || normalized === '1.3';
 }
 
 function normalizePublicationNumber(value?: string): string {
@@ -462,6 +474,7 @@ async function runBigQueryQuery(payload: any): Promise<any> {
 type BigQueryBibliographicData = {
     title?: string;
     abstract?: string;
+    detailedAbstract?: string;
     applicant?: string;
     inventors?: string;
     ipc?: string;
@@ -469,17 +482,38 @@ type BigQueryBibliographicData = {
     publicationDate?: string;
     attorney?: string;
     googlePatentsUrl?: string;
+    pdfUrl?: string;
+    source?: 'google_bigquery' | 'google_patents';
 };
 
 function mapBigQueryToBiblio(patentNumber: string, row: BigQueryBibliographicData): OpsBibliographicData {
     return {
         docdbId: normalizePublicationForBigQuery(patentNumber),
         title: row.title,
+        abstract: row.abstract,
+        detailedAbstract: row.detailedAbstract || row.abstract,
         applicant: row.applicant,
         inventor: row.inventors,
         ipc: row.ipc,
         publicationDate: row.publicationDate || row.filingDate,
-        source: 'google_bigquery'
+        googlePatentsUrl: row.googlePatentsUrl,
+        pdfUrl: row.pdfUrl,
+        source: row.source || 'google_bigquery'
+    };
+}
+
+function mapGoogleBiblioToSearchData(row: OpsBibliographicData): BigQueryBibliographicData {
+    return {
+        title: row.title,
+        abstract: row.abstract,
+        detailedAbstract: row.detailedAbstract || row.abstract,
+        applicant: row.applicant,
+        inventors: row.inventor,
+        ipc: row.ipc,
+        publicationDate: row.publicationDate,
+        googlePatentsUrl: row.googlePatentsUrl,
+        pdfUrl: row.pdfUrl,
+        source: 'google_patents'
     };
 }
 
@@ -532,6 +566,7 @@ function extractAttorneyFromBigQueryRow(row: any): string {
 }
 
 async function fetchBigQueryBibliographicData(publicationNumber: string): Promise<BigQueryBibliographicData | null> {
+    if (GOOGLE_PATENTS_ONLY_ENABLED) return null;
     if (!BIGQUERY_BILLING_PROJECT) return null;
     const normalized = normalizePublicationForBigQuery(publicationNumber);
     if (!normalized) return null;
@@ -552,12 +587,14 @@ async function fetchBigQueryBibliographicData(publicationNumber: string): Promis
             return {
                 title: cached.title || undefined,
                 abstract: cached.abstract || undefined,
+                detailedAbstract: cached.abstract || undefined,
                 applicant: cached.applicant || undefined,
                 inventors: cached.inventor || undefined,
                 ipc: cached.classification || undefined,
                 filingDate: cached.patent_date || undefined,
                 publicationDate: cached.patent_date || undefined,
-                googlePatentsUrl: cached.url || `https://patents.google.com/patent/${cacheKey}/en`
+                googlePatentsUrl: cached.url || `https://patents.google.com/patent/${cacheKey}/en`,
+                source: 'google_bigquery'
             };
         }
     }
@@ -663,13 +700,15 @@ async function fetchBigQueryBibliographicData(publicationNumber: string): Promis
         const result = {
             title: title || undefined,
             abstract: abstract || undefined,
+            detailedAbstract: abstract || undefined,
             applicant: applicant || undefined,
             inventors: inventors || undefined,
             ipc: ipc || undefined,
             filingDate: filingDate || undefined,
             publicationDate: publicationDate || undefined,
             attorney: attorney || undefined,
-            googlePatentsUrl: normalized ? `https://patents.google.com/patent/${normalized}/en` : undefined
+            googlePatentsUrl: normalized ? `https://patents.google.com/patent/${normalized}/en` : undefined,
+            source: 'google_bigquery' as const
         };
         await prisma.searchResultCache.upsert({
             where: {
@@ -1144,18 +1183,24 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
             filingDate: existingBiblio?.ops_publication_date
         });
         const shouldTryBigQuery = !hasXmlBiblio && !hasStoredBiblio;
-        const bqData = shouldTryBigQuery
-            ? (bqCache.has(patentNumber)
-                ? bqCache.get(patentNumber) || null
-                : await fetchBigQueryBibliographicData(numeroPublicacao || patentNumber))
+        let resolvedExternalData: BigQueryBibliographicData | null = shouldTryBigQuery
+            ? (bqCache.has(patentNumber) ? (bqCache.get(patentNumber) || null) : null)
             : null;
-        if (shouldTryBigQuery && !bqCache.has(patentNumber)) bqCache.set(patentNumber, bqData);
+        if (shouldTryBigQuery && !resolvedExternalData) {
+            const normalizedPublication = numeroPublicacao || patentNumber;
+            const googleData = await fetchGooglePatentsBibliographicData(normalizedPublication);
+            resolvedExternalData = googleData ? mapGoogleBiblioToSearchData(googleData) : null;
+            if (!resolvedExternalData) {
+                resolvedExternalData = await fetchBigQueryBibliographicData(normalizedPublication);
+            }
+        }
+        if (shouldTryBigQuery && !bqCache.has(patentNumber)) bqCache.set(patentNumber, resolvedExternalData);
         const hasBigQueryBiblio = hasBasicBibliographicData({
-            title: bqData?.title,
-            applicant: bqData?.applicant,
-            inventor: bqData?.inventors,
-            ipc: bqData?.ipc,
-            filingDate: bqData?.filingDate
+            title: resolvedExternalData?.title,
+            applicant: resolvedExternalData?.applicant,
+            inventor: resolvedExternalData?.inventors,
+            ipc: resolvedExternalData?.ipc,
+            filingDate: resolvedExternalData?.filingDate
         });
         const shouldQueueOpsBiblio = !isDocumentEligible
             && !hasXmlBiblio
@@ -1182,12 +1227,13 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
                 where: { cod_pedido: patentId },
                 update: {
                     numero_publicacao: numeroPublicacao || numeroRaw || patentNumber,
-                    title: bqData?.title || inventionTitle || dispatchTitle || undefined,
-                    abstract: bqData?.abstract || undefined,
-                    applicant: bqData?.applicant || applicants || undefined,
-                    inventors: bqData?.inventors || inventors || undefined,
-                    ipc_codes: bqData?.ipc || ipcs || undefined,
-                    filing_date: bqData?.filingDate || filingDate || undefined,
+                    title: resolvedExternalData?.title || inventionTitle || dispatchTitle || undefined,
+                    abstract: resolvedExternalData?.abstract || undefined,
+                    resumo_detalhado: resolvedExternalData?.detailedAbstract || resolvedExternalData?.abstract || undefined,
+                    applicant: resolvedExternalData?.applicant || applicants || undefined,
+                    inventors: resolvedExternalData?.inventors || inventors || undefined,
+                    ipc_codes: resolvedExternalData?.ipc || ipcs || undefined,
+                    filing_date: resolvedExternalData?.filingDate || filingDate || undefined,
                     last_rpi: String(rpiNumber),
                     last_event: dispatchCode || undefined,
                     status: dispatchTitle || undefined
@@ -1195,12 +1241,13 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
                 create: {
                     cod_pedido: patentId,
                     numero_publicacao: numeroPublicacao || numeroRaw || patentNumber,
-                    title: bqData?.title || inventionTitle || dispatchTitle || null,
-                    abstract: bqData?.abstract || null,
-                    applicant: bqData?.applicant || applicants || null,
-                    inventors: bqData?.inventors || inventors || null,
-                    ipc_codes: bqData?.ipc || ipcs || null,
-                    filing_date: bqData?.filingDate || filingDate || null,
+                    title: resolvedExternalData?.title || inventionTitle || dispatchTitle || null,
+                    abstract: resolvedExternalData?.abstract || null,
+                    resumo_detalhado: resolvedExternalData?.detailedAbstract || resolvedExternalData?.abstract || null,
+                    applicant: resolvedExternalData?.applicant || applicants || null,
+                    inventors: resolvedExternalData?.inventors || inventors || null,
+                    ipc_codes: resolvedExternalData?.ipc || ipcs || null,
+                    filing_date: resolvedExternalData?.filingDate || filingDate || null,
                     last_rpi: String(rpiNumber),
                     last_event: dispatchCode || null,
                     status: dispatchTitle || null
@@ -1219,12 +1266,13 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
             await prisma.inpiPatent.update({
                 where: { cod_pedido: patentId },
                 data: {
-                    title: bqData?.title || undefined,
-                    abstract: bqData?.abstract || undefined,
-                    applicant: bqData?.applicant || applicants || undefined,
-                    inventors: bqData?.inventors || inventors || undefined,
-                    ipc_codes: bqData?.ipc || ipcs || undefined,
-                    filing_date: bqData?.filingDate || filingDate || undefined,
+                    title: resolvedExternalData?.title || undefined,
+                    abstract: resolvedExternalData?.abstract || undefined,
+                    resumo_detalhado: resolvedExternalData?.detailedAbstract || resolvedExternalData?.abstract || undefined,
+                    applicant: resolvedExternalData?.applicant || applicants || undefined,
+                    inventors: resolvedExternalData?.inventors || inventors || undefined,
+                    ipc_codes: resolvedExternalData?.ipc || ipcs || undefined,
+                    filing_date: resolvedExternalData?.filingDate || filingDate || undefined,
                     last_rpi: String(rpiNumber),
                     last_event: dispatchCode || undefined,
                     status: dispatchTitle || undefined
@@ -1255,12 +1303,12 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
                     complement: complement || null,
                     eligible_for_doc_download: isDocumentEligible,
                     bibliographic_status: isDocumentEligible ? 'queued_document' : ((hasXmlBiblio || hasBigQueryBiblio) ? 'completed' : 'pending'),
-                    ops_title: bqData?.title || inventionTitle || dispatchTitle || null,
-                    ops_applicant: bqData?.applicant || applicants || null,
-                    ops_inventor: bqData?.inventors || inventors || null,
-                    ops_ipc: bqData?.ipc || ipcs || null,
-                    ops_publication_date: bqData?.publicationDate || bqData?.filingDate || filingDate || null,
-                    ops_error: bqData ? `source=bigquery${bqData.attorney ? ` attorney=${bqData.attorney}` : ''}` : null,
+                    ops_title: resolvedExternalData?.title || inventionTitle || dispatchTitle || null,
+                    ops_applicant: resolvedExternalData?.applicant || applicants || null,
+                    ops_inventor: resolvedExternalData?.inventors || inventors || null,
+                    ops_ipc: resolvedExternalData?.ipc || ipcs || null,
+                    ops_publication_date: resolvedExternalData?.publicationDate || resolvedExternalData?.filingDate || filingDate || null,
+                    ops_error: resolvedExternalData ? `source=${resolvedExternalData.source || 'google_bigquery'}${resolvedExternalData.attorney ? ` attorney=${resolvedExternalData.attorney}` : ''}` : null,
                     ops_last_sync_at: (hasXmlBiblio || hasBigQueryBiblio) ? new Date() : null
                 }
             });
@@ -1274,12 +1322,12 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
                 where: { id: publicationExists.id },
                 data: {
                     bibliographic_status: 'completed',
-                    ops_title: bqData?.title || inventionTitle || dispatchTitle || undefined,
-                    ops_applicant: bqData?.applicant || applicants || undefined,
-                    ops_inventor: bqData?.inventors || inventors || undefined,
-                    ops_ipc: bqData?.ipc || ipcs || undefined,
-                    ops_publication_date: bqData?.publicationDate || bqData?.filingDate || filingDate || undefined,
-                    ops_error: bqData ? `source=bigquery${bqData.attorney ? ` attorney=${bqData.attorney}` : ''}` : undefined,
+                    ops_title: resolvedExternalData?.title || inventionTitle || dispatchTitle || undefined,
+                    ops_applicant: resolvedExternalData?.applicant || applicants || undefined,
+                    ops_inventor: resolvedExternalData?.inventors || inventors || undefined,
+                    ops_ipc: resolvedExternalData?.ipc || ipcs || undefined,
+                    ops_publication_date: resolvedExternalData?.publicationDate || resolvedExternalData?.filingDate || filingDate || undefined,
+                    ops_error: resolvedExternalData ? `source=${resolvedExternalData.source || 'google_bigquery'}${resolvedExternalData.attorney ? ` attorney=${resolvedExternalData.attorney}` : ''}` : undefined,
                     ops_last_sync_at: new Date()
                 }
             }).catch(() => undefined);
@@ -1628,17 +1676,24 @@ async function downloadOpsPdfByLink(link: string, pages: string): Promise<Buffer
 type OpsBibliographicData = {
     docdbId: string;
     title?: string;
+    abstract?: string;
+    detailedAbstract?: string;
     applicant?: string;
     inventor?: string;
     ipc?: string;
     publicationDate?: string;
+    googlePatentsUrl?: string;
+    pdfUrl?: string;
     source?: string;
 };
 
 function extractGooglePatentNumberCandidates(patentNumber: string): string[] {
-    const normalized = normalizePublicationNumber(patentNumber).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    const raw = normalizePublicationNumber(patentNumber).toUpperCase();
+    const withoutCheckDigit = raw.replace(/-([0-9X])$/, '');
+    const normalized = raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    const normalizedWithoutCheckDigit = withoutCheckDigit.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
     if (!normalized) return [];
-    const variants = new Set<string>([normalized]);
+    const variants = new Set<string>([normalized, normalizedWithoutCheckDigit]);
     const noBr = normalized.replace(/^BR/i, '');
     if (noBr) variants.add(noBr);
     if (normalized.endsWith('0')) variants.add(normalized.slice(0, -1));
@@ -1654,12 +1709,79 @@ function extractGooglePatentNumberCandidates(patentNumber: string): string[] {
     return Array.from(variants);
 }
 
-async function fetchGooglePatentsBibliographicData(patentNumber: string): Promise<OpsBibliographicData | null> {
-    if (!GOOGLE_PATENTS_FALLBACK_ENABLED) return null;
+function extractGooglePatentAbstract($: ReturnType<typeof cheerio.load>): string {
+    const candidates = [
+        $('meta[name="DC.description"]').attr('content'),
+        $('meta[name="description"]').attr('content'),
+        $('section[itemprop="abstract"] div.abstract').first().text(),
+        $('div.abstract').first().text(),
+        $('abstract').first().text()
+    ];
+    for (const candidate of candidates) {
+        const value = normalizeText(candidate || '');
+        if (value.length >= 40) return value;
+    }
+    return '';
+}
+
+function extractGooglePatentPdfUrl($: ReturnType<typeof cheerio.load>, pageUrl: string): string | undefined {
+    const candidateLinks = new Set<string>();
+    const addLink = (value?: string | null) => {
+        const href = normalizeText(value || '');
+        if (!href) return;
+        if (/\.pdf($|\?)/i.test(href) || /download=pdf/i.test(href) || /\/patent\/.*\/download/i.test(href)) {
+            const absolute = href.startsWith('http') ? href : `https://patents.google.com${href.startsWith('/') ? '' : '/'}${href}`;
+            candidateLinks.add(absolute);
+        }
+    };
+    addLink($('meta[name="citation_pdf_url"]').attr('content'));
+    $('a, button').each((_, el) => {
+        const text = normalizeText($(el).text()).toLowerCase();
+        const aria = normalizeText($(el).attr('aria-label') || '').toLowerCase();
+        if (text.includes('download pdf') || aria.includes('download pdf')) {
+            addLink($(el).attr('href') || $(el).attr('data-href'));
+        }
+    });
+    $('a[href]').each((_, el) => addLink($(el).attr('href')));
+    for (const link of Array.from(candidateLinks)) {
+        if (link.includes('/patent/')) return link;
+    }
+    return pageUrl;
+}
+
+function extractGooglePortugueseUrl($: ReturnType<typeof cheerio.load>, pageUrl: string): string | undefined {
+    const direct = $('a[href*="/pt"]').toArray().find((el) => {
+        const text = normalizeText($(el).text()).toLowerCase();
+        return text.includes('portuguese') || text.includes('português');
+    });
+    const href = direct ? normalizeText($(direct).attr('href') || '') : '';
+    if (!href) return undefined;
+    return href.startsWith('http') ? href : `https://patents.google.com${href.startsWith('/') ? '' : '/'}${href}`;
+}
+
+async function resolveGooglePatentDetailUrl(patentNumber: string): Promise<string | null> {
     const candidates = extractGooglePatentNumberCandidates(patentNumber);
     for (const candidate of candidates) {
-        const url = `https://patents.google.com/patent/${candidate}/en`;
-        const response = await axios.get(url, {
+        const detailUrl = `https://patents.google.com/patent/${candidate}/en`;
+        await waitGooglePatentsThrottle();
+        lastGooglePatentsRequestAt = Date.now();
+        const response = await axios.get(detailUrl, {
+            timeout: 30000,
+            validateStatus: () => true,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+            }
+        });
+        if (response.status < 200 || response.status >= 300) continue;
+        const html = typeof response.data === 'string' ? response.data : '';
+        if (!html || /security verification|just a moment/i.test(html)) continue;
+        if (html.includes('/patent/')) return detailUrl;
+    }
+    for (const candidate of candidates) {
+        const searchUrl = `https://patents.google.com/?q=${encodeURIComponent(candidate)}`;
+        await waitGooglePatentsThrottle();
+        lastGooglePatentsRequestAt = Date.now();
+        const response = await axios.get(searchUrl, {
             timeout: 30000,
             validateStatus: () => true,
             headers: {
@@ -1670,73 +1792,173 @@ async function fetchGooglePatentsBibliographicData(patentNumber: string): Promis
         const html = typeof response.data === 'string' ? response.data : '';
         if (!html || /security verification|just a moment/i.test(html)) continue;
         const $ = cheerio.load(html);
-        const title = normalizeText($('meta[name="DC.title"]').attr('content') || $('title').text());
-        const applicant = normalizeText($('meta[scheme="assignee"]').attr('content') || $('dd[itemprop="assigneeOriginal"] span[itemprop="name"]').first().text());
-        const inventor = normalizeText($('meta[scheme="inventor"]').attr('content') || $('dd[itemprop="inventor"] span[itemprop="name"]').first().text());
-        const publicationDate = normalizeText($('meta[scheme="publication-date"]').attr('content') || $('time[itemprop="publicationDate"]').attr('datetime') || '');
-        const ipc = $('span[itemprop="Code"], td[itemprop="Code"]')
-            .toArray()
-            .map((el) => normalizeText($(el).text()))
-            .filter(Boolean)
-            .slice(0, 20)
-            .join(', ');
-        if (!title && !applicant && !inventor && !ipc) continue;
-        return {
-            docdbId: candidate,
-            title: title || undefined,
-            applicant: applicant || undefined,
-            inventor: inventor || undefined,
-            ipc: ipc || undefined,
-            publicationDate: publicationDate || undefined,
-            source: 'google_patents'
-        };
+        const firstPatentHref = $('a[href^="/patent/"]').first().attr('href') || '';
+        const normalized = normalizeText(firstPatentHref);
+        if (!normalized) continue;
+        return normalized.startsWith('http') ? normalized : `https://patents.google.com${normalized}`;
     }
     return null;
 }
 
-async function downloadGooglePatentsFullDocument(patentNumber: string): Promise<Buffer | null> {
+async function fetchGooglePatentsBibliographicData(patentNumber: string): Promise<OpsBibliographicData | null> {
     if (!GOOGLE_PATENTS_FALLBACK_ENABLED) return null;
-    const candidates = extractGooglePatentNumberCandidates(patentNumber);
-    for (const candidate of candidates) {
-        const pageUrl = `https://patents.google.com/patent/${candidate}/en`;
-        const pageResponse = await axios.get(pageUrl, {
+    const detailUrl = await resolveGooglePatentDetailUrl(patentNumber);
+    if (!detailUrl) return null;
+    await waitGooglePatentsThrottle();
+    lastGooglePatentsRequestAt = Date.now();
+    const response = await axios.get(detailUrl, {
+        timeout: 30000,
+        validateStatus: () => true,
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+        }
+    });
+    if (response.status < 200 || response.status >= 300) return null;
+    const html = typeof response.data === 'string' ? response.data : '';
+    if (!html || /security verification|just a moment/i.test(html)) return null;
+    const $ = cheerio.load(html);
+    const portugueseUrl = extractGooglePortugueseUrl($, detailUrl);
+    let extractionUrl = detailUrl;
+    let extraction$ = $;
+    if (portugueseUrl) {
+        await waitGooglePatentsThrottle();
+        lastGooglePatentsRequestAt = Date.now();
+        const ptResponse = await axios.get(portugueseUrl, {
             timeout: 30000,
             validateStatus: () => true,
             headers: {
                 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
             }
         });
-        if (pageResponse.status < 200 || pageResponse.status >= 300) continue;
-        const html = typeof pageResponse.data === 'string' ? pageResponse.data : '';
-        if (!html || /security verification|just a moment/i.test(html)) continue;
-        const $ = cheerio.load(html);
-        const candidateLinks = new Set<string>();
-        const addLink = (value?: string | null) => {
-            const href = normalizeText(value || '');
-            if (!href) return;
-            if (/\.pdf($|\?)/i.test(href) || /download=pdf/i.test(href) || /\/patent\/.*\/download/i.test(href)) {
-                candidateLinks.add(href);
-            }
-        };
-        addLink($('meta[name="citation_pdf_url"]').attr('content'));
-        $('a[href]').each((_, el) => addLink($(el).attr('href')));
-        for (const link of Array.from(candidateLinks)) {
-            const absolute = link.startsWith('http') ? link : `https://patents.google.com${link.startsWith('/') ? '' : '/'}${link}`;
-            const pdfResponse = await axios.get(absolute, {
-                responseType: 'arraybuffer',
-                timeout: 60000,
-                validateStatus: () => true,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
-                }
-            });
-            if (pdfResponse.status < 200 || pdfResponse.status >= 300) continue;
-            const contentType = String(pdfResponse.headers?.['content-type'] || '').toLowerCase();
-            const pdfBuffer = Buffer.from(pdfResponse.data);
-            if ((contentType.includes('pdf') || pdfBuffer.slice(0, 4).toString() === '%PDF') && pdfBuffer.length > 1024) {
-                return pdfBuffer;
-            }
+        const ptHtml = typeof ptResponse.data === 'string' ? ptResponse.data : '';
+        if (ptResponse.status >= 200 && ptResponse.status < 300 && ptHtml && !/security verification|just a moment/i.test(ptHtml)) {
+            extractionUrl = portugueseUrl;
+            extraction$ = cheerio.load(ptHtml);
         }
+    }
+    const title = normalizeText(extraction$('meta[name="DC.title"]').attr('content') || extraction$('h1').first().text() || extraction$('title').text());
+    const applicant = normalizeText(extraction$('meta[scheme="assignee"]').attr('content') || extraction$('dd[itemprop="assigneeOriginal"] span[itemprop="name"]').first().text());
+    const inventor = normalizeText(extraction$('meta[scheme="inventor"]').attr('content') || extraction$('dd[itemprop="inventor"] span[itemprop="name"]').first().text());
+    const publicationDate = normalizeText(extraction$('meta[scheme="publication-date"]').attr('content') || extraction$('time[itemprop="publicationDate"]').attr('datetime') || '');
+    const ipc = extraction$('span[itemprop="Code"], td[itemprop="Code"]')
+        .toArray()
+        .map((el) => normalizeText(extraction$(el).text()))
+        .filter(Boolean)
+        .slice(0, 20)
+        .join(', ');
+    const abstract = extractGooglePatentAbstract(extraction$);
+    const pdfUrl = extractGooglePatentPdfUrl(extraction$, extractionUrl);
+    if (!title && !applicant && !inventor && !ipc && !abstract) return null;
+    return {
+        docdbId: normalizePublicationNumber(patentNumber),
+        title: title || undefined,
+        abstract: abstract || undefined,
+        detailedAbstract: abstract || undefined,
+        applicant: applicant || undefined,
+        inventor: inventor || undefined,
+        ipc: ipc || undefined,
+        publicationDate: publicationDate || undefined,
+        googlePatentsUrl: extractionUrl,
+        pdfUrl,
+        source: 'google_patents'
+    };
+}
+
+async function tryDownloadPdfFromGoogleUrl(url: string): Promise<Buffer | null> {
+    await waitGooglePatentsThrottle();
+    lastGooglePatentsRequestAt = Date.now();
+    const response = await axios.get(url, {
+        responseType: 'arraybuffer',
+        timeout: 60000,
+        validateStatus: () => true,
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+        }
+    });
+    if (response.status < 200 || response.status >= 300) return null;
+    const contentType = String(response.headers?.['content-type'] || '').toLowerCase();
+    const buffer = Buffer.from(response.data);
+    if ((contentType.includes('pdf') || buffer.slice(0, 4).toString() === '%PDF') && buffer.length > 1024) {
+        return buffer;
+    }
+    if (!contentType.includes('html')) return null;
+    const html = buffer.toString('utf8');
+    const $ = cheerio.load(html);
+    const nestedLinks = new Set<string>();
+    const addNested = (value?: string | null) => {
+        const href = normalizeText(value || '');
+        if (!href) return;
+        if (/\.pdf($|\?)/i.test(href) || /download=pdf/i.test(href) || /\/patent\/.*\/download/i.test(href)) {
+            nestedLinks.add(href.startsWith('http') ? href : `https://patents.google.com${href.startsWith('/') ? '' : '/'}${href}`);
+        }
+    };
+    addNested($('meta[name="citation_pdf_url"]').attr('content'));
+    $('a[href], button[data-href]').each((_, el) => addNested($(el).attr('href') || $(el).attr('data-href')));
+    for (const nested of Array.from(nestedLinks)) {
+        await waitGooglePatentsThrottle();
+        lastGooglePatentsRequestAt = Date.now();
+        const nestedResponse = await axios.get(nested, {
+            responseType: 'arraybuffer',
+            timeout: 60000,
+            validateStatus: () => true,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+            }
+        });
+        if (nestedResponse.status < 200 || nestedResponse.status >= 300) continue;
+        const nestedBuffer = Buffer.from(nestedResponse.data);
+        const nestedType = String(nestedResponse.headers?.['content-type'] || '').toLowerCase();
+        if ((nestedType.includes('pdf') || nestedBuffer.slice(0, 4).toString() === '%PDF') && nestedBuffer.length > 1024) {
+            return nestedBuffer;
+        }
+    }
+    return null;
+}
+
+async function downloadGooglePatentsFullDocument(patentNumber: string): Promise<Buffer | null> {
+    if (!GOOGLE_PATENTS_FALLBACK_ENABLED) return null;
+    const detailUrl = await resolveGooglePatentDetailUrl(patentNumber);
+    if (!detailUrl) return null;
+    await waitGooglePatentsThrottle();
+    lastGooglePatentsRequestAt = Date.now();
+    const pageResponse = await axios.get(detailUrl, {
+        timeout: 30000,
+        validateStatus: () => true,
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+        }
+    });
+    if (pageResponse.status < 200 || pageResponse.status >= 300) return null;
+    const html = typeof pageResponse.data === 'string' ? pageResponse.data : '';
+    if (!html || /security verification|just a moment/i.test(html)) return null;
+    const $ = cheerio.load(html);
+    const portugueseUrl = extractGooglePortugueseUrl($, detailUrl);
+    const candidateLinks = new Set<string>();
+    const addLink = (value?: string | null) => {
+        const href = normalizeText(value || '');
+        if (!href) return;
+        if (/\.pdf($|\?)/i.test(href) || /download=pdf/i.test(href) || /\/patent\/.*\/download/i.test(href) || href.includes('/patent/')) {
+            candidateLinks.add(href.startsWith('http') ? href : `https://patents.google.com${href.startsWith('/') ? '' : '/'}${href}`);
+        }
+    };
+    addLink($('meta[name="citation_pdf_url"]').attr('content'));
+    $('a[href], button[data-href]').each((_, el) => {
+        const text = normalizeText($(el).text()).toLowerCase();
+        const aria = normalizeText($(el).attr('aria-label') || '').toLowerCase();
+        if (text.includes('download pdf') || aria.includes('download pdf')) {
+            addLink($(el).attr('href') || $(el).attr('data-href'));
+        } else {
+            addLink($(el).attr('href'));
+        }
+    });
+    addLink(`${detailUrl}?download=pdf`);
+    if (portugueseUrl) {
+        addLink(portugueseUrl);
+        addLink(`${portugueseUrl}?download=pdf`);
+    }
+    for (const link of Array.from(candidateLinks)) {
+        const pdf = await tryDownloadPdfFromGoogleUrl(link);
+        if (pdf) return pdf;
     }
     return null;
 }
@@ -1844,7 +2066,7 @@ async function fetchOpsBibliographicData(patentNumber: string): Promise<OpsBibli
 }
 
 async function fetchBibliographicDataWithFallbacks(patentNumber: string, attemptNumber = 1): Promise<OpsBibliographicData | null> {
-    // Ordem exigida: 1) INPI worker 2) OPS 3) Google Patents via BigQuery
+    // Ordem exigida: 1) INPI worker 2) OPS 3) Google Patents Scrape / BigQuery
     if (patentNumber.startsWith('BR')) {
         try {
             const inpi = await fetchInpiScrapeBibliographicData(patentNumber);
@@ -1859,8 +2081,8 @@ async function fetchBibliographicDataWithFallbacks(patentNumber: string, attempt
     }
     const fromOps = await fetchOpsBibliographicData(patentNumber);
     if (fromOps) return fromOps;
-    const fromBigQuery = await fetchBigQueryBibliographicData(patentNumber);
-    if (fromBigQuery) return mapBigQueryToBiblio(patentNumber, fromBigQuery);
+    const fromGooglePatents = await fetchGooglePatentsBibliographicData(patentNumber);
+    if (fromGooglePatents) return fromGooglePatents;
     return null;
 }
 
@@ -1886,6 +2108,15 @@ async function applyBibliographicData(patentNumber: string, biblio: OpsBibliogra
                 { numero_publicacao: { contains: patentNumber, mode: 'insensitive' } },
                 { cod_pedido: patentNumber }
             ]
+        },
+        select: {
+            cod_pedido: true,
+            title: true,
+            abstract: true,
+            resumo_detalhado: true,
+            applicant: true,
+            inventors: true,
+            ipc_codes: true
         }
     });
     if (linkedPatent) {
@@ -1893,6 +2124,8 @@ async function applyBibliographicData(patentNumber: string, biblio: OpsBibliogra
             where: { cod_pedido: linkedPatent.cod_pedido },
             data: {
                 title: linkedPatent.title || biblio.title || undefined,
+                abstract: linkedPatent.abstract || biblio.abstract || undefined,
+                resumo_detalhado: linkedPatent.resumo_detalhado || biblio.detailedAbstract || biblio.abstract || undefined,
                 applicant: linkedPatent.applicant || biblio.applicant || undefined,
                 inventors: linkedPatent.inventors || biblio.inventor || undefined,
                 ipc_codes: linkedPatent.ipc_codes || biblio.ipc || undefined
@@ -2026,13 +2259,11 @@ async function processNextBigQueryBibliographicJob() {
         });
 
         try {
-            const bqData = await fetchBigQueryBibliographicData(job.patent_number);
-            if (!bqData) {
-                const recentIndexing = isRecentPatentForIndexing(job.patent_number);
-                const status = recentIndexing ? 'waiting_indexing' : 'not_found';
-                const errorText = recentIndexing
-                    ? `Dados bibliográficos BigQuery ainda não indexados para ${job.patent_number}`
-                    : `Dados bibliográficos BigQuery não encontrados para ${job.patent_number}`;
+            const googleData = await fetchGooglePatentsBibliographicData(job.patent_number);
+            const externalBiblio = googleData ? mapGoogleBiblioToSearchData(googleData) : null;
+            if (!externalBiblio) {
+                const status = 'not_found';
+                const errorText = `Dados bibliográficos Google Patents não encontrados para ${job.patent_number}`;
                 await prismaAny.bigQueryBibliographicJob.update({
                     where: { id: job.id },
                     data: { status, error: errorText, finished_at: new Date() }
@@ -2040,27 +2271,27 @@ async function processNextBigQueryBibliographicJob() {
                 await prismaAny.inpiPublication.updateMany({
                     where: { patent_number: job.patent_number },
                     data: {
-                        bibliographic_status: recentIndexing ? 'pending' : 'not_found',
-                        ops_error: 'source=google_bigquery not_found',
+                        bibliographic_status: 'not_found',
+                        ops_error: 'source=google_patents not_found',
                         ops_last_sync_at: new Date()
                     }
                 });
                 return;
             }
 
-            const biblio = mapBigQueryToBiblio(job.patent_number, bqData);
+            const biblio = mapBigQueryToBiblio(job.patent_number, externalBiblio);
             await applyBibliographicData(job.patent_number, biblio);
             await prismaAny.bigQueryBibliographicJob.update({
                 where: { id: job.id },
                 data: {
                     status: 'completed',
                     docdb_id: biblio.docdbId,
-                    error: 'source=google_bigquery',
+                    error: `source=${externalBiblio.source || 'google_patents'}`,
                     finished_at: new Date()
                 }
             });
         } catch (error: unknown) {
-            const message = truncateError(errorMessage(error, 'Erro ao consultar bibliografia no BigQuery'));
+            const message = truncateError(errorMessage(error, 'Erro ao consultar bibliografia no Google Patents'));
             await prismaAny.bigQueryBibliographicJob.update({
                 where: { id: job.id },
                 data: {
@@ -2247,6 +2478,9 @@ async function processNextDocumentJob() {
                 }
             };
 
+            const googlePrimaryRecovered = await tryGooglePatentsFallback('DOC_PRIMARY');
+            if (googlePrimaryRecovered) return;
+
             const docdbId = await resolveDocdbId(publicationNumber);
             if (!docdbId) {
                 const publicationBiblio = await prismaAny.inpiPublication.findFirst({
@@ -2264,12 +2498,14 @@ async function processNextDocumentJob() {
                     where: { cod_pedido: job.patent_id },
                     select: {
                         title: true,
+                        resumo_detalhado: true,
                         applicant: true,
                         inventors: true,
                         ipc_codes: true,
                         filing_date: true
                     }
                 }).catch(() => null);
+                const hasDetailedAbstract = Boolean(normalizeText(patentBiblio?.resumo_detalhado || ''));
                 const hasStoredBiblio = hasBasicBibliographicData({
                     title: publicationBiblio?.ops_title || patentBiblio?.title,
                     applicant: publicationBiblio?.ops_applicant || patentBiblio?.applicant,
@@ -2277,28 +2513,33 @@ async function processNextDocumentJob() {
                     ipc: publicationBiblio?.ops_ipc || patentBiblio?.ipc_codes,
                     filingDate: publicationBiblio?.ops_publication_date || patentBiblio?.filing_date
                 });
-                const bqData = hasStoredBiblio ? null : await fetchBigQueryBibliographicData(publicationNumber);
-                if (bqData) {
+                let fallbackBiblio: BigQueryBibliographicData | null = null;
+                if (!hasStoredBiblio && !hasDetailedAbstract) {
+                    const googleBiblio = await fetchGooglePatentsBibliographicData(publicationNumber);
+                    fallbackBiblio = googleBiblio ? mapGoogleBiblioToSearchData(googleBiblio) : null;
+                }
+                if (fallbackBiblio) {
                     await prisma.inpiPatent.update({
                         where: { cod_pedido: job.patent_id },
                         data: {
-                            title: bqData.title || undefined,
-                            abstract: bqData.abstract || undefined,
-                            applicant: bqData.applicant || undefined,
-                            inventors: bqData.inventors || undefined,
-                            ipc_codes: bqData.ipc || undefined
+                            title: fallbackBiblio.title || undefined,
+                            abstract: fallbackBiblio.abstract || undefined,
+                            resumo_detalhado: fallbackBiblio.detailedAbstract || fallbackBiblio.abstract || undefined,
+                            applicant: fallbackBiblio.applicant || undefined,
+                            inventors: fallbackBiblio.inventors || undefined,
+                            ipc_codes: fallbackBiblio.ipc || undefined
                         }
                     }).catch(() => undefined);
                     await prismaAny.inpiPublication.updateMany({
                         where: { patent_number: publicationNumber },
                         data: {
                             bibliographic_status: 'completed',
-                            ops_title: bqData.title || null,
-                            ops_applicant: bqData.applicant || null,
-                            ops_inventor: bqData.inventors || null,
-                            ops_ipc: bqData.ipc || null,
-                            ops_publication_date: bqData.publicationDate || bqData.filingDate || null,
-                            ops_error: 'source=google_bigquery',
+                            ops_title: fallbackBiblio.title || null,
+                            ops_applicant: fallbackBiblio.applicant || null,
+                            ops_inventor: fallbackBiblio.inventors || null,
+                            ops_ipc: fallbackBiblio.ipc || null,
+                            ops_publication_date: fallbackBiblio.publicationDate || fallbackBiblio.filingDate || null,
+                            ops_error: `source=${fallbackBiblio.source || 'google_patents'}`,
                             ops_last_sync_at: new Date()
                         }
                     }).catch(() => undefined);
@@ -2310,8 +2551,8 @@ async function processNextDocumentJob() {
                 const recentIndexing = isRecentPatentForIndexing(publicationNumber);
                 const status = recentIndexing ? 'waiting_indexing' : 'not_found';
                 const code = recentIndexing
-                    ? (bqData ? 'DOC_DOCDB_PENDING_INDEX_BQ_ENRICHED' : 'DOC_DOCDB_PENDING_INDEX')
-                    : (bqData ? 'DOC_DOCDB_NOT_FOUND_BQ_ENRICHED' : 'DOC_DOCDB_NOT_FOUND');
+                    ? (fallbackBiblio ? 'DOC_DOCDB_PENDING_INDEX_ENRICHED' : 'DOC_DOCDB_PENDING_INDEX')
+                    : (fallbackBiblio ? 'DOC_DOCDB_NOT_FOUND_ENRICHED' : 'DOC_DOCDB_NOT_FOUND');
                 const errorText = `${code} publication=${publicationNumber}`;
                 await prisma.documentDownloadJob.update({
                     where: { id: job.id },
@@ -2459,6 +2700,20 @@ export async function debugBigQueryLookup(publicationNumber: string) {
     };
 }
 
+export async function debugGooglePatentsLookup(publicationNumber: string) {
+    const normalized = normalizePublicationNumber(publicationNumber);
+    const bibliographic = normalized ? await fetchGooglePatentsBibliographicData(normalized) : null;
+    const pdfBuffer = normalized ? await downloadGooglePatentsFullDocument(normalized) : null;
+    return {
+        publicationNumber,
+        normalized,
+        found: Boolean(bibliographic),
+        bibliographic,
+        pdfFound: Boolean(pdfBuffer && pdfBuffer.length > 1024),
+        pdfBytes: pdfBuffer?.length || 0
+    };
+}
+
 export async function debugInpiLookup(patentNumber: string) {
     const codPedido = normalizeInpiCodPedido(patentNumber);
     const module = await import('./inpiScraper');
@@ -2508,7 +2763,7 @@ export async function retryDocumentJob(jobId: string) {
     return updated;
 }
 
-export async function retryOpsBibliographicJob(jobId: string, preferBigQuery = true) {
+export async function retryOpsBibliographicJob(jobId: string, preferBigQuery = false) {
     const updated = await prismaAny.opsBibliographicJob.update({
         where: { id: jobId },
         data: {
