@@ -2514,10 +2514,12 @@ const start = async () => {
     try {
         const startupLog = `/tmp/server_startup.log`;
         fs.writeFileSync(startupLog, `Server starting at ${new Date().toISOString()} with PID ${process.pid}\n`);
-        await ensureMonitoringTables();
-
-        // ─── STARTUP ──────────────────────────────────────────────────
         await fastify.listen({ port: parseInt(process.env.PORT || '3001'), host: '0.0.0.0' });
+        try {
+            await ensureMonitoringTables();
+        } catch (error) {
+            fastify.log.error(error, 'Falha ao inicializar tabelas de monitoramento. API seguirá no ar e tentará novamente nas rotas.');
+        }
         startBackgroundWorkers();
     } catch (err) {
         fastify.log.error(err);
