@@ -1828,20 +1828,6 @@ async function openGooglePatentViaBrowser(patentNumber: string): Promise<GoogleP
             detailHtml = extracted.html;
             break;
         }
-        if (!detailUrl || !detailHtml) {
-            for (const candidate of candidates) {
-                const directUrl = `https://patents.google.com/patent/${candidate}/en`;
-                await waitGooglePatentsThrottle();
-                lastGooglePatentsRequestAt = Date.now();
-                await page.goto(directUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
-                await sleep(900 + Math.floor(Math.random() * 450));
-                const extracted = await tryExtractFromCurrentPage();
-                if (!extracted) continue;
-                detailUrl = extracted.url;
-                detailHtml = extracted.html;
-                break;
-            }
-        }
         if (!detailUrl || !detailHtml) return null;
 
         const switchedToPortuguese = await page.evaluate(() => {
@@ -2114,26 +2100,6 @@ async function downloadGooglePatentsFullDocument(patentNumber: string): Promise<
     for (const link of Array.from(candidateLinks)) {
         const pdf = await tryDownloadPdfFromGoogleUrl(link);
         if (pdf) return pdf;
-    }
-    const fallbackCandidates = extractGooglePatentNumberCandidates(patentNumber);
-    const fallbackUrl = fallbackCandidates[0]
-        ? `https://patents.google.com/patent/${fallbackCandidates[0]}/en`
-        : `https://patents.google.com/?q=${encodeURIComponent(patentNumber)}`;
-    try {
-        const localPort = parseInt(process.env.PORT || '3001', 10);
-        const endpoint = `http://127.0.0.1:${localPort}/patent/document?url=${encodeURIComponent(fallbackUrl)}&publicationNumber=${encodeURIComponent(patentNumber)}`;
-        const response = await axios.get(endpoint, {
-            responseType: 'arraybuffer',
-            timeout: 120000,
-            validateStatus: () => true
-        });
-        if (response.status >= 200 && response.status < 300) {
-            const buffer = Buffer.from(response.data);
-            if (buffer.slice(0, 4).toString() === '%PDF' && buffer.length > 1024) {
-                return buffer;
-            }
-        }
-    } catch {
     }
     return null;
 }
