@@ -1689,16 +1689,19 @@ type OpsBibliographicData = {
 
 function extractGooglePatentNumberCandidates(patentNumber: string): string[] {
     const raw = normalizePublicationNumber(patentNumber).toUpperCase();
+    const beforeHyphen = raw.split('-')[0] || raw;
     const withoutCheckDigit = raw.replace(/-([0-9X])$/, '');
-    const normalized = raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    const normalizedBase = beforeHyphen.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
     const normalizedWithoutCheckDigit = withoutCheckDigit.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-    if (!normalized) return [];
-    const variants = new Set<string>([normalizedWithoutCheckDigit, normalized]);
-    const noBr = normalized.replace(/^BR/i, '');
+    const normalized = raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    if (!normalizedBase && !normalizedWithoutCheckDigit && !normalized) return [];
+    const primary = normalizedBase || normalizedWithoutCheckDigit || normalized;
+    const variants = new Set<string>([primary, normalizedWithoutCheckDigit, normalized]);
+    const noBr = primary.replace(/^BR/i, '');
     if (noBr) variants.add(noBr);
-    if (normalized.endsWith('0')) variants.add(normalized.slice(0, -1));
+    if (primary.endsWith('0')) variants.add(primary.slice(0, -1));
     if (noBr.endsWith('0')) variants.add(noBr.slice(0, -1));
-    const brMatch = normalized.match(/^BR(10|11)(\d{8,})$/);
+    const brMatch = primary.match(/^BR(10|11|12|13)(\d{8,})$/);
     if (brMatch) {
         const doc = brMatch[2];
         if (doc.length > 1) {
@@ -1765,6 +1768,12 @@ type GooglePatentBrowserSnapshot = {
     portugueseUrl?: string;
     portugueseHtml?: string;
     pdfCandidates: string[];
+    title?: string;
+    abstract?: string;
+    applicant?: string;
+    inventor?: string;
+    ipc?: string;
+    publicationDate?: string;
 };
 
 async function openGooglePatentViaBrowser(patentNumber: string): Promise<GooglePatentBrowserSnapshot | null> {
@@ -1780,6 +1789,14 @@ async function openGooglePatentViaBrowser(patentNumber: string): Promise<GoogleP
     try {
         let detailUrl = '';
         let detailHtml = '';
+        const tryExtractFromCurrentPage = async (): Promise<{ url: string; html: string } | null> => {
+            const currentUrl = page.url();
+            if (!currentUrl.includes('/patent/')) return null;
+            const html = await page.content();
+            if (!html || /security verification|just a moment/i.test(html)) return null;
+            return { url: currentUrl, html };
+        };
+
         for (const candidate of candidates) {
             await waitGooglePatentsThrottle();
             lastGooglePatentsRequestAt = Date.now();
@@ -1805,12 +1822,25 @@ async function openGooglePatentViaBrowser(patentNumber: string): Promise<GoogleP
                 await sleep(1400 + Math.floor(Math.random() * 500));
                 currentUrl = page.url();
             }
-            if (!currentUrl.includes('/patent/')) continue;
-            const html = await page.content();
-            if (!html || /security verification|just a moment/i.test(html)) continue;
-            detailUrl = currentUrl;
-            detailHtml = html;
+            const extracted = await tryExtractFromCurrentPage();
+            if (!extracted) continue;
+            detailUrl = extracted.url;
+            detailHtml = extracted.html;
             break;
+        }
+        if (!detailUrl || !detailHtml) {
+            for (const candidate of candidates) {
+                const directUrl = `https://patents.google.com/patent/${candidate}/en`;
+                await waitGooglePatentsThrottle();
+                lastGooglePatentsRequestAt = Date.now();
+                await page.goto(directUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+                await sleep(900 + Math.floor(Math.random() * 450));
+                const extracted = await tryExtractFromCurrentPage();
+                if (!extracted) continue;
+                detailUrl = extracted.url;
+                detailHtml = extracted.html;
+                break;
+            }
         }
         if (!detailUrl || !detailHtml) return null;
 
@@ -1849,6 +1879,38 @@ async function openGooglePatentViaBrowser(patentNumber: string): Promise<GoogleP
             }
             return out;
         });
+        const browserBiblio = await page.evaluate(() => {
+            const clean = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
+            const title = clean(
+                document.querySelector('meta[name="DC.title"]')?.getAttribute('content')
+                || document.querySelector('h1')?.textContent
+                || document.title
+            );
+            const abstract = clean(
+                document.querySelector('meta[name="DC.description"]')?.getAttribute('content')
+                || document.querySelector('section[itemprop="abstract"] div.abstract')?.textContent
+                || document.querySelector('div.abstract')?.textContent
+                || document.querySelector('abstract')?.textContent
+            );
+            const applicant = clean(
+                document.querySelector('meta[scheme="assignee"]')?.getAttribute('content')
+                || document.querySelector('dd[itemprop="assigneeOriginal"] span[itemprop="name"]')?.textContent
+            );
+            const inventor = clean(
+                document.querySelector('meta[scheme="inventor"]')?.getAttribute('content')
+                || document.querySelector('dd[itemprop="inventor"] span[itemprop="name"]')?.textContent
+            );
+            const publicationDate = clean(
+                document.querySelector('meta[scheme="publication-date"]')?.getAttribute('content')
+                || document.querySelector('time[itemprop="publicationDate"]')?.getAttribute('datetime')
+            );
+            const ipcList = Array.from(document.querySelectorAll('span[itemprop="Code"], td[itemprop="Code"]'))
+                .map((el) => clean(el.textContent))
+                .filter(Boolean)
+                .slice(0, 20);
+            const ipc = clean(ipcList.join(', '));
+            return { title, abstract, applicant, inventor, ipc, publicationDate };
+        });
         const base = portugueseUrl || detailUrl;
         const pdfCandidates = new Set<string>();
         const addAbsolute = (raw?: string) => {
@@ -1870,7 +1932,13 @@ async function openGooglePatentViaBrowser(patentNumber: string): Promise<GoogleP
             detailHtml,
             portugueseUrl,
             portugueseHtml,
-            pdfCandidates: Array.from(pdfCandidates)
+            pdfCandidates: Array.from(pdfCandidates),
+            title: browserBiblio.title || undefined,
+            abstract: browserBiblio.abstract || undefined,
+            applicant: browserBiblio.applicant || undefined,
+            inventor: browserBiblio.inventor || undefined,
+            ipc: browserBiblio.ipc || undefined,
+            publicationDate: browserBiblio.publicationDate || undefined
         };
     } finally {
         await page.close().catch(() => undefined);
@@ -1884,23 +1952,34 @@ async function fetchGooglePatentsBibliographicData(patentNumber: string): Promis
     if (!snapshot) return null;
     const extractionHtml = snapshot.portugueseHtml || snapshot.detailHtml;
     const extractionUrl = snapshot.portugueseUrl || snapshot.detailUrl;
+    const extractionHtmlLower = extractionHtml.toLowerCase();
+    if (
+        extractionHtmlLower.includes('error 404') ||
+        extractionHtmlLower.includes('did not match any documents') ||
+        extractionHtmlLower.includes('não encontrou nenhum resultado')
+    ) {
+        return null;
+    }
     const extraction$ = cheerio.load(extractionHtml);
     const fallback$ = cheerio.load(snapshot.detailHtml);
-    const title = normalizeText(extraction$('meta[name="DC.title"]').attr('content') || extraction$('h1').first().text() || extraction$('title').text());
+    const title = normalizeText(snapshot.title || extraction$('meta[name="DC.title"]').attr('content') || extraction$('h1').first().text() || extraction$('title').text());
     const applicant = normalizeText(
-        extraction$('meta[scheme="assignee"]').attr('content')
+        snapshot.applicant
+        || extraction$('meta[scheme="assignee"]').attr('content')
         || extraction$('dd[itemprop="assigneeOriginal"] span[itemprop="name"]').first().text()
         || fallback$('meta[scheme="assignee"]').attr('content')
         || fallback$('dd[itemprop="assigneeOriginal"] span[itemprop="name"]').first().text()
     );
     const inventor = normalizeText(
-        extraction$('meta[scheme="inventor"]').attr('content')
+        snapshot.inventor
+        || extraction$('meta[scheme="inventor"]').attr('content')
         || extraction$('dd[itemprop="inventor"] span[itemprop="name"]').first().text()
         || fallback$('meta[scheme="inventor"]').attr('content')
         || fallback$('dd[itemprop="inventor"] span[itemprop="name"]').first().text()
     );
     const publicationDate = normalizeText(
-        extraction$('meta[scheme="publication-date"]').attr('content')
+        snapshot.publicationDate
+        || extraction$('meta[scheme="publication-date"]').attr('content')
         || extraction$('time[itemprop="publicationDate"]').attr('datetime')
         || fallback$('meta[scheme="publication-date"]').attr('content')
         || fallback$('time[itemprop="publicationDate"]').attr('datetime')
@@ -1918,7 +1997,7 @@ async function fetchGooglePatentsBibliographicData(patentNumber: string): Promis
         .filter(Boolean)
         .slice(0, 20)
         .join(', ');
-    const abstract = extractGooglePatentAbstract(extraction$) || extractGooglePatentAbstract(fallback$);
+    const abstract = normalizeText(snapshot.abstract || extractGooglePatentAbstract(extraction$) || extractGooglePatentAbstract(fallback$));
     const pdfUrl = snapshot.pdfCandidates[0] || extractGooglePatentPdfUrl(extraction$, extractionUrl);
     if (!title && !applicant && !inventor && !ipc && !abstract) return null;
     return {
@@ -1928,7 +2007,7 @@ async function fetchGooglePatentsBibliographicData(patentNumber: string): Promis
         detailedAbstract: abstract || undefined,
         applicant: applicant || undefined,
         inventor: inventor || undefined,
-        ipc: ipc || fallbackIpc || undefined,
+        ipc: snapshot.ipc || ipc || fallbackIpc || undefined,
         publicationDate: publicationDate || undefined,
         googlePatentsUrl: extractionUrl,
         pdfUrl,
@@ -2020,6 +2099,26 @@ async function downloadGooglePatentsFullDocument(patentNumber: string): Promise<
     for (const link of Array.from(candidateLinks)) {
         const pdf = await tryDownloadPdfFromGoogleUrl(link);
         if (pdf) return pdf;
+    }
+    const fallbackCandidates = extractGooglePatentNumberCandidates(patentNumber);
+    const fallbackUrl = fallbackCandidates[0]
+        ? `https://patents.google.com/patent/${fallbackCandidates[0]}/en`
+        : `https://patents.google.com/?q=${encodeURIComponent(patentNumber)}`;
+    try {
+        const localPort = parseInt(process.env.PORT || '3001', 10);
+        const endpoint = `http://127.0.0.1:${localPort}/patent/document?url=${encodeURIComponent(fallbackUrl)}&publicationNumber=${encodeURIComponent(patentNumber)}`;
+        const response = await axios.get(endpoint, {
+            responseType: 'arraybuffer',
+            timeout: 120000,
+            validateStatus: () => true
+        });
+        if (response.status >= 200 && response.status < 300) {
+            const buffer = Buffer.from(response.data);
+            if (buffer.slice(0, 4).toString() === '%PDF' && buffer.length > 1024) {
+                return buffer;
+            }
+        }
+    } catch {
     }
     return null;
 }
@@ -2474,44 +2573,55 @@ async function processNextDocumentJob() {
                 return;
             }
 
+            const googleSearchCandidates = Array.from(new Set([
+                publicationNumber,
+                normalizeText(patent.numero_publicacao || ''),
+                normalizeText(job.patent_id || ''),
+                normalizeText(patent.cod_pedido || '')
+            ].filter(Boolean)));
+
             const tryGooglePatentsFallback = async (reasonCode: string): Promise<boolean> => {
-                try {
-                    const pdf = await downloadGooglePatentsFullDocument(publicationNumber);
-                    if (!pdf || pdf.length < 1024) return false;
-                    const safeBase = publicationNumber.replace(/[^\w.-]/g, '_');
-                    const baseKey = `patent-docs/${safeBase}`;
-                    const fullKey = `${baseKey}/full_document.pdf`;
-                    await uploadPdfToS3(fullKey, pdf);
-                    await prisma.documentDownloadJob.update({
-                        where: { id: job.id },
-                        data: {
+                for (const candidate of googleSearchCandidates) {
+                    try {
+                        const pdf = await downloadGooglePatentsFullDocument(candidate);
+                        if (!pdf || pdf.length < 1024) continue;
+                        const safeBase = publicationNumber.replace(/[^\w.-]/g, '_');
+                        const baseKey = `patent-docs/${safeBase}`;
+                        const fullKey = `${baseKey}/full_document.pdf`;
+                        await uploadPdfToS3(fullKey, pdf);
+                        await prisma.documentDownloadJob.update({
+                            where: { id: job.id },
+                            data: {
+                                status: 'completed',
+                                storage_key: fullKey,
+                                finished_at: new Date(),
+                                publication_number: publicationNumber,
+                                error: truncateError(`${reasonCode} source=google_patents candidate=${candidate}`)
+                            }
+                        });
+                        documentJobLog({
+                            jobId: job.id,
+                            patentId: job.patent_id,
+                            publicationNumber,
                             status: 'completed',
-                            storage_key: fullKey,
-                            finished_at: new Date(),
-                            publication_number: publicationNumber,
-                            error: truncateError(`${reasonCode} source=google_patents`)
-                        }
-                    });
-                    documentJobLog({
-                        jobId: job.id,
-                        patentId: job.patent_id,
-                        publicationNumber,
-                        status: 'completed',
-                        code: `${reasonCode}_GOOGLE_PATENTS`,
-                        storageKey: fullKey
-                    });
-                    return true;
-                } catch (error) {
-                    documentJobLog({
-                        jobId: job.id,
-                        patentId: job.patent_id,
-                        publicationNumber,
-                        status: 'failed',
-                        code: `${reasonCode}_GOOGLE_PATENTS_FAILED`,
-                        detail: serializeUnknownError(error)
-                    });
-                    return false;
+                            code: `${reasonCode}_GOOGLE_PATENTS`,
+                            storageKey: fullKey,
+                            candidate
+                        });
+                        return true;
+                    } catch (error) {
+                        documentJobLog({
+                            jobId: job.id,
+                            patentId: job.patent_id,
+                            publicationNumber,
+                            status: 'failed',
+                            code: `${reasonCode}_GOOGLE_PATENTS_FAILED`,
+                            detail: serializeUnknownError(error),
+                            candidate
+                        });
+                    }
                 }
+                return false;
             };
 
             const googlePrimaryRecovered = await tryGooglePatentsFallback('DOC_PRIMARY');
@@ -2548,8 +2658,13 @@ async function processNextDocumentJob() {
             });
             let fallbackBiblio: BigQueryBibliographicData | null = null;
             if (!hasStoredBiblio && !hasDetailedAbstract) {
-                const googleBiblio = await fetchGooglePatentsBibliographicData(publicationNumber);
-                fallbackBiblio = googleBiblio ? mapGoogleBiblioToSearchData(googleBiblio) : null;
+                for (const candidate of googleSearchCandidates) {
+                    const googleBiblio = await fetchGooglePatentsBibliographicData(candidate);
+                    if (googleBiblio) {
+                        fallbackBiblio = mapGoogleBiblioToSearchData(googleBiblio);
+                        break;
+                    }
+                }
             }
             if (fallbackBiblio) {
                 await prisma.inpiPatent.update({
@@ -2577,7 +2692,7 @@ async function processNextDocumentJob() {
                     }
                 }).catch(() => undefined);
             }
-            const errorText = `DOC_GOOGLE_PATENTS_NOT_FOUND publication=${publicationNumber} source=google_patents`;
+            const errorText = `DOC_GOOGLE_PATENTS_NOT_FOUND publication=${publicationNumber} source=google_patents candidates=${googleSearchCandidates.join('|')}`;
             await prisma.documentDownloadJob.update({
                 where: { id: job.id },
                 data: { status: 'not_found', error: truncateError(errorText), finished_at: new Date() }

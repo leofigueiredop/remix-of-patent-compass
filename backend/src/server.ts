@@ -1972,7 +1972,8 @@ async function resolveGooglePdfCandidatesViaBrowser(seedUrl: string, publication
     });
     const page = await browser.newPage();
     try {
-        const targetNumber = String(publicationNumber || '').trim();
+        const targetRaw = String(publicationNumber || '').trim().toUpperCase();
+        const targetNumber = (targetRaw.split('-')[0] || targetRaw).replace(/[^A-Z0-9]/g, '');
         await page.goto('https://patents.google.com/', { waitUntil: 'domcontentloaded', timeout: 45000 });
         if (targetNumber) {
             await page.evaluate((value) => {
