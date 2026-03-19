@@ -35,15 +35,15 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex">
+    <div className="min-h-screen flex bg-gradient-to-br from-cyan-50 via-sky-50 to-emerald-100/50">
       {/* Left panel */}
       <div className="hidden lg:flex lg:w-1/2 items-center justify-center p-12" style={{ background: "var(--gradient-hero)" }}>
         <div className="max-w-md text-center">
-          <div className="w-16 h-16 rounded-2xl bg-accent flex items-center justify-center mx-auto mb-8">
+          <div className="w-16 h-16 rounded-2xl bg-white/20 border border-white/20 backdrop-blur-sm flex items-center justify-center mx-auto mb-8">
             <ShieldCheck className="w-8 h-8 text-accent-foreground" />
           </div>
           <h1 className="text-3xl font-bold text-primary-foreground mb-4">
-            PatentScope
+            AURA
           </h1>
           <p className="text-primary-foreground/70 text-lg leading-relaxed">
             Sistema de apoio à pesquisa e análise prévia de patentes.
@@ -61,29 +61,29 @@ export default function Login() {
       </div>
 
       {/* Right panel - Auth form */}
-      <div className="flex-1 flex items-center justify-center p-8 bg-background">
+      <div className="flex-1 flex items-center justify-center p-8">
         <div className="w-full max-w-sm">
           <div className="lg:hidden flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-600 to-emerald-500 flex items-center justify-center">
               <ShieldCheck className="w-5 h-5 text-primary-foreground" />
             </div>
-            <h1 className="text-xl font-bold">PatentScope</h1>
+            <h1 className="text-xl font-bold">AURA</h1>
           </div>
+          <div className="rounded-2xl border border-cyan-100 bg-white/85 p-7 shadow-lg backdrop-blur-sm">
+            <h2 className="text-2xl font-bold mb-1">
+              {isRegister ? "Criar Conta" : "Bem-vindo de volta"}
+            </h2>
+            <p className="text-muted-foreground mb-8">
+              {isRegister ? "Preencha seus dados para começar" : "Acesse sua conta para continuar"}
+            </p>
 
-          <h2 className="text-2xl font-bold mb-1">
-            {isRegister ? "Criar Conta" : "Bem-vindo de volta"}
-          </h2>
-          <p className="text-muted-foreground mb-8">
-            {isRegister ? "Preencha seus dados para começar" : "Acesse sua conta para continuar"}
-          </p>
+            {error && (
+              <div className="mb-4 p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">
+                {error}
+              </div>
+            )}
 
-          {error && (
-            <div className="mb-4 p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">
-              {error}
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-4">
             {isRegister && (
               <div>
                 <label className="text-sm font-medium mb-1.5 block">Nome</label>
@@ -131,24 +131,25 @@ export default function Login() {
               </div>
             </div>
 
-            <Button type="submit" className="w-full mt-2" disabled={loading}>
-              {loading ? (
-                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Aguarde...</>
-              ) : (
-                isRegister ? "Criar Conta" : "Entrar"
-              )}
-            </Button>
-          </form>
+              <Button type="submit" className="w-full mt-2 bg-gradient-to-r from-cyan-600 to-emerald-500 hover:from-cyan-700 hover:to-emerald-600" disabled={loading}>
+                {loading ? (
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Aguarde...</>
+                ) : (
+                  isRegister ? "Criar Conta" : "Entrar"
+                )}
+              </Button>
+            </form>
 
-          <p className="text-sm text-center text-muted-foreground mt-8">
-            {isRegister ? "Já tem uma conta?" : "Não tem uma conta?"}{" "}
-            <button
-              onClick={() => { setIsRegister(!isRegister); setError(""); }}
-              className="text-primary font-medium hover:underline"
-            >
-              {isRegister ? "Fazer login" : "Criar conta"}
-            </button>
-          </p>
+            <p className="text-sm text-center text-muted-foreground mt-8">
+              {isRegister ? "Já tem uma conta?" : "Não tem uma conta?"}{" "}
+              <button
+                onClick={() => { setIsRegister(!isRegister); setError(""); }}
+                className="text-primary font-medium hover:underline"
+              >
+                {isRegister ? "Fazer login" : "Criar conta"}
+              </button>
+            </p>
+          </div>
         </div>
       </div>
     </div>
