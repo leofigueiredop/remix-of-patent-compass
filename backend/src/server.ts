@@ -37,7 +37,7 @@ import {
 } from './services/backgroundWorkers';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import pdfParse from 'pdf-parse';
 
 const execAsync = promisify(exec);
@@ -258,7 +258,60 @@ async function ensureMonitoringTables() {
             updated_at timestamptz not null default now()
         )`,
         `create index if not exists idx_monitoring_alerts_unread on monitoring_alerts(is_read)`,
-        `create index if not exists idx_monitoring_alerts_monitored_patent on monitoring_alerts(monitored_patent_id)`
+        `create index if not exists idx_monitoring_alerts_monitored_patent on monitoring_alerts(monitored_patent_id)`,
+        `create table if not exists monitoring_collision_ai_briefs (
+            id text primary key,
+            patent_number text not null,
+            context_hash text not null,
+            risk_level text not null,
+            summary text not null,
+            key_points jsonb not null default '[]'::jsonb,
+            collision_focus text null,
+            recommendation text null,
+            raw_payload jsonb null,
+            created_at timestamptz not null default now(),
+            updated_at timestamptz not null default now(),
+            unique(patent_number, context_hash)
+        )`,
+        `create index if not exists idx_monitoring_collision_ai_briefs_patent on monitoring_collision_ai_briefs(patent_number)`
+    ];
+    for (const sql of statements) {
+        await prisma.$executeRawUnsafe(sql);
+    }
+}
+
+async function ensureBusinessTables() {
+    const statements = [
+        `create table if not exists crm_demands (
+            id text primary key,
+            client_id text null references "Client"(id) on delete set null,
+            title text not null,
+            description text null,
+            status text not null default 'nova',
+            priority text not null default 'media',
+            due_date timestamptz null,
+            owner_name text null,
+            patent_number text null,
+            created_at timestamptz not null default now(),
+            updated_at timestamptz not null default now()
+        )`,
+        `create index if not exists idx_crm_demands_status on crm_demands(status)`,
+        `create index if not exists idx_crm_demands_client on crm_demands(client_id)`,
+        `create table if not exists monitoring_market_watchlists (
+            id text primary key,
+            name text not null unique,
+            query text not null,
+            scope text not null default 'all',
+            active boolean not null default true,
+            created_at timestamptz not null default now(),
+            updated_at timestamptz not null default now()
+        )`,
+        `create index if not exists idx_monitoring_market_watchlists_active on monitoring_market_watchlists(active)`,
+        `create table if not exists system_settings (
+            key text primary key,
+            value jsonb not null,
+            updated_at timestamptz not null default now()
+        )`
     ];
     for (const sql of statements) {
         await prisma.$executeRawUnsafe(sql);
@@ -775,6 +828,18 @@ async function generateWithGemini(prompt: string, expectJson = true, customSyste
     return await generateWithGroq(prompt, expectJson, customSystemMessage);
 }
 
+function parseModelJsonResponse(raw: string): any {
+    try {
+        return JSON.parse(raw);
+    } catch {
+        const codeBlock = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+        if (codeBlock?.[1]) return JSON.parse(codeBlock[1]);
+        const objectMatch = raw.match(/\{[\s\S]*\}/);
+        if (objectMatch?.[0]) return JSON.parse(objectMatch[0]);
+        throw new Error('Resposta da IA não está em JSON válido');
+    }
+}
+
 // ─── POST /auth/register ───────────────────────────────────────
 fastify.post('/auth/register', async (request, reply) => {
     const { email, password, name } = request.body as { email: string; password: string; name?: string };
@@ -825,8 +890,137 @@ fastify.get('/auth/me', async (request, reply) => {
         const user = await prisma.user.findUnique({ where: { id } });
         if (!user) return reply.code(401).send({ error: 'Usuário não encontrado' });
         return { id: user.id, email: user.email, name: user.name, role: user.role };
-    } catch {
+    } catch (err) {
         return reply.code(401).send({ error: 'Token inválido' });
+    }
+});
+
+// ==========================================
+// CLIENTS API (CRM)
+// ==========================================
+
+fastify.get('/clients', async (request, reply) => {
+    try {
+        const clients = await prisma.client.findMany({
+            include: {
+                _count: {
+                    select: { patents: true }
+                }
+            },
+            orderBy: { name: 'asc' }
+        });
+        return clients;
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({ error: 'Erro ao buscar clientes' });
+    }
+});
+
+fastify.post('/clients', async (request: any, reply) => {
+    try {
+        const { name, email, document } = request.body;
+        if (!name) {
+            return reply.status(400).send({ error: 'Nome é obrigatório' });
+        }
+        const client = await prisma.client.create({
+            data: { name, email, document }
+        });
+        return reply.status(201).send(client);
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({ error: 'Erro ao criar cliente' });
+    }
+});
+
+fastify.get('/demands', async (request: any, reply) => {
+    try {
+        await ensureBusinessTables();
+        const q = String(request.query?.q || '').trim();
+        const status = String(request.query?.status || '').trim();
+        const values: any[] = [];
+        const conditions: string[] = [];
+        const push = (value: any) => {
+            values.push(value);
+            return `$${values.length}`;
+        };
+        if (q) {
+            const token = `%${q}%`;
+            conditions.push(`(d.title ilike ${push(token)} or coalesce(d.description,'') ilike ${push(token)} or coalesce(c.name,'') ilike ${push(token)} or coalesce(d.patent_number,'') ilike ${push(token)})`);
+        }
+        if (status && status !== 'all') {
+            conditions.push(`d.status = ${push(status)}`);
+        }
+        const whereClause = conditions.length ? `where ${conditions.join(' and ')}` : '';
+        const rows = await prisma.$queryRawUnsafe<any[]>(
+            `select d.id, d.client_id, c.name as client_name, d.title, d.description, d.status, d.priority, d.due_date, d.owner_name, d.patent_number, d.created_at, d.updated_at
+             from crm_demands d
+             left join "Client" c on c.id = d.client_id
+             ${whereClause}
+             order by d.updated_at desc`,
+            ...values
+        );
+        return { rows };
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({ error: 'Erro ao buscar demandas' });
+    }
+});
+
+fastify.post('/demands', async (request: any, reply) => {
+    try {
+        await ensureBusinessTables();
+        const title = String(request.body?.title || '').trim();
+        const description = String(request.body?.description || '').trim();
+        const clientId = String(request.body?.clientId || '').trim();
+        const priority = String(request.body?.priority || 'media').trim().toLowerCase();
+        const dueDate = request.body?.dueDate ? new Date(request.body?.dueDate) : null;
+        const ownerName = String(request.body?.ownerName || '').trim();
+        const patentNumber = String(request.body?.patentNumber || '').trim();
+        if (!title) return reply.status(400).send({ error: 'Título é obrigatório' });
+        const id = randomUUID();
+        await prisma.$executeRawUnsafe(
+            `insert into crm_demands (id, client_id, title, description, status, priority, due_date, owner_name, patent_number, created_at, updated_at)
+             values ($1, $2, $3, nullif($4,''), 'nova', $5, $6, nullif($7,''), nullif($8,''), now(), now())`,
+            id,
+            clientId || null,
+            title,
+            description,
+            ['baixa', 'media', 'alta', 'critica'].includes(priority) ? priority : 'media',
+            dueDate && !Number.isNaN(dueDate.getTime()) ? dueDate.toISOString() : null,
+            ownerName,
+            patentNumber
+        );
+        return reply.status(201).send({ id });
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({ error: 'Erro ao criar demanda' });
+    }
+});
+
+fastify.patch('/demands/:id', async (request: any, reply) => {
+    try {
+        await ensureBusinessTables();
+        const { id } = request.params as { id: string };
+        const updates: string[] = [];
+        const values: any[] = [];
+        const push = (value: any) => {
+            values.push(value);
+            return `$${values.length}`;
+        };
+        if (request.body?.status) updates.push(`status = ${push(String(request.body.status))}`);
+        if (request.body?.priority) updates.push(`priority = ${push(String(request.body.priority))}`);
+        if (typeof request.body?.ownerName === 'string') updates.push(`owner_name = nullif(${push(request.body.ownerName)}, '')`);
+        if (typeof request.body?.description === 'string') updates.push(`description = nullif(${push(request.body.description)}, '')`);
+        if (!updates.length) return reply.status(400).send({ error: 'Nenhum campo para atualizar' });
+        updates.push(`updated_at = now()`);
+        const updated = await prisma.$queryRawUnsafe<any[]>(
+            `update crm_demands set ${updates.join(', ')} where id = ${push(id)} returning id, status, priority, owner_name, updated_at`
+        );
+        if (!updated?.[0]) return reply.status(404).send({ error: 'Demanda não encontrada' });
+        return updated[0];
+    } catch (error) {
+        fastify.log.error(error);
+        return reply.status(500).send({ error: 'Erro ao atualizar demanda' });
     }
 });
 
@@ -837,6 +1031,46 @@ fastify.get('/health', async () => {
         services: { groq: GROQ_API_KEY ? 'configured' : 'missing', whisper: WHISPER_BASE_URL },
         ops: OPS_CONSUMER_KEY ? 'configured' : 'missing',
         inpi_mode: INPI_MODE
+    };
+});
+
+fastify.get('/system-health', async () => {
+    await ensureMonitoringTables();
+    await ensureBusinessTables();
+    const dbOk = await prisma.$queryRawUnsafe<any[]>(`select 1 as ok`).then(() => true).catch(() => false);
+    const monitored = await prisma.$queryRawUnsafe<any[]>(`select count(*)::int as total from monitored_inpi_patents`).catch(() => [{ total: 0 }]);
+    const unread = await prisma.$queryRawUnsafe<any[]>(`select count(*)::int as total from monitoring_alerts where is_read=false`).catch(() => [{ total: 0 }]);
+    const lastRpi = await prisma.$queryRawUnsafe<any[]>(
+        `select rpi_number, status, finished_at, updated_at from rpiimportjob order by coalesce(finished_at, updated_at) desc limit 1`
+    ).catch(() => []);
+    const lastDoc = await prisma.$queryRawUnsafe<any[]>(
+        `select status, finished_at, updated_at from documentdownloadjob order by coalesce(finished_at, updated_at) desc limit 1`
+    ).catch(() => []);
+    return {
+        services: {
+            inpiWeb: { status: 'online' as const },
+            epoOps: { status: OPS_CONSUMER_KEY ? 'online' as const : 'degraded' as const },
+            database: { status: dbOk ? 'online' as const : 'offline' as const },
+            groq: { status: GROQ_API_KEY ? 'online' as const : 'degraded' as const }
+        },
+        metrics: {
+            monitoredPatents: Number(monitored?.[0]?.total || 0),
+            unreadAlerts: Number(unread?.[0]?.total || 0)
+        },
+        syncs: [
+            {
+                name: 'Importação RPI',
+                status: lastRpi?.[0]?.status || 'unknown',
+                reference: lastRpi?.[0]?.rpi_number ? `RPI ${lastRpi[0].rpi_number}` : null,
+                at: lastRpi?.[0]?.finished_at || lastRpi?.[0]?.updated_at || null
+            },
+            {
+                name: 'Downloads de Documentos',
+                status: lastDoc?.[0]?.status || 'unknown',
+                reference: null,
+                at: lastDoc?.[0]?.finished_at || lastDoc?.[0]?.updated_at || null
+            }
+        ]
     };
 });
 
@@ -3774,6 +4008,256 @@ fastify.get('/monitoring/patents', async (request: any) => {
     };
 });
 
+fastify.get('/monitoring/collision/overview', async () => {
+    await ensureMonitoringTables();
+    const [totalsRows, riskRows, unreadRows, dueRows, aiCoverageRows] = await Promise.all([
+        prisma.$queryRawUnsafe<any[]>(
+            `select
+                count(*)::int as total,
+                sum(case when active then 1 else 0 end)::int as active,
+                sum(case when blocked_by_user then 1 else 0 end)::int as blocked
+             from monitored_inpi_patents`
+        ).catch(() => [{ total: 0, active: 0, blocked: 0 }]),
+        prisma.$queryRawUnsafe<any[]>(
+            `with latest as (
+                select distinct on (patent_number) patent_number, risk_level, updated_at
+                from monitoring_collision_ai_briefs
+                order by patent_number, updated_at desc
+             )
+             select
+                sum(case when risk_level='critico' then 1 else 0 end)::int as critico,
+                sum(case when risk_level='alto' then 1 else 0 end)::int as alto,
+                sum(case when risk_level='medio' then 1 else 0 end)::int as medio,
+                sum(case when risk_level='baixo' then 1 else 0 end)::int as baixo
+             from latest`
+        ).catch(() => [{ critico: 0, alto: 0, medio: 0, baixo: 0 }]),
+        prisma.$queryRawUnsafe<any[]>(
+            `select count(*)::int as total from monitoring_alerts where is_read=false`
+        ).catch(() => [{ total: 0 }]),
+        prisma.$queryRawUnsafe<any[]>(
+            `select count(*)::int as total from monitoring_alerts where is_read=false and deadline is not null and deadline <= (now() + interval '7 days')`
+        ).catch(() => [{ total: 0 }]),
+        prisma.$queryRawUnsafe<any[]>(
+            `with latest as (
+                select distinct on (patent_number) patent_number
+                from monitoring_collision_ai_briefs
+                order by patent_number, updated_at desc
+            )
+            select count(*)::int as total from latest`
+        ).catch(() => [{ total: 0 }])
+    ]);
+
+    const totals = totalsRows?.[0] || {};
+    const risk = riskRows?.[0] || {};
+    const aiCoverage = Number(aiCoverageRows?.[0]?.total || 0);
+    const monitoredTotal = Number(totals?.total || 0);
+    return {
+        monitored: {
+            total: monitoredTotal,
+            active: Number(totals?.active || 0),
+            blocked: Number(totals?.blocked || 0),
+            aiCoverage,
+            aiCoveragePct: monitoredTotal > 0 ? Math.round((aiCoverage / monitoredTotal) * 100) : 0
+        },
+        alerts: {
+            unread: Number(unreadRows?.[0]?.total || 0),
+            due7d: Number(dueRows?.[0]?.total || 0)
+        },
+        risk: {
+            critico: Number(risk?.critico || 0),
+            alto: Number(risk?.alto || 0),
+            medio: Number(risk?.medio || 0),
+            baixo: Number(risk?.baixo || 0)
+        }
+    };
+});
+
+fastify.get('/monitoring/process/overview', async () => {
+    await ensureMonitoringTables();
+    const [criticalOpen, deadlinesSoon, dispatches, activeMonitored] = await Promise.all([
+        prisma.$queryRawUnsafe<any[]>(
+            `select count(*)::int as total from monitoring_alerts where is_read=false and coalesce(despacho_code,'') in ('6.1','7.1')`
+        ).catch(() => [{ total: 0 }]),
+        prisma.$queryRawUnsafe<any[]>(
+            `select count(*)::int as total from monitoring_alerts where is_read=false and deadline is not null and deadline <= (now() + interval '7 days')`
+        ).catch(() => [{ total: 0 }]),
+        prisma.$queryRawUnsafe<any[]>(
+            `select count(*)::int as total from inpi_publication where created_at >= (now() - interval '7 days')`
+        ).catch(() => [{ total: 0 }]),
+        prisma.$queryRawUnsafe<any[]>(
+            `select count(*)::int as total from monitored_inpi_patents where active=true`
+        ).catch(() => [{ total: 0 }])
+    ]);
+    return {
+        kpis: {
+            openExigencies: Number(criticalOpen?.[0]?.total || 0),
+            deadlines7d: Number(deadlinesSoon?.[0]?.total || 0),
+            newDispatches7d: Number(dispatches?.[0]?.total || 0),
+            regularProcesses: Number(activeMonitored?.[0]?.total || 0)
+        }
+    };
+});
+
+fastify.get('/monitoring/process/events', async (request: any) => {
+    await ensureMonitoringTables();
+    const q = String(request.query?.q || '').trim();
+    const values: any[] = [];
+    const filters: string[] = [];
+    const push = (value: any) => {
+        values.push(value);
+        return `$${values.length}`;
+    };
+    if (q) {
+        const token = `%${q}%`;
+        filters.push(`(coalesce(a.patent_number,'') ilike ${push(token)} or coalesce(a.title,'') ilike ${push(token)} or coalesce(a.complement,'') ilike ${push(token)} or coalesce(a.despacho_code,'') ilike ${push(token)})`);
+    }
+    const whereClause = filters.length ? `where ${filters.join(' and ')}` : '';
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+        `select a.id, a.patent_number, a.rpi_number, a.rpi_date, a.despacho_code, a.title, a.complement, a.severity, a.deadline, a.is_read, a.updated_at
+         from monitoring_alerts a
+         ${whereClause}
+         order by coalesce(a.deadline, a.rpi_date) asc, a.created_at desc
+         limit 250`,
+        ...values
+    ).catch(() => []);
+    return { rows };
+});
+
+fastify.get('/monitoring/market/overview', async () => {
+    await ensureBusinessTables();
+    const [topHoldersRows, topClassesRows, filingsRows] = await Promise.all([
+        prisma.$queryRawUnsafe<any[]>(
+            `select applicant as label, count(*)::int as total
+             from inpi_patents
+             where applicant is not null and trim(applicant) <> ''
+             group by applicant
+             order by total desc
+             limit 5`
+        ).catch(() => []),
+        prisma.$queryRawUnsafe<any[]>(
+            `select split_part(ipc_codes, ';', 1) as label, count(*)::int as total
+             from inpi_patents
+             where ipc_codes is not null and trim(ipc_codes) <> ''
+             group by split_part(ipc_codes, ';', 1)
+             order by total desc
+             limit 5`
+        ).catch(() => []),
+        prisma.$queryRawUnsafe<any[]>(
+            `select count(*)::int as total
+             from inpi_patents
+             where created_at >= (now() - interval '30 days')`
+        ).catch(() => [{ total: 0 }])
+    ]);
+    return {
+        topHolders: topHoldersRows,
+        topClasses: topClassesRows,
+        filingsLast30d: Number(filingsRows?.[0]?.total || 0)
+    };
+});
+
+fastify.get('/monitoring/market/watchlists', async () => {
+    await ensureBusinessTables();
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+        `select id, name, query, scope, active, created_at, updated_at
+         from monitoring_market_watchlists
+         order by updated_at desc`
+    ).catch(() => []);
+    return { rows };
+});
+
+fastify.post('/monitoring/market/watchlists', async (request: any, reply) => {
+    await ensureBusinessTables();
+    const name = String(request.body?.name || '').trim();
+    const query = String(request.body?.query || '').trim();
+    const scope = String(request.body?.scope || 'all').trim();
+    if (!name || !query) return reply.code(400).send({ error: 'name e query são obrigatórios' });
+    const id = randomUUID();
+    await prisma.$executeRawUnsafe(
+        `insert into monitoring_market_watchlists (id, name, query, scope, active, created_at, updated_at)
+         values ($1,$2,$3,$4,true,now(),now())
+         on conflict (name) do update set query=excluded.query, scope=excluded.scope, active=true, updated_at=now()`,
+        id,
+        name,
+        query,
+        scope
+    );
+    return { id, name, query, scope, active: true };
+});
+
+fastify.patch('/monitoring/market/watchlists/:id', async (request: any, reply) => {
+    await ensureBusinessTables();
+    const { id } = request.params as { id: string };
+    const active = request.body?.active === undefined ? true : Boolean(request.body?.active);
+    const updated = await prisma.$queryRawUnsafe<any[]>(
+        `update monitoring_market_watchlists
+         set active=$2, updated_at=now()
+         where id=$1
+         returning id, name, query, scope, active, updated_at`,
+        id,
+        active
+    ).catch(() => []);
+    if (!updated?.[0]) return reply.code(404).send({ error: 'Vigília não encontrada' });
+    return updated[0];
+});
+
+fastify.get('/settings/system', async () => {
+    await ensureBusinessTables();
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+        `select key, value, updated_at from system_settings where key in ('smtp','templates','workflows','integrations')`
+    ).catch(() => []);
+    const byKey = new Map(rows.map((row) => [row.key, row.value]));
+    return {
+        smtp: byKey.get('smtp') || {
+            host: '',
+            port: '587',
+            username: '',
+            password: '',
+            senderName: ''
+        },
+        templates: byKey.get('templates') || {
+            collision: '',
+            process: ''
+        },
+        workflows: byKey.get('workflows') || {
+            statuses: ['nova', 'triagem', 'andamento', 'cliente', 'concluida'],
+            collisionSlaDays: 7,
+            processSlaDays: 5,
+            autoCreateDemandsFromCriticalAlerts: true
+        },
+        integrations: byKey.get('integrations') || {
+            inpiMode: INPI_MODE,
+            epoOpsEnabled: Boolean(OPS_CONSUMER_KEY),
+            groqEnabled: Boolean(GROQ_API_KEY),
+            groqModel: 'llama-3.1-70b-versatile',
+            webhookUrl: ''
+        }
+    };
+});
+
+fastify.put('/settings/system', async (request: any, reply) => {
+    await ensureBusinessTables();
+    const smtp = request.body?.smtp || {};
+    const templates = request.body?.templates || {};
+    const workflows = request.body?.workflows || {};
+    const integrations = request.body?.integrations || {};
+    const entries: Array<{ key: string; value: any }> = [
+        { key: 'smtp', value: smtp },
+        { key: 'templates', value: templates },
+        { key: 'workflows', value: workflows },
+        { key: 'integrations', value: integrations }
+    ];
+    for (const entry of entries) {
+        await prisma.$executeRawUnsafe(
+            `insert into system_settings (key, value, updated_at)
+             values ($1, $2::jsonb, now())
+             on conflict (key) do update set value=excluded.value, updated_at=now()`,
+            entry.key,
+            JSON.stringify(entry.value || {})
+        );
+    }
+    return reply.code(204).send();
+});
+
 fastify.get('/monitoring/alerts', async (request: any) => {
     await ensureMonitoringTables();
     const { page = 1, pageSize = 30, unreadOnly } = request.query as any;
@@ -3810,6 +4294,162 @@ fastify.post('/monitoring/alerts/:id/read', async (request: any, reply) => {
     ).catch(() => []);
     if (!updated?.[0]) return reply.code(404).send({ error: 'Alerta não encontrado' });
     return updated[0];
+});
+
+fastify.post('/monitoring/collision/explain', async (request: any, reply) => {
+    await ensureMonitoringTables();
+    const patentNumber = String(request.body?.patentNumber || '').trim();
+    const title = String(request.body?.title || '').trim();
+    const applicant = String(request.body?.applicant || '').trim();
+    const inventors = String(request.body?.inventors || '').trim();
+    const ipcCodes = String(request.body?.ipcCodes || '').trim();
+    const lastEvent = String(request.body?.lastEvent || '').trim();
+
+    if (!patentNumber) {
+        return reply.code(400).send({ error: 'patentNumber é obrigatório' });
+    }
+    if (!GROQ_API_KEY) {
+        return reply.code(503).send({ error: 'Groq Cloud não está configurado no backend.' });
+    }
+
+    const relatedAlerts = await prisma.$queryRawUnsafe<any[]>(
+        `select rpi_number, rpi_date, despacho_code, title, complement, severity, deadline
+         from monitoring_alerts
+         where patent_number = $1
+         order by rpi_date desc, created_at desc
+         limit 6`,
+        patentNumber
+    ).catch(() => []);
+
+    const alertsText = relatedAlerts.length
+        ? relatedAlerts.map((alert, index) =>
+            `${index + 1}) RPI ${alert.rpi_number || '-'} | despacho ${alert.despacho_code || '-'} | severidade ${alert.severity || '-'} | título ${(alert.title || '').substring(0, 180)} | complemento ${(alert.complement || '').substring(0, 220)}`
+        ).join('\n')
+        : 'Sem alertas históricos registrados para esta patente monitorada.';
+
+    const contextText = [
+        `PATENTE_MONITORADA: ${patentNumber}`,
+        `TITULO: ${title || '-'}`,
+        `TITULAR: ${applicant || '-'}`,
+        `INVENTORES: ${inventors || '-'}`,
+        `IPC: ${ipcCodes || '-'}`,
+        `ULTIMO_EVENTO: ${lastEvent || '-'}`,
+        `ALERTAS_RECENTES:\n${alertsText}`
+    ].join('\n');
+    const contextHash = createHash('sha256').update(contextText).digest('hex');
+
+    const cached = await prisma.$queryRawUnsafe<any[]>(
+        `select risk_level, summary, key_points, collision_focus, recommendation, raw_payload, updated_at
+         from monitoring_collision_ai_briefs
+         where patent_number=$1 and context_hash=$2
+         limit 1`,
+        patentNumber,
+        contextHash
+    ).catch(() => []);
+    if (cached?.[0]) {
+        const payload = cached[0].raw_payload || {};
+        return {
+            patentNumber,
+            resumoExecutivo: cached[0].summary,
+            nivelRisco: cached[0].risk_level,
+            pontosChave: Array.isArray(cached[0].key_points) ? cached[0].key_points : [],
+            oQueEstaColidindo: cached[0].collision_focus || '',
+            acaoRecomendada: cached[0].recommendation || '',
+            camadaA: Number(payload?.camadaA || 0),
+            camadaB: Number(payload?.camadaB || 0),
+            scoreFinal: Number(payload?.scoreFinal || 0),
+            confianca: Number(payload?.confianca || 0),
+            analyzedAt: cached[0].updated_at,
+            cached: true
+        };
+    }
+
+    const prompt = `Você é um analista sênior de PI no Brasil. Gere uma explicação curta, clara e acionável para evitar leitura manual de todos os eventos.
+
+CONTEXTO:
+${contextText}
+
+REGRAS:
+- Responda em português do Brasil.
+- Seja objetivo e sem juridiquês desnecessário.
+- Foque em onde pode haver choque com terceiros e por quê.
+- Se dados forem insuficientes, diga explicitamente.
+- Não invente fatos não presentes no contexto.
+
+Retorne APENAS JSON válido no formato:
+{
+  "resumoExecutivo": "texto curto em 2-4 frases",
+  "nivelRisco": "baixo|medio|alto|critico",
+  "camadaA": 0-100,
+  "camadaB": 0-100,
+  "scoreFinal": 0-100,
+  "confianca": 0-100,
+  "pontosChave": ["ponto 1","ponto 2","ponto 3"],
+  "oQueEstaColidindo": "quais elementos parecem colidir",
+  "acaoRecomendada": "ação prática imediata para o analista"
+}`;
+
+    let parsed: any;
+    try {
+        const raw = await generateWithGemini(prompt, true, 'Você é especialista em análise de colidência de patentes para tomada de decisão operacional. Sempre responda JSON válido e conciso.');
+        parsed = parseModelJsonResponse(raw);
+    } catch (error: any) {
+        request.log.error({ error }, 'Falha ao gerar explicação de colidência com Groq');
+        return reply.code(502).send({ error: 'Falha ao gerar explicação com IA no momento.' });
+    }
+
+    const normalizedRisk = ['baixo', 'medio', 'alto', 'critico'].includes(String(parsed?.nivelRisco || '').toLowerCase())
+        ? String(parsed.nivelRisco).toLowerCase()
+        : 'medio';
+    const summary = String(parsed?.resumoExecutivo || '').trim() || 'Sem resumo disponível.';
+    const points = Array.isArray(parsed?.pontosChave) ? parsed.pontosChave.map((item: any) => String(item)).filter(Boolean).slice(0, 6) : [];
+    const collisionFocus = String(parsed?.oQueEstaColidindo || '').trim();
+    const recommendation = String(parsed?.acaoRecomendada || '').trim();
+    const camadaA = Math.max(0, Math.min(100, Number(parsed?.camadaA || 0) || 0));
+    const camadaB = Math.max(0, Math.min(100, Number(parsed?.camadaB || 0) || 0));
+    const scoreFinal = Math.max(0, Math.min(100, Number(parsed?.scoreFinal || Math.round((camadaA * 0.45) + (camadaB * 0.55))) || 0));
+    const confianca = Math.max(0, Math.min(100, Number(parsed?.confianca || 0) || 0));
+    const rawPayload = {
+        ...parsed,
+        camadaA,
+        camadaB,
+        scoreFinal,
+        confianca
+    };
+
+    await prisma.$executeRawUnsafe(
+        `insert into monitoring_collision_ai_briefs
+         (id, patent_number, context_hash, risk_level, summary, key_points, collision_focus, recommendation, raw_payload, created_at, updated_at)
+         values ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9::jsonb,now(),now())
+         on conflict (patent_number, context_hash)
+         do update set risk_level=excluded.risk_level, summary=excluded.summary, key_points=excluded.key_points, collision_focus=excluded.collision_focus, recommendation=excluded.recommendation, raw_payload=excluded.raw_payload, updated_at=now()`,
+        randomUUID(),
+        patentNumber,
+        contextHash,
+        normalizedRisk,
+        summary,
+        JSON.stringify(points),
+        collisionFocus || null,
+        recommendation || null,
+        JSON.stringify(rawPayload)
+    ).catch((error) => {
+        request.log.warn({ error }, 'Falha ao persistir brief de colidência IA');
+    });
+
+    return {
+        patentNumber,
+        resumoExecutivo: summary,
+        nivelRisco: normalizedRisk,
+        pontosChave: points,
+        oQueEstaColidindo: collisionFocus,
+        acaoRecomendada: recommendation,
+        camadaA,
+        camadaB,
+        scoreFinal,
+        confianca,
+        analyzedAt: new Date().toISOString(),
+        cached: false
+    };
 });
 
 fastify.get('/monitoring/config', async () => {

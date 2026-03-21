@@ -499,22 +499,24 @@ export default function QuickSearch() {
 
     return (
         <AppLayout>
-            <div className="space-y-6">
+            <div className="flex flex-col gap-6 w-full mx-auto">
                 {/* Header */}
-                <div>
-                    <h1 className="text-2xl font-bold flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center">
-                            <Search className="w-5 h-5 text-accent" />
-                        </div>
-                        Busca Rápida de Patentes
-                    </h1>
-                    <p className="text-muted-foreground mt-1">
-                        Pesquise na base local de patentes importadas por RPI e complemente com Espacenet
-                    </p>
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h1 className="text-2xl font-bold flex items-center gap-3 text-slate-900">
+                            <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center">
+                                <Search className="w-5 h-5 text-emerald-600" />
+                            </div>
+                            Busca Rápida
+                        </h1>
+                        <p className="text-muted-foreground text-sm mt-1">
+                            Pesquise na base local de patentes importadas por RPI e complemente com Espacenet
+                        </p>
+                    </div>
                 </div>
 
                 {/* Search Form */}
-                <form onSubmit={handleSearch} className="bg-card rounded-xl border p-6 space-y-4">
+                <form onSubmit={handleSearch} className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="text-sm font-medium mb-1.5 flex items-center gap-2">

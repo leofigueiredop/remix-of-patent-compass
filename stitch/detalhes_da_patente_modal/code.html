@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+
+<html lang="pt-BR"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Aura Intelligence - Detalhes da Patente</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "on-tertiary-fixed": "#002113",
+                        "surface-container": "#eceef0",
+                        "on-secondary": "#ffffff",
+                        "on-error": "#ffffff",
+                        "inverse-primary": "#adc6ff",
+                        "surface-container-low": "#f2f4f6",
+                        "on-background": "#191c1e",
+                        "background": "#f7f9fb",
+                        "surface-container-lowest": "#ffffff",
+                        "on-tertiary": "#ffffff",
+                        "on-surface": "#191c1e",
+                        "surface-dim": "#d8dadc",
+                        "on-secondary-fixed": "#131b2e",
+                        "surface": "#f7f9fb",
+                        "surface-variant": "#e0e3e5",
+                        "surface-bright": "#f7f9fb",
+                        "secondary-fixed": "#dae2fd",
+                        "inverse-on-surface": "#eff1f3",
+                        "on-tertiary-container": "#f5fff6",
+                        "surface-container-highest": "#e0e3e5",
+                        "outline-variant": "#c2c6d6",
+                        "primary-container": "#2170e4",
+                        "on-surface-variant": "#424754",
+                        "on-primary-fixed": "#001a42",
+                        "tertiary": "#006947",
+                        "on-primary-container": "#fefcff",
+                        "primary": "#0058be",
+                        "error": "#ba1a1a",
+                        "secondary-container": "#dae2fd",
+                        "on-primary": "#ffffff",
+                        "inverse-surface": "#2d3133",
+                        "primary-fixed": "#d8e2ff",
+                        "tertiary-container": "#00855b",
+                        "on-tertiary-fixed-variant": "#005236",
+                        "outline": "#727785",
+                        "tertiary-fixed-dim": "#4edea3",
+                        "secondary": "#565e74",
+                        "on-secondary-fixed-variant": "#3f465c",
+                        "error-container": "#ffdad6",
+                        "surface-container-high": "#e6e8ea",
+                        "secondary-fixed-dim": "#bec6e0",
+                        "on-primary-fixed-variant": "#004395",
+                        "on-error-container": "#93000a",
+                        "tertiary-fixed": "#6ffbbe",
+                        "primary-fixed-dim": "#adc6ff",
+                        "surface-tint": "#005ac2",
+                        "on-secondary-container": "#5c647a"
+                    },
+                    fontFamily: {
+                        "headline": ["Manrope"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    },
+                    borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        .glass-effect { background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(12px); }
+        .aura-shadow { box-shadow: 0px 20px 40px rgba(15, 23, 42, 0.06); }
+        body { scrollbar-gutter: stable; }
+    </style>
+</head>
+<body class="bg-surface font-body text-on-surface antialiased">
+<!-- Background Content (Simulating the App State underneath) -->
+<div class="fixed inset-0 z-0 overflow-hidden opacity-40 grayscale pointer-events-none">
+<header class="bg-[#f7f9fb] dark:bg-slate-900 w-full sticky top-0 z-50 flex items-center justify-between px-8 py-4 max-w-[1440px] mx-auto w-full">
+<div class="text-2xl font-black tracking-tighter text-[#0058be] dark:text-blue-400 font-headline">Aura</div>
+<nav class="hidden md:flex gap-8 font-['Manrope'] antialiased text-sm font-medium tracking-tight">
+<span class="text-[#565e74]">Dashboard</span>
+<span class="text-[#0058be] font-bold border-b-2 border-[#0058be] pb-1">Monitoramento</span>
+<span class="text-[#565e74]">Meus Ativos</span>
+<span class="text-[#565e74]">Nova Pesquisa</span>
+</nav>
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-secondary">notifications</span>
+<div class="w-8 h-8 rounded-full bg-surface-container-high"></div>
+</div>
+</header>
+<main class="p-8 max-w-[1440px] mx-auto grid grid-cols-12 gap-6">
+<div class="col-span-12 h-32 bg-surface-container-lowest rounded-xl"></div>
+<div class="col-span-4 h-96 bg-surface-container-lowest rounded-xl"></div>
+<div class="col-span-8 h-96 bg-surface-container-lowest rounded-xl"></div>
+</main>
+</div>
+<!-- Modal Backdrop -->
+<div class="fixed inset-0 z-[60] bg-on-secondary-fixed/40 backdrop-blur-sm flex items-center justify-center p-4 md:p-8">
+<!-- Modal Container -->
+<div class="w-full max-w-6xl max-h-[921px] bg-surface-container-lowest rounded-xl flex flex-col aura-shadow overflow-hidden">
+<!-- Modal Header -->
+<div class="px-8 py-6 flex items-center justify-between border-b border-outline-variant/20">
+<div class="flex items-center gap-4">
+<div class="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+<span class="material-symbols-outlined text-primary" data-icon="description">description</span>
+</div>
+<div>
+<h1 class="text-xl md:text-2xl font-black font-headline tracking-tight text-on-surface">DETALHES DA PATENTE: BR 10 2021 004562-3</h1>
+<p class="text-xs font-label uppercase tracking-widest text-secondary font-semibold">Base de Dados INPI • Prioridade Unionista</p>
+</div>
+</div>
+<button class="w-10 h-10 rounded-full hover:bg-surface-container-high flex items-center justify-center transition-all">
+<span class="material-symbols-outlined text-outline">close</span>
+</button>
+</div>
+<!-- Modal Body (Scrollable) -->
+<div class="flex-1 overflow-y-auto p-8 space-y-8">
+<!-- Quick Summary Grid (Bento Style) -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+<div class="p-4 bg-surface-container-low rounded-lg">
+<span class="text-[10px] font-label font-bold text-secondary uppercase tracking-wider block mb-1">Número</span>
+<span class="text-sm font-semibold text-on-surface">BR 10 2021 004562-3</span>
+</div>
+<div class="p-4 bg-surface-container-low rounded-lg">
+<span class="text-[10px] font-label font-bold text-secondary uppercase tracking-wider block mb-1">Fonte</span>
+<span class="text-sm font-semibold text-on-surface">INPI (Brasil)</span>
+</div>
+<div class="p-4 bg-surface-container-low rounded-lg">
+<span class="text-[10px] font-label font-bold text-secondary uppercase tracking-wider block mb-1">Situação</span>
+<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-tertiary/10 text-tertiary uppercase">Em Exame</span>
+</div>
+<div class="p-4 bg-surface-container-low rounded-lg">
+<span class="text-[10px] font-label font-bold text-secondary uppercase tracking-wider block mb-1">Documento</span>
+<div class="flex items-center gap-2 text-primary font-bold text-sm cursor-pointer hover:underline">
+<span class="material-symbols-outlined text-sm">picture_as_pdf</span>
+<span>Visualizar</span>
+</div>
+</div>
+<div class="col-span-2 p-4 bg-surface-container-low rounded-lg">
+<span class="text-[10px] font-label font-bold text-secondary uppercase tracking-wider block mb-1">Titular</span>
+<span class="text-sm font-semibold text-on-surface">Petróleo Brasileiro S.A. - PETROBRAS</span>
+</div>
+<div class="p-4 bg-surface-container-low rounded-lg">
+<span class="text-[10px] font-label font-bold text-secondary uppercase tracking-wider block mb-1">Data de Depósito</span>
+<span class="text-sm font-semibold text-on-surface">11/03/2021</span>
+</div>
+<div class="p-4 bg-surface-container-low rounded-lg">
+<span class="text-[10px] font-label font-bold text-secondary uppercase tracking-wider block mb-1">IPC</span>
+<span class="text-sm font-semibold text-on-surface">C10G 1/00; C10G 3/00</span>
+</div>
+<div class="col-span-2 md:col-span-4 p-4 bg-surface-container-low rounded-lg">
+<span class="text-[10px] font-label font-bold text-secondary uppercase tracking-wider block mb-1">Inventor</span>
+<span class="text-sm font-semibold text-on-surface">Ricardo Rodrigues da Silva; Amanda Ferreira Lopes; Carlos Eduardo Santos</span>
+</div>
+</div>
+<!-- Tabs Navigation -->
+<div class="border-b border-outline-variant/20 overflow-x-auto">
+<nav class="flex gap-8 min-w-max">
+<button class="pb-4 text-sm font-bold text-primary border-b-2 border-primary flex items-center gap-2">
+<span class="material-symbols-outlined text-lg" data-icon="history">history</span>
+                            Despachos
+                        </button>
+<button class="pb-4 text-sm font-medium text-secondary hover:text-on-surface transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-lg" data-icon="payments">payments</span>
+                            Anuidades
+                        </button>
+<button class="pb-4 text-sm font-medium text-secondary hover:text-on-surface transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-lg" data-icon="folder_zip">folder_zip</span>
+                            Protocolos
+                        </button>
+<button class="pb-4 text-sm font-medium text-secondary hover:text-on-surface transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-lg" data-icon="contract">contract</span>
+                            Petições
+                        </button>
+</nav>
+</div>
+<!-- Tab Content: Despachos -->
+<div class="space-y-4">
+<div class="overflow-hidden rounded-lg border border-outline-variant/20 bg-surface-container-lowest">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low border-b border-outline-variant/20">
+<th class="px-4 py-3 text-[10px] font-bold text-secondary uppercase tracking-widest">RPI</th>
+<th class="px-4 py-3 text-[10px] font-bold text-secondary uppercase tracking-widest">Data</th>
+<th class="px-4 py-3 text-[10px] font-bold text-secondary uppercase tracking-widest">Código</th>
+<th class="px-4 py-3 text-[10px] font-bold text-secondary uppercase tracking-widest">Descrição</th>
+<th class="px-4 py-3 text-[10px] font-bold text-secondary uppercase tracking-widest">Complemento</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant/10">
+<tr class="hover:bg-surface-container-low/50 transition-colors">
+<td class="px-4 py-4 text-sm font-medium text-on-surface">2734</td>
+<td class="px-4 py-4 text-sm text-on-surface-variant">30/05/2023</td>
+<td class="px-4 py-4 text-sm font-bold text-primary">6.1</td>
+<td class="px-4 py-4 text-sm text-on-surface">Exigência Técnica</td>
+<td class="px-4 py-4 text-xs text-secondary italic">Prazo de 90 dias para resposta...</td>
+</tr>
+<tr class="hover:bg-surface-container-low/50 transition-colors">
+<td class="px-4 py-4 text-sm font-medium text-on-surface">2690</td>
+<td class="px-4 py-4 text-sm text-on-surface-variant">25/01/2023</td>
+<td class="px-4 py-4 text-sm font-bold text-primary">3.1</td>
+<td class="px-4 py-4 text-sm text-on-surface">Publicação do Pedido</td>
+<td class="px-4 py-4 text-xs text-secondary italic">Disponível para consulta pública</td>
+</tr>
+<tr class="hover:bg-surface-container-low/50 transition-colors">
+<td class="px-4 py-4 text-sm font-medium text-on-surface">2625</td>
+<td class="px-4 py-4 text-sm text-on-surface-variant">15/04/2021</td>
+<td class="px-4 py-4 text-sm font-bold text-primary">2.1</td>
+<td class="px-4 py-4 text-sm text-on-surface">Depósito de Pedido de Patente</td>
+<td class="px-4 py-4 text-xs text-secondary italic">Número provisório gerado</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+<!-- Modal Footer (Actions) -->
+<div class="px-8 py-6 bg-surface-container border-t border-outline-variant/20 flex flex-wrap gap-4 items-center justify-between">
+<div class="flex flex-wrap gap-3">
+<button class="bg-gradient-to-r from-primary to-primary-container text-on-primary px-5 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold shadow-md hover:opacity-90 transition-opacity">
+<span class="material-symbols-outlined text-lg" data-icon="picture_as_pdf">picture_as_pdf</span>
+                        Documento PDF
+                    </button>
+<button class="bg-surface-container-high text-primary px-5 py-2.5 rounded-lg flex items-center gap-2 text-sm font-bold hover:bg-surface-variant transition-colors">
+<span class="material-symbols-outlined text-lg" data-icon="image">image</span>
+                        Figuras
+                    </button>
+</div>
+<div class="flex flex-wrap gap-3">
+<button class="border border-outline-variant text-secondary hover:text-primary hover:border-primary px-4 py-2 rounded-lg flex items-center gap-2 text-xs font-bold uppercase tracking-wider transition-all">
+<span class="material-symbols-outlined text-lg" data-icon="search">search</span>
+                        Google Patents
+                    </button>
+<button class="border border-outline-variant text-secondary hover:text-primary hover:border-primary px-4 py-2 rounded-lg flex items-center gap-2 text-xs font-bold uppercase tracking-wider transition-all">
+<span class="material-symbols-outlined text-lg" data-icon="language">language</span>
+                        Espacenet
+                    </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Global Footer -->
+<footer class="fixed bottom-0 left-0 w-full z-10 bg-[#f7f9fb] dark:bg-slate-950 border-t border-slate-200/20 pointer-events-none opacity-40">
+<div class="flex flex-col md:flex-row justify-between items-center px-12 py-8 w-full">
+<div class="font-['Inter'] text-xs uppercase tracking-widest font-semibold text-[#565e74]">© 2024 Aura Patent Intelligence. Todos os direitos reservados.</div>
+<div class="flex gap-6 mt-4 md:mt-0 font-['Inter'] text-xs uppercase tracking-widest font-semibold text-[#565e74]">
+<span>Termos de Uso</span>
+<span>Privacidade</span>
+<span>Suporte</span>
+</div>
+</div>
+</footer>
+</body></html>

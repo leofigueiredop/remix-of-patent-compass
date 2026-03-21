@@ -20,9 +20,17 @@ import ResearchHistory from "./pages/ResearchHistory";
 import ResearchSettings from "./pages/ResearchSettings";
 import KnowledgeBase from "./pages/KnowledgeBase";
 import MonitoringSettings from "./pages/MonitoringSettings";
+import Clients from "./pages/Clients";
+import ProcessMonitoring from "./pages/ProcessMonitoring";
+import Demands from "./pages/Demands";
+import Alerts from "./pages/Alerts";
+import MarketMonitoring from "./pages/MarketMonitoring";
+import MyAssets from "./pages/MyAssets";
 import QuickSearch from "./pages/QuickSearch";
 import PatentBase from "./pages/PatentBase";
 import BackgroundWorkers from "./pages/BackgroundWorkers";
+import SystemHealth from "./pages/SystemHealth";
+import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -36,8 +44,11 @@ const App = () => (
         <ResearchProvider>
           <Routes>
             <Route path="/" element={<Login />} />
-            <Route path="/dashboard" element={<Navigate to="/research/dashboard" />} />
-            <Route path="/research/dashboard" element={<Dashboard />} />
+            
+            {/* Dashboard */}
+            <Route path="/dashboard" element={<Dashboard />} />
+            
+            {/* Pesquisas */}
             <Route path="/research/new" element={<NewResearch />} />
             <Route path="/research/briefing" element={<NewResearch />} />
             <Route path="/research/transcription" element={<Transcription />} />
@@ -48,13 +59,38 @@ const App = () => (
             <Route path="/research/report" element={<Report />} />
             <Route path="/research/history" element={<ResearchHistory />} />
             <Route path="/research/settings" element={<ResearchSettings />} />
+            
+            {/* Monitoramentos */}
+            <Route path="/monitoring/dashboard" element={<Navigate to="/dashboard" />} />
+            <Route path="/monitoring/collision" element={<MonitoringPatents />} />
+            <Route path="/monitoring/process" element={<ProcessMonitoring />} />
+            <Route path="/monitoring/market" element={<MarketMonitoring />} />
+            <Route path="/monitoring/assets" element={<MyAssets />} />
+            
+            {/* Base */}
+            <Route path="/base/patents" element={<PatentBase />} />
             <Route path="/search" element={<QuickSearch />} />
             <Route path="/knowledge-base" element={<KnowledgeBase />} />
-            <Route path="/monitoring/dashboard" element={<MonitoringDashboard />} />
-            <Route path="/monitoring/patents" element={<MonitoringPatents />} />
-            <Route path="/monitoring/base" element={<PatentBase />} />
-            <Route path="/monitoring/background-workers" element={<BackgroundWorkers />} />
+            
+            {/* CRM */}
+            <Route path="/clients" element={<Clients />} />
+            <Route path="/demands" element={<Demands />} />
+            
+            {/* Operações */}
+            <Route path="/alerts" element={<Alerts />} />
+            <Route path="/operations/workers" element={<BackgroundWorkers />} />
+            <Route path="/operations/system-health" element={<SystemHealth />} />
+            
+            {/* Configurações */}
+            <Route path="/settings" element={<Settings />} />
+            
+            {/* Legado / Redirecionamentos para manter compatibilidade */}
+            <Route path="/research/dashboard" element={<Navigate to="/dashboard" />} />
+            <Route path="/monitoring/patents" element={<Navigate to="/monitoring/collision" />} />
+            <Route path="/monitoring/base" element={<Navigate to="/base/patents" />} />
+            <Route path="/monitoring/background-workers" element={<Navigate to="/operations/workers" />} />
             <Route path="/monitoring/settings" element={<MonitoringSettings />} />
+            
             <Route path="/proposta" element={<Proposal />} />
             <Route path="*" element={<NotFound />} />
           </Routes>

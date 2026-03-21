@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+
+<html lang="pt-BR"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Aura Patent Intelligence - Detalhes da Patente</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;400;600;800&amp;family=Inter:wght@300;400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "surface-dim": "#cfdce3",
+              "secondary-fixed": "#d5e3fc",
+              "primary": "#3a665d",
+              "on-primary-fixed-variant": "#38635a",
+              "secondary-fixed-dim": "#c7d5ed",
+              "error-container": "#fe8983",
+              "error": "#9f403d",
+              "surface-container-highest": "#d9e4ea",
+              "outline-variant": "#a9b4b9",
+              "inverse-surface": "#0b0f10",
+              "on-primary": "#ddfff5",
+              "secondary": "#526074",
+              "on-error-container": "#752121",
+              "on-surface": "#2a3439",
+              "on-secondary-fixed": "#324053",
+              "tertiary": "#4a4bd7",
+              "on-error": "#fff7f6",
+              "background": "#f7f9fb",
+              "on-primary-container": "#2d5950",
+              "on-tertiary-container": "#000000",
+              "inverse-primary": "#cbfbee",
+              "on-background": "#2a3439",
+              "on-tertiary-fixed-variant": "#010028",
+              "secondary-dim": "#465468",
+              "tertiary-dim": "#3d3dcb",
+              "primary-fixed": "#bdece0",
+              "primary-dim": "#2e5a51",
+              "surface-container-lowest": "#ffffff",
+              "on-primary-fixed": "#19473e",
+              "on-surface-variant": "#566166",
+              "primary-fixed-dim": "#afded2",
+              "inverse-on-surface": "#9a9d9f",
+              "secondary-container": "#d5e3fc",
+              "surface": "#f7f9fb",
+              "tertiary-fixed-dim": "#6366f1",
+              "surface-tint": "#3a665d",
+              "surface-container-high": "#e1e9ee",
+              "surface-container": "#e8eff3",
+              "error-dim": "#4e0309",
+              "on-secondary-container": "#455367",
+              "outline": "#717c82",
+              "on-secondary": "#f8f8ff",
+              "primary-container": "#bdece0",
+              "surface-container-low": "#f0f4f7",
+              "tertiary-fixed": "#7073ff",
+              "surface-variant": "#d9e4ea",
+              "surface-bright": "#f7f9fb",
+              "on-tertiary-fixed": "#000000",
+              "on-tertiary": "#fbf7ff",
+              "tertiary-container": "#7073ff",
+              "on-secondary-fixed-variant": "#4e5c71"
+            },
+            fontFamily: {
+              "headline": ["Manrope"],
+              "body": ["Inter"],
+              "label": ["Inter"]
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+        }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #a9b4b9; border-radius: 10px; }
+    </style>
+</head>
+<body class="bg-background font-body text-on-background antialiased min-h-screen overflow-hidden">
+<!-- Background Layer (Blurred Content Simulation) -->
+<div class="fixed inset-0 z-0 flex flex-col pointer-events-none opacity-40 blur-sm">
+<header class="flex items-center justify-between px-8 py-4 w-full max-w-screen-2xl mx-auto bg-slate-50/80">
+<div class="text-2xl font-bold tracking-tighter text-emerald-950">Aura</div>
+<div class="flex gap-6">
+<span class="font-medium text-slate-600">Monitoramento</span>
+<span class="font-medium text-slate-600">Dashboard</span>
+</div>
+</header>
+<main class="p-12 grid grid-cols-3 gap-8">
+<div class="h-64 bg-surface-container rounded-xl"></div>
+<div class="h-64 bg-surface-container rounded-xl"></div>
+<div class="h-64 bg-surface-container rounded-xl"></div>
+<div class="h-96 col-span-2 bg-surface-container rounded-xl"></div>
+<div class="h-96 bg-surface-container rounded-xl"></div>
+</main>
+</div>
+<!-- Modal Backdrop -->
+<div class="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8 bg-on-surface/20 backdrop-blur-md">
+<!-- Modal Container -->
+<div class="relative w-full max-w-5xl bg-surface-container-lowest rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[921px]">
+<!-- Header Section -->
+<div class="p-8 pb-4 border-b border-outline-variant/10">
+<div class="flex flex-col md:flex-row justify-between items-start gap-4 mb-8">
+<div class="flex flex-col gap-1">
+<div class="flex items-center gap-3">
+<span class="text-xs font-bold tracking-widest text-tertiary uppercase">BR 10 2023 004567-8</span>
+<span class="px-2 py-0.5 text-[10px] font-semibold bg-primary-container text-on-primary-container rounded-full">ATIVO</span>
+</div>
+<h1 class="text-3xl font-headline font-extrabold text-on-surface tracking-tight leading-tight">Sistema de Filtragem Inteligente com Redução de Ruído Passivo</h1>
+<p class="text-on-surface-variant font-medium text-sm mt-1">Titular: <span class="text-on-surface">Aura Technologies S.A.</span></p>
+</div>
+<div class="flex gap-2 shrink-0">
+<button class="p-2 rounded-lg hover:bg-surface-container text-on-surface-variant transition-colors">
+<span class="material-symbols-outlined">share</span>
+</button>
+<button class="p-2 rounded-lg hover:bg-surface-container text-on-surface-variant transition-colors">
+<span class="material-symbols-outlined">bookmark</span>
+</button>
+<button class="p-2 rounded-lg hover:bg-error-container/20 text-error transition-colors">
+<span class="material-symbols-outlined">close</span>
+</button>
+</div>
+</div>
+<!-- Info Grid -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-6 py-4 px-6 bg-surface-container-low rounded-xl">
+<div class="flex flex-col gap-1">
+<span class="text-[10px] font-bold text-outline uppercase tracking-wider">Data de Depósito</span>
+<span class="text-sm font-semibold text-on-surface">14 Mar 2023</span>
+</div>
+<div class="flex flex-col gap-1">
+<span class="text-[10px] font-bold text-outline uppercase tracking-wider">Situação Atual</span>
+<span class="text-sm font-semibold text-primary">Aguardando Exame Ténico</span>
+</div>
+<div class="flex flex-col gap-1">
+<span class="text-[10px] font-bold text-outline uppercase tracking-wider">Documento PDF</span>
+<a class="flex items-center gap-1 text-sm font-semibold text-on-surface hover:text-tertiary transition-colors" href="#">
+<span class="material-symbols-outlined text-sm">picture_as_pdf</span>
+                            Visualizar PDF
+                        </a>
+</div>
+<div class="flex flex-col gap-1">
+<span class="text-[10px] font-bold text-outline uppercase tracking-wider">Classificação IPC</span>
+<span class="text-sm font-semibold text-on-surface">B01D 35/00</span>
+</div>
+</div>
+</div>
+<!-- Navigation Tabs -->
+<div class="px-8 border-b border-outline-variant/10 flex items-center justify-between overflow-x-auto">
+<nav class="flex gap-8">
+<button class="py-4 text-sm font-semibold text-primary border-b-2 border-primary transition-all">Despachos</button>
+<button class="py-4 text-sm font-medium text-on-surface-variant hover:text-on-surface border-b-2 border-transparent transition-all">Anuidades</button>
+<button class="py-4 text-sm font-medium text-on-surface-variant hover:text-on-surface border-b-2 border-transparent transition-all">Protocolos</button>
+<button class="py-4 text-sm font-medium text-on-surface-variant hover:text-on-surface border-b-2 border-transparent transition-all">Petições</button>
+</nav>
+<div class="flex gap-3 ml-4 py-2 shrink-0">
+<button class="px-4 py-1.5 rounded-md border border-outline-variant text-[11px] font-bold tracking-wider text-on-surface-variant uppercase hover:bg-surface-container-low transition-all">Google Patents</button>
+<button class="px-4 py-1.5 rounded-md border border-outline-variant text-[11px] font-bold tracking-wider text-on-surface-variant uppercase hover:bg-surface-container-low transition-all">Espacenet</button>
+</div>
+</div>
+<!-- Modal Body (Table Content) -->
+<div class="flex-1 overflow-y-auto p-8">
+<div class="mb-6 flex items-center justify-between">
+<h3 class="text-lg font-headline font-bold text-on-surface">Últimos Despachos (RPI)</h3>
+<div class="flex items-center gap-2 px-3 py-1.5 bg-surface-container-high rounded-full">
+<span class="material-symbols-outlined text-sm text-primary">filter_list</span>
+<span class="text-xs font-medium">Filtrar por Código</span>
+</div>
+</div>
+<div class="w-full">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="text-[10px] font-bold text-outline uppercase tracking-widest">
+<th class="pb-4 px-4 font-bold">Código</th>
+<th class="pb-4 px-4 font-bold">Data RPI</th>
+<th class="pb-4 px-4 font-bold">Descrição do Evento</th>
+<th class="pb-4 px-4 font-bold text-right">RPI</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant/10">
+<tr class="group hover:bg-surface-container-low transition-colors">
+<td class="py-5 px-4">
+<span class="font-mono text-sm font-bold text-on-surface">3.1</span>
+</td>
+<td class="py-5 px-4">
+<span class="text-sm text-on-surface-variant">22 Ago 2023</span>
+</td>
+<td class="py-5 px-4">
+<p class="text-sm font-medium text-on-surface">Publicação do Pedido de Patente</p>
+<p class="text-xs text-on-surface-variant mt-0.5">O pedido foi publicado conforme previsto no art. 30 da LPI.</p>
+</td>
+<td class="py-5 px-4 text-right">
+<span class="text-sm font-semibold text-on-surface">2746</span>
+</td>
+</tr>
+<tr class="group hover:bg-surface-container-low transition-colors">
+<td class="py-5 px-4">
+<span class="font-mono text-sm font-bold text-on-surface">2.1</span>
+</td>
+<td class="py-5 px-4">
+<span class="text-sm text-on-surface-variant">15 Mai 2023</span>
+</td>
+<td class="py-5 px-4">
+<p class="text-sm font-medium text-on-surface">Pedido de Patente ou de Certificado de Adição de Invenção Depositado</p>
+<p class="text-xs text-on-surface-variant mt-0.5">Processo formal de entrada no INPI concluído com sucesso.</p>
+</td>
+<td class="py-5 px-4 text-right">
+<span class="text-sm font-semibold text-on-surface">2732</span>
+</td>
+</tr>
+<tr class="group hover:bg-surface-container-low transition-colors">
+<td class="py-5 px-4">
+<span class="font-mono text-sm font-bold text-on-surface">15.21</span>
+</td>
+<td class="py-5 px-4">
+<span class="text-sm text-on-surface-variant">28 Abr 2023</span>
+</td>
+<td class="py-5 px-4">
+<p class="text-sm font-medium text-on-surface">Numeração Definitiva</p>
+<p class="text-xs text-on-surface-variant mt-0.5">Atribuição de número oficial para acompanhamento processual.</p>
+</td>
+<td class="py-5 px-4 text-right">
+<span class="text-sm font-semibold text-on-surface">2729</span>
+</td>
+</tr>
+<tr class="group hover:bg-surface-container-low transition-colors">
+<td class="py-5 px-4">
+<span class="font-mono text-sm font-bold text-on-surface">1.1</span>
+</td>
+<td class="py-5 px-4">
+<span class="text-sm text-on-surface-variant">14 Mar 2023</span>
+</td>
+<td class="py-5 px-4">
+<p class="text-sm font-medium text-on-surface">Recebimento do Pedido</p>
+<p class="text-xs text-on-surface-variant mt-0.5">Protocolo inicial de depósito via sistema e-Patentes.</p>
+</td>
+<td class="py-5 px-4 text-right">
+<span class="text-sm font-semibold text-on-surface">2722</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Footer Action Bar -->
+<div class="px-8 py-6 bg-surface-container flex flex-col md:flex-row items-center justify-between gap-4">
+<div class="flex items-center gap-4">
+<div class="flex -space-x-2">
+<div class="w-8 h-8 rounded-full bg-primary-fixed border-2 border-surface-container-lowest flex items-center justify-center text-[10px] font-bold text-on-primary-fixed">JD</div>
+<div class="w-8 h-8 rounded-full bg-secondary-fixed border-2 border-surface-container-lowest flex items-center justify-center text-[10px] font-bold text-on-secondary-fixed">AM</div>
+</div>
+<span class="text-xs font-medium text-on-surface-variant italic">2 analistas monitorando este ativo</span>
+</div>
+<div class="flex gap-4 w-full md:w-auto">
+<button class="flex-1 md:flex-none px-6 py-2.5 text-sm font-bold tracking-wider text-on-surface-variant hover:text-on-surface transition-colors uppercase">
+                        Gerar Relatório
+                    </button>
+<button class="flex-1 md:flex-none px-8 py-2.5 bg-gradient-to-br from-primary to-primary-dim text-on-primary rounded-lg text-sm font-bold tracking-widest uppercase shadow-lg shadow-primary/20 hover:scale-[1.02] transition-all">
+                        Solicitar Revisão Jurídica
+                    </button>
+</div>
+</div>
+</div>
+</div>
+</body></html>

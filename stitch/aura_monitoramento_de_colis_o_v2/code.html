@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Collision Watchtower | Aura Patent Intelligence</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Manrope:wght@600;700;800&amp;display=swap" rel="stylesheet"/>
+<!-- Icons -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "on-tertiary-container": "#f5fff6",
+                        "surface-container-highest": "#e0e3e5",
+                        "secondary-fixed": "#dae2fd",
+                        "inverse-on-surface": "#eff1f3",
+                        "surface-variant": "#e0e3e5",
+                        "surface-bright": "#f7f9fb",
+                        "on-secondary-fixed": "#131b2e",
+                        "surface": "#f7f9fb",
+                        "on-surface": "#191c1e",
+                        "surface-dim": "#d8dadc",
+                        "on-tertiary": "#ffffff",
+                        "inverse-primary": "#adc6ff",
+                        "surface-container-low": "#f2f4f6",
+                        "on-background": "#191c1e",
+                        "background": "#f7f9fb",
+                        "surface-container-lowest": "#ffffff",
+                        "on-tertiary-fixed": "#002113",
+                        "surface-container": "#eceef0",
+                        "on-secondary": "#ffffff",
+                        "on-error": "#ffffff",
+                        "surface-tint": "#005ac2",
+                        "on-secondary-container": "#5c647a",
+                        "on-primary-fixed-variant": "#004395",
+                        "on-error-container": "#93000a",
+                        "tertiary-fixed": "#6ffbbe",
+                        "primary-fixed-dim": "#adc6ff",
+                        "error-container": "#ffdad6",
+                        "surface-container-high": "#e6e8ea",
+                        "secondary-fixed-dim": "#bec6e0",
+                        "outline": "#727785",
+                        "tertiary-fixed-dim": "#4edea3",
+                        "secondary": "#565e74",
+                        "on-secondary-fixed-variant": "#3f465c",
+                        "on-primary": "#ffffff",
+                        "inverse-surface": "#2d3133",
+                        "primary-fixed": "#d8e2ff",
+                        "tertiary-container": "#00855b",
+                        "on-tertiary-fixed-variant": "#005236",
+                        "error": "#ba1a1a",
+                        "secondary-container": "#dae2fd",
+                        "tertiary": "#006947",
+                        "on-primary-container": "#fefcff",
+                        "primary": "#0058be",
+                        "outline-variant": "#c2c6d6",
+                        "primary-container": "#2170e4",
+                        "on-surface-variant": "#424754",
+                        "on-primary-fixed": "#001a42"
+                    },
+                    fontFamily: {
+                        "headline": ["Manrope"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    },
+                    borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .glass-nav {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+        }
+        .patent-radar-ring {
+            border: 0.5px solid rgba(0, 88, 190, 0.2);
+        }
+    </style>
+</head>
+<body class="bg-surface font-body text-on-surface-variant">
+<!-- Top Navigation Bar -->
+<nav class="fixed top-0 w-full z-50 glass-nav border-none shadow-[0px_20px_40px_rgba(15,23,42,0.06)] flex justify-between items-center h-20 px-10">
+<div class="flex items-center gap-12">
+<span class="text-2xl font-black tracking-tighter text-primary">Aura</span>
+<div class="hidden md:flex gap-8 items-center font-headline font-semibold tracking-tight text-sm">
+<a class="text-secondary hover:text-primary transition-colors" href="#">Dashboard</a>
+<a class="text-primary border-b-2 border-primary pb-1" href="#">Collision</a>
+<a class="text-secondary hover:text-primary transition-colors" href="#">Process</a>
+<a class="text-secondary hover:text-primary transition-colors" href="#">Market</a>
+<a class="text-secondary hover:text-primary transition-colors" href="#">My Patents</a>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="relative hidden lg:block">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-lg">search</span>
+<input class="pl-10 pr-4 py-2 bg-surface-container-low border-none rounded-lg text-sm w-64 focus:ring-2 focus:ring-primary focus:bg-surface-container-lowest outline-none transition-all" placeholder="Search conflicts..." type="text"/>
+</div>
+<button class="p-2 hover:bg-slate-100/50 rounded-lg transition-all text-secondary">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+</button>
+<button class="p-2 hover:bg-slate-100/50 rounded-lg transition-all text-secondary">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+</button>
+<div class="h-10 w-10 rounded-full overflow-hidden border-2 border-primary/10">
+<img alt="User Profile" class="w-full h-full object-cover" data-alt="Corporate professional male headshot avatar" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAjtqkkrrcy1qwv5sz869FIdkFgwwLzNtjB8uJvsZjQ-U_dwv80Zgt_y4lTsH24ftZ3GnKjh3Q30zqos87v_hvsM0XNfWDL89c-kg6myuLt9BojyXSfwScMTkJ3uhX18V_y662WmyhbgHH7-QXuwqMouMWJHtHMJeuznJcDa4rvkW9lY6pfzErNb_IANtRgf5a41MauM0BjCxCFFkh5QQmzxbTIhecznxEQxFNG8PHZK2rIR6kIPKz2oPCSdAZDj1NtwbvwyjBpBdE"/>
+</div>
+</div>
+</nav>
+<main class="pt-32 pb-20 px-10 max-w-[1600px] mx-auto">
+<!-- Header Section -->
+<header class="mb-12 flex justify-between items-end">
+<div>
+<div class="flex items-center gap-3 mb-2">
+<span class="bg-tertiary-fixed text-on-tertiary-fixed text-[0.625rem] font-bold uppercase tracking-widest px-2 py-0.5 rounded">Live Watchtower</span>
+<span class="text-outline text-xs font-medium">Last RPI Update: Oct 24, 2024</span>
+</div>
+<h1 class="text-4xl font-headline font-extrabold text-on-surface tracking-tight">Collision Watchtower</h1>
+<p class="mt-2 text-secondary max-w-xl">Intelligent conflict detection across the latest Industrial Property Journal (RPI) publications. Automated risk assessment and priority mapping.</p>
+</div>
+<button class="bg-gradient-to-r from-primary to-primary-container text-white px-6 py-3 rounded-lg font-headline font-bold flex items-center gap-2 shadow-lg shadow-primary/20 hover:scale-[0.98] transition-all duration-150">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">sync</span>
+                Sincronizar Dados RPI
+            </button>
+</header>
+<!-- Stats Bento Grid -->
+<div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
+<div class="bg-surface-container-lowest p-6 rounded-xl border-none shadow-sm flex flex-col justify-between">
+<span class="text-label-sm text-outline uppercase tracking-wider font-semibold text-[0.6875rem]">Total Conflicts</span>
+<div class="mt-4 flex items-baseline gap-2">
+<span class="text-3xl font-headline font-bold text-on-surface">142</span>
+<span class="text-error text-xs font-bold">+12 new</span>
+</div>
+</div>
+<div class="bg-surface-container-lowest p-6 rounded-xl border-none shadow-sm">
+<span class="text-label-sm text-outline uppercase tracking-wider font-semibold text-[0.6875rem]">Critical Risk</span>
+<div class="mt-4 flex items-baseline gap-2">
+<span class="text-3xl font-headline font-bold text-on-surface">08</span>
+<div class="w-2 h-2 rounded-full bg-error animate-pulse"></div>
+</div>
+</div>
+<div class="bg-surface-container-lowest p-6 rounded-xl border-none shadow-sm">
+<span class="text-label-sm text-outline uppercase tracking-wider font-semibold text-[0.6875rem]">AI Processing Accuracy</span>
+<div class="mt-4 flex items-baseline gap-2">
+<span class="text-3xl font-headline font-bold text-on-surface">99.2%</span>
+</div>
+</div>
+<div class="bg-surface-container-lowest p-6 rounded-xl border-none shadow-sm overflow-hidden relative">
+<div class="relative z-10">
+<span class="text-label-sm text-outline uppercase tracking-wider font-semibold text-[0.6875rem]">Watchlist Status</span>
+<div class="mt-4 flex items-baseline gap-2">
+<span class="text-3xl font-headline font-bold text-on-surface">Active</span>
+</div>
+</div>
+<div class="absolute -right-4 -bottom-4 opacity-10">
+<span class="material-symbols-outlined text-8xl" style="font-variation-settings: 'FILL' 1;">security</span>
+</div>
+</div>
+</div>
+<!-- Main Collision List -->
+<section class="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
+<div class="p-8 border-b border-surface-container">
+<div class="flex justify-between items-center">
+<h2 class="font-headline font-bold text-xl text-on-surface">Detected Conflicts</h2>
+<div class="flex gap-4">
+<button class="flex items-center gap-2 px-4 py-2 bg-surface-container-low text-secondary rounded-lg text-sm font-medium hover:bg-surface-container-high transition-all">
+<span class="material-symbols-outlined text-lg">filter_list</span>
+                            Filter Risk
+                        </button>
+<button class="flex items-center gap-2 px-4 py-2 bg-surface-container-low text-secondary rounded-lg text-sm font-medium hover:bg-surface-container-high transition-all">
+<span class="material-symbols-outlined text-lg">download</span>
+                            Export Report
+                        </button>
+</div>
+</div>
+</div>
+<!-- List Table Header -->
+<div class="grid grid-cols-12 px-8 py-4 bg-surface-container-low/50 text-label-sm text-outline uppercase tracking-widest font-bold text-[0.625rem]">
+<div class="col-span-4">Monitored vs. Conflicting Patent</div>
+<div class="col-span-3">Collision Context</div>
+<div class="col-span-2 text-center">Confidence Score</div>
+<div class="col-span-3 text-right">Actions</div>
+</div>
+<!-- List Content -->
+<div class="divide-y-0">
+<!-- Row 1: Critical -->
+<div class="grid grid-cols-12 px-8 py-8 items-center hover:bg-surface-container-low/30 transition-all group">
+<div class="col-span-4 flex items-center gap-6">
+<div class="flex flex-col">
+<span class="text-xs text-primary font-bold mb-1">BR 10 2018 012345-6</span>
+<span class="text-sm font-bold text-on-surface group-hover:text-primary transition-colors">Smart Grid Controller Unit</span>
+<div class="flex items-center gap-2 mt-3 text-outline">
+<span class="material-symbols-outlined text-sm">compare_arrows</span>
+<span class="text-[0.625rem] uppercase font-bold tracking-tighter">Versus</span>
+</div>
+<span class="text-xs text-error font-bold mt-2">BR 10 2024 098765-1</span>
+<span class="text-sm font-bold text-on-surface">Intelligent Energy Management System</span>
+</div>
+</div>
+<div class="col-span-3">
+<div class="flex flex-wrap gap-1">
+<span class="px-2 py-0.5 rounded bg-surface-container-high text-on-secondary-container text-[0.625rem] font-bold">IPC: H02J 13/00</span>
+<span class="px-2 py-0.5 rounded bg-surface-container-high text-on-secondary-container text-[0.625rem] font-bold">CLAIMS OVERLAP</span>
+</div>
+<p class="text-xs text-secondary mt-2 line-clamp-2 italic">Potential overlap in modular power distribution architecture defined in Section 4.2.</p>
+</div>
+<div class="col-span-2 flex flex-col items-center">
+<div class="relative w-16 h-16 flex items-center justify-center">
+<svg class="w-full h-full -rotate-90">
+<circle class="text-surface-container-high" cx="32" cy="32" fill="none" r="28" stroke="currentColor" stroke-width="4"></circle>
+<circle class="text-error" cx="32" cy="32" fill="none" r="28" stroke="currentColor" stroke-dasharray="175" stroke-dashoffset="10" stroke-width="4"></circle>
+</svg>
+<span class="absolute text-sm font-black text-on-surface">94%</span>
+</div>
+<span class="text-[0.625rem] font-black uppercase text-error tracking-tighter mt-1">Risco Crítico</span>
+</div>
+<div class="col-span-3 flex justify-end gap-2">
+<button class="bg-surface-container-high text-primary px-4 py-2 rounded-lg text-xs font-bold hover:bg-primary hover:text-white transition-all">Abrir</button>
+<button class="bg-surface-container-lowest border border-outline-variant/30 text-secondary px-4 py-2 rounded-lg text-xs font-bold hover:bg-surface-container-low transition-all">Ignorar</button>
+<button class="bg-surface-container-lowest border border-outline-variant/30 text-secondary px-4 py-2 rounded-lg text-xs font-bold hover:bg-surface-container-low transition-all">Monitorar</button>
+</div>
+</div>
+<!-- Row 2: High -->
+<div class="grid grid-cols-12 px-8 py-8 items-center hover:bg-surface-container-low/30 transition-all group">
+<div class="col-span-4 flex items-center gap-6">
+<div class="flex flex-col">
+<span class="text-xs text-primary font-bold mb-1">BR 10 2019 045532-0</span>
+<span class="text-sm font-bold text-on-surface">Nanostructured Battery Cathode</span>
+<div class="flex items-center gap-2 mt-3 text-outline">
+<span class="material-symbols-outlined text-sm">compare_arrows</span>
+<span class="text-[0.625rem] uppercase font-bold tracking-tighter">Versus</span>
+</div>
+<span class="text-xs text-error font-bold mt-2">BR 10 2024 077221-4</span>
+<span class="text-sm font-bold text-on-surface">Energy Storage Device with Nickel Alloy</span>
+</div>
+</div>
+<div class="col-span-3">
+<div class="flex flex-wrap gap-1">
+<span class="px-2 py-0.5 rounded bg-surface-container-high text-on-secondary-container text-[0.625rem] font-bold">IPC: H01M 4/525</span>
+</div>
+<p class="text-xs text-secondary mt-2 line-clamp-2 italic">Similar chemical composition reported in abstract. Requires technical verification.</p>
+</div>
+<div class="col-span-2 flex flex-col items-center">
+<div class="relative w-16 h-16 flex items-center justify-center">
+<svg class="w-full h-full -rotate-90">
+<circle class="text-surface-container-high" cx="32" cy="32" fill="none" r="28" stroke="currentColor" stroke-width="4"></circle>
+<circle class="text-primary-container" cx="32" cy="32" fill="none" r="28" stroke="currentColor" stroke-dasharray="175" stroke-dashoffset="35" stroke-width="4"></circle>
+</svg>
+<span class="absolute text-sm font-black text-on-surface">78%</span>
+</div>
+<span class="text-[0.625rem] font-black uppercase text-primary-container tracking-tighter mt-1">Risco Alto</span>
+</div>
+<div class="col-span-3 flex justify-end gap-2">
+<button class="bg-surface-container-high text-primary px-4 py-2 rounded-lg text-xs font-bold hover:bg-primary hover:text-white transition-all">Abrir</button>
+<button class="bg-surface-container-lowest border border-outline-variant/30 text-secondary px-4 py-2 rounded-lg text-xs font-bold hover:bg-surface-container-low transition-all">Ignorar</button>
+<button class="bg-surface-container-lowest border border-outline-variant/30 text-secondary px-4 py-2 rounded-lg text-xs font-bold hover:bg-surface-container-low transition-all">Monitorar</button>
+</div>
+</div>
+<!-- Row 3: Moderate -->
+<div class="grid grid-cols-12 px-8 py-8 items-center hover:bg-surface-container-low/30 transition-all group">
+<div class="col-span-4 flex items-center gap-6">
+<div class="flex flex-col">
+<span class="text-xs text-primary font-bold mb-1">BR 10 2021 000921-9</span>
+<span class="text-sm font-bold text-on-surface">Adaptive Cooling for AI Servers</span>
+<div class="flex items-center gap-2 mt-3 text-outline">
+<span class="material-symbols-outlined text-sm">compare_arrows</span>
+<span class="text-[0.625rem] uppercase font-bold tracking-tighter">Versus</span>
+</div>
+<span class="text-xs text-error font-bold mt-2">BR 10 2024 012290-0</span>
+<span class="text-sm font-bold text-on-surface">Modular Heat Sink for Data Centers</span>
+</div>
+</div>
+<div class="col-span-3">
+<div class="flex flex-wrap gap-1">
+<span class="px-2 py-0.5 rounded bg-surface-container-high text-on-secondary-container text-[0.625rem] font-bold">IPC: G06F 1/20</span>
+<span class="px-2 py-0.5 rounded bg-surface-container-high text-on-secondary-container text-[0.625rem] font-bold">GEOGRAPHIC MATCH</span>
+</div>
+<p class="text-xs text-secondary mt-2 line-clamp-2 italic">Common keywords detected in priority claim documents.</p>
+</div>
+<div class="col-span-2 flex flex-col items-center">
+<div class="relative w-16 h-16 flex items-center justify-center">
+<svg class="w-full h-full -rotate-90">
+<circle class="text-surface-container-high" cx="32" cy="32" fill="none" r="28" stroke="currentColor" stroke-width="4"></circle>
+<circle class="text-tertiary-container" cx="32" cy="32" fill="none" r="28" stroke="currentColor" stroke-dasharray="175" stroke-dashoffset="100" stroke-width="4"></circle>
+</svg>
+<span class="absolute text-sm font-black text-on-surface">42%</span>
+</div>
+<span class="text-[0.625rem] font-black uppercase text-tertiary-container tracking-tighter mt-1">Moderado</span>
+</div>
+<div class="col-span-3 flex justify-end gap-2">
+<button class="bg-surface-container-high text-primary px-4 py-2 rounded-lg text-xs font-bold hover:bg-primary hover:text-white transition-all">Abrir</button>
+<button class="bg-surface-container-lowest border border-outline-variant/30 text-secondary px-4 py-2 rounded-lg text-xs font-bold hover:bg-surface-container-low transition-all">Ignorar</button>
+<button class="bg-surface-container-lowest border border-outline-variant/30 text-secondary px-4 py-2 rounded-lg text-xs font-bold hover:bg-surface-container-low transition-all">Monitorar</button>
+</div>
+</div>
+</div>
+<!-- Footer of List -->
+<div class="px-8 py-6 bg-surface-container-low/20 flex justify-between items-center">
+<span class="text-xs text-outline font-medium">Showing 1-3 of 142 conflicts detected in RPI 2802</span>
+<div class="flex gap-2">
+<button class="p-2 bg-surface-container-lowest border border-outline-variant/20 rounded-lg text-secondary disabled:opacity-50" disabled="">
+<span class="material-symbols-outlined">chevron_left</span>
+</button>
+<button class="p-2 bg-surface-container-lowest border border-outline-variant/20 rounded-lg text-secondary hover:bg-surface-container-low">
+<span class="material-symbols-outlined">chevron_right</span>
+</button>
+</div>
+</div>
+</section>
+</main>
+<!-- Footer -->
+<footer class="w-full py-12 px-10 border-t border-slate-200/20 bg-surface flex flex-col md:flex-row justify-between items-center gap-6">
+<div class="flex flex-col md:flex-row gap-6 items-center">
+<span class="font-headline font-black text-primary text-xl tracking-tighter mr-4">Aura</span>
+<div class="flex gap-8">
+<a class="font-label text-[0.6875rem] uppercase tracking-widest font-medium text-secondary hover:text-primary transition-colors" href="#">Legal</a>
+<a class="font-label text-[0.6875rem] uppercase tracking-widest font-medium text-secondary hover:text-primary transition-colors" href="#">Privacy Policy</a>
+<a class="font-label text-[0.6875rem] uppercase tracking-widest font-medium text-secondary hover:text-primary transition-colors" href="#">Documentation</a>
+<a class="font-label text-[0.6875rem] uppercase tracking-widest font-medium text-secondary hover:text-primary transition-colors" href="#">Support</a>
+</div>
+</div>
+<p class="font-label text-[0.6875rem] uppercase tracking-widest font-medium text-secondary opacity-80">© 2024 Aura Patent Intelligence. Precision IP Analytics.</p>
+</footer>
+</body></html>

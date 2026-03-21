@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+
+<html class="light" lang="pt-BR"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Aura Patent Intelligence | Monitoramento de Mercado</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;400;500;600;700;800&amp;family=Inter:wght@300;400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "surface-dim": "#cfdce3",
+              "secondary-fixed": "#d5e3fc",
+              "primary": "#3a665d",
+              "on-primary-fixed-variant": "#38635a",
+              "secondary-fixed-dim": "#c7d5ed",
+              "error-container": "#fe8983",
+              "error": "#9f403d",
+              "surface-container-highest": "#d9e4ea",
+              "outline-variant": "#a9b4b9",
+              "inverse-surface": "#0b0f10",
+              "on-primary": "#ddfff5",
+              "secondary": "#526074",
+              "on-error-container": "#752121",
+              "on-surface": "#2a3439",
+              "on-secondary-fixed": "#324053",
+              "tertiary": "#4a4bd7",
+              "on-error": "#fff7f6",
+              "background": "#f7f9fb",
+              "on-primary-container": "#2d5950",
+              "on-tertiary-container": "#000000",
+              "inverse-primary": "#cbfbee",
+              "on-background": "#2a3439",
+              "on-tertiary-fixed-variant": "#010028",
+              "secondary-dim": "#465468",
+              "tertiary-dim": "#3d3dcb",
+              "primary-fixed": "#bdece0",
+              "primary-dim": "#2e5a51",
+              "surface-container-lowest": "#ffffff",
+              "on-primary-fixed": "#19473e",
+              "on-surface-variant": "#566166",
+              "primary-fixed-dim": "#afded2",
+              "inverse-on-surface": "#9a9d9f",
+              "secondary-container": "#d5e3fc",
+              "surface": "#f7f9fb",
+              "tertiary-fixed-dim": "#6366f1",
+              "surface-tint": "#3a665d",
+              "surface-container-high": "#e1e9ee",
+              "surface-container": "#e8eff3",
+              "error-dim": "#4e0309",
+              "on-secondary-container": "#455367",
+              "outline": "#717c82",
+              "on-secondary": "#f8f8ff",
+              "primary-container": "#bdece0",
+              "surface-container-low": "#f0f4f7",
+              "tertiary-fixed": "#7073ff",
+              "surface-variant": "#d9e4ea",
+              "surface-bright": "#f7f9fb",
+              "on-tertiary-fixed": "#000000",
+              "on-tertiary": "#fbf7ff",
+              "tertiary-container": "#7073ff",
+              "on-secondary-fixed-variant": "#4e5c71"
+            },
+            fontFamily: {
+              "headline": ["Manrope"],
+              "body": ["Inter"],
+              "label": ["Inter"]
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+        }
+        .primary-gradient {
+            background: linear-gradient(135deg, #3a665d 0%, #2e5a51 100%);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body antialiased">
+<!-- Sidebar (Intellectual Monolith) -->
+<aside class="h-screen w-64 fixed left-0 top-0 bg-slate-100 flex flex-col gap-2 p-6 font-['Manrope'] text-sm font-medium z-40">
+<div class="mb-10 flex items-center gap-3">
+<div class="w-8 h-8 primary-gradient rounded-lg flex items-center justify-center text-white">
+<span class="material-symbols-outlined text-sm" data-icon="monolith">monorail</span>
+</div>
+<div>
+<h1 class="text-lg font-black text-slate-900 leading-tight">Aura Patent</h1>
+<p class="text-[10px] tracking-widest uppercase text-slate-500">Intellectual Monolith</p>
+</div>
+</div>
+<nav class="flex flex-col gap-1 flex-1">
+<a class="flex items-center gap-3 px-4 py-3 text-slate-500 hover:bg-slate-200/50 hover:translate-x-1 transition-all duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="radar">radar</span>
+<span>Colisão</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 bg-white text-emerald-900 shadow-sm rounded-lg transition-all ease-in-out" href="#">
+<span class="material-symbols-outlined" data-icon="analytics">analytics</span>
+<span>Mercado</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-slate-500 hover:bg-slate-200/50 hover:translate-x-1 transition-all duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="account_tree">account_tree</span>
+<span>Processo</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-slate-500 hover:bg-slate-200/50 hover:translate-x-1 transition-all duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span>Geral</span>
+</a>
+</nav>
+<button class="mt-auto primary-gradient text-on-primary py-3 px-4 rounded-md text-[11px] font-bold tracking-wider uppercase transition-all active:scale-[0.98]">
+            Novo Monitoramento
+        </button>
+</aside>
+<!-- Main Content Area -->
+<main class="ml-64 min-h-screen">
+<!-- Top Navigation -->
+<header class="bg-slate-50/80 backdrop-blur-xl docked full-width top-0 sticky z-30 font-['Manrope'] tracking-tight antialiased">
+<div class="flex items-center justify-between px-12 py-5 w-full max-w-screen-2xl mx-auto">
+<div class="flex items-center gap-12">
+<span class="text-2xl font-bold tracking-tighter text-emerald-950">Monitoramento</span>
+<nav class="hidden md:flex gap-8">
+<a class="text-emerald-900 font-semibold border-b-2 border-emerald-800 pb-1" href="#">Monitoramento</a>
+<a class="text-slate-600 font-medium hover:text-emerald-800 transition-colors" href="#">Dashboard</a>
+</nav>
+</div>
+<div class="flex items-center gap-6">
+<div class="relative">
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:text-primary transition-colors" data-icon="notifications">notifications</span>
+<span class="absolute -top-1 -right-1 w-2 h-2 bg-error rounded-full"></span>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:text-primary transition-colors" data-icon="settings">settings</span>
+<div class="w-8 h-8 rounded-full overflow-hidden border border-outline-variant/30">
+<img alt="User profile" class="w-full h-full object-cover" data-alt="Close up portrait of a professional man in business attire" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDEqinR2lPUcSKcckgPPLECK4AN0J4LpW4U0BRoOrko57_qW1MzfwzhUjeuER4PpZWsmqMiz3Cy0E8oCFQyFJHbKyKdgWR4ZnCBI4PFj2EkfUYyzfTi8XjeMDD_Pich1VT9yBhhMi9JyHeeSnEZcyn2d076OXexTsIq54Gv43lxeZd49AjwPVBCRo7qQ2ygK_gOkOpi-v5kGpOm1HxNDxSbIOSAZDsJWhCjl-vxn0XboLGpK-5fwwL4WiO2IinqAVEShCiDdpy2mkY"/>
+</div>
+</div>
+</div>
+<div class="bg-slate-200/50 h-[1px] w-full"></div>
+</header>
+<div class="px-12 py-10 max-w-screen-2xl mx-auto">
+<!-- Hero Stats / Market Overview -->
+<div class="mb-16">
+<h2 class="font-headline text-5xl font-extrabold text-on-surface tracking-tighter mb-4">Inteligência de Mercado</h2>
+<p class="font-body text-on-surface-variant max-w-2xl leading-relaxed">Analise a densidade competitiva e a movimentação estratégica de ativos de propriedade intelectual em tempo real.</p>
+</div>
+<!-- Bento Grid Layout -->
+<div class="grid grid-cols-12 gap-8">
+<!-- Monitoramento de Titulares -->
+<section class="col-span-12 lg:col-span-8 space-y-8">
+<div class="bg-surface-container-low p-8 rounded-xl">
+<div class="flex justify-between items-end mb-10">
+<div>
+<span class="text-[10px] uppercase tracking-[0.2em] text-primary font-bold">Titulares Estratégicos</span>
+<h3 class="font-headline text-3xl font-bold text-on-surface mt-2">Principais Competidores</h3>
+</div>
+<button class="text-primary font-bold text-sm flex items-center gap-2 hover:opacity-70 transition-opacity">
+                                Ver todos <span class="material-symbols-outlined text-lg" data-icon="arrow_forward">arrow_forward</span>
+</button>
+</div>
+<div class="space-y-6">
+<!-- Competitor 1 -->
+<div class="bg-surface-container-lowest p-6 flex items-center justify-between group cursor-pointer">
+<div class="flex items-center gap-6">
+<div class="w-12 h-12 bg-surface-container flex items-center justify-center rounded">
+<span class="material-symbols-outlined text-secondary" data-icon="memory">memory</span>
+</div>
+<div>
+<h4 class="font-headline font-bold text-lg text-on-surface">NeuralLink Corp</h4>
+<p class="text-xs text-on-surface-variant font-medium">Biotecnologia &amp; Interface Cérebro-Máquina</p>
+</div>
+</div>
+<div class="flex gap-12 text-right">
+<div>
+<p class="text-[10px] uppercase tracking-wider text-outline mb-1">Ativos Totais</p>
+<p class="font-headline font-extrabold text-2xl text-on-surface">1,248</p>
+</div>
+<div>
+<p class="text-[10px] uppercase tracking-wider text-outline mb-1">Novos Depósitos (30d)</p>
+<div class="flex items-center justify-end gap-2">
+<span class="font-headline font-extrabold text-2xl text-primary">+42</span>
+<span class="material-symbols-outlined text-primary text-sm" data-icon="trending_up">trending_up</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Competitor 2 -->
+<div class="bg-surface-container-lowest p-6 flex items-center justify-between group cursor-pointer">
+<div class="flex items-center gap-6">
+<div class="w-12 h-12 bg-surface-container flex items-center justify-center rounded">
+<span class="material-symbols-outlined text-secondary" data-icon="rocket_launch">rocket_launch</span>
+</div>
+<div>
+<h4 class="font-headline font-bold text-lg text-on-surface">AstroDynamics</h4>
+<p class="text-xs text-on-surface-variant font-medium">Propulsão Aeroespacial &amp; Satélites</p>
+</div>
+</div>
+<div class="flex gap-12 text-right">
+<div>
+<p class="text-[10px] uppercase tracking-wider text-outline mb-1">Ativos Totais</p>
+<p class="font-headline font-extrabold text-2xl text-on-surface">856</p>
+</div>
+<div>
+<p class="text-[10px] uppercase tracking-wider text-outline mb-1">Novos Depósitos (30d)</p>
+<div class="flex items-center justify-end gap-2">
+<span class="font-headline font-extrabold text-2xl text-primary">+18</span>
+<span class="material-symbols-outlined text-primary text-sm" data-icon="trending_up">trending_up</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Market Density Radar (Visual Representation) -->
+<div class="bg-surface-container-low p-8 rounded-xl overflow-hidden relative">
+<div class="flex justify-between items-start mb-8">
+<div>
+<h3 class="font-headline text-2xl font-bold text-on-surface">Market Density Radar</h3>
+<p class="text-sm text-on-surface-variant mt-1">Sobreposição de portfólio por cluster tecnológico</p>
+</div>
+<div class="flex gap-4">
+<div class="flex items-center gap-2">
+<span class="w-3 h-3 rounded-full bg-primary"></span>
+<span class="text-xs font-medium">Sua Empresa</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="w-3 h-3 rounded-full bg-secondary"></span>
+<span class="text-xs font-medium">Média Mercado</span>
+</div>
+</div>
+</div>
+<!-- Simulated Radar Chart -->
+<div class="h-[400px] w-full flex items-center justify-center relative">
+<!-- Concentric circles -->
+<div class="absolute w-full h-full border border-outline-variant/10 rounded-full"></div>
+<div class="absolute w-3/4 h-3/4 border border-outline-variant/10 rounded-full"></div>
+<div class="absolute w-1/2 h-1/2 border border-outline-variant/10 rounded-full"></div>
+<div class="absolute w-1/4 h-1/4 border border-outline-variant/10 rounded-full"></div>
+<!-- Bubbles of overlap -->
+<div class="absolute top-[20%] left-[30%] w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center border border-primary/40 backdrop-blur-sm">
+<span class="text-[10px] font-bold text-primary">IA</span>
+</div>
+<div class="absolute bottom-[25%] right-[20%] w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center border border-primary/20 backdrop-blur-sm">
+<span class="text-[10px] font-bold text-primary">Robótica</span>
+</div>
+<div class="absolute top-[40%] right-[35%] w-32 h-32 bg-secondary/10 rounded-full flex items-center justify-center border border-secondary/20 backdrop-blur-sm">
+<span class="text-[10px] font-bold text-secondary-dim">IoT</span>
+</div>
+<div class="absolute bottom-[10%] left-[45%] w-12 h-12 bg-primary/30 rounded-full flex items-center justify-center border border-primary/50">
+<span class="text-[10px] font-bold text-primary">Semicond.</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Sidebar Content: Novas Descobertas -->
+<section class="col-span-12 lg:col-span-4">
+<div class="bg-surface-container-highest p-8 rounded-xl h-full">
+<div class="flex items-center justify-between mb-8">
+<h3 class="font-headline text-2xl font-bold text-on-surface">Novas Descobertas</h3>
+<span class="material-symbols-outlined text-primary" data-icon="bolt">bolt</span>
+</div>
+<div class="space-y-6">
+<!-- Alert 1 -->
+<div class="bg-surface-container-lowest p-5 border-l-4 border-primary rounded-r-lg shadow-sm">
+<div class="flex items-start gap-3 mb-3">
+<span class="material-symbols-outlined text-primary text-xl" data-icon="warning">warning</span>
+<h5 class="text-sm font-bold text-on-surface leading-snug">Risco de Colisão Detectado</h5>
+</div>
+<p class="text-xs text-on-surface-variant mb-4 leading-relaxed">
+                                    A <span class="font-bold text-on-surface">NeuralLink</span> depositou uma patente de processamento neural que sobrepõe sua tecnologia de "Back-end Alpha".
+                                </p>
+<div class="flex justify-between items-center text-[10px] font-bold">
+<span class="text-tertiary">#BR10202400123</span>
+<span class="text-on-surface-variant">Há 2 horas</span>
+</div>
+</div>
+<!-- Alert 2 -->
+<div class="bg-surface-container-lowest p-5 border-l-4 border-secondary rounded-r-lg shadow-sm">
+<div class="flex items-start gap-3 mb-3">
+<span class="material-symbols-outlined text-secondary text-xl" data-icon="lightbulb">lightbulb</span>
+<h5 class="text-sm font-bold text-on-surface leading-snug">Oportunidade de Licenciamento</h5>
+</div>
+<p class="text-xs text-on-surface-variant mb-4 leading-relaxed">
+                                    Nova tecnologia em domínio público identificada na categoria de <span class="font-bold text-on-surface">Sensores Ópticos</span>.
+                                </p>
+<div class="flex justify-between items-center text-[10px] font-bold">
+<span class="text-tertiary">#US9876543A</span>
+<span class="text-on-surface-variant">Ontem</span>
+</div>
+</div>
+<!-- Alert 3 -->
+<div class="bg-surface-container-lowest p-5 border-l-4 border-primary/40 rounded-r-lg shadow-sm">
+<div class="flex items-start gap-3 mb-3">
+<span class="material-symbols-outlined text-primary-dim text-xl" data-icon="new_releases">new_releases</span>
+<h5 class="text-sm font-bold text-on-surface leading-snug">Expansão de Mercado</h5>
+</div>
+<p class="text-xs text-on-surface-variant mb-4 leading-relaxed">
+<span class="font-bold text-on-surface">AstroDynamics</span> registrou entrada em 3 novos países no cluster de telecomunicações.
+                                </p>
+<div class="flex justify-between items-center text-[10px] font-bold">
+<span class="text-tertiary">MERCADO GLOBAL</span>
+<span class="text-on-surface-variant">2 dias atrás</span>
+</div>
+</div>
+</div>
+<button class="w-full mt-10 py-3 text-xs font-bold text-on-surface bg-transparent border border-outline-variant/30 hover:bg-surface-container-high transition-colors flex items-center justify-center gap-2">
+                            Ver Feed Completo
+                            <span class="material-symbols-outlined text-sm" data-icon="open_in_new">open_in_new</span>
+</button>
+</div>
+</section>
+</div>
+<!-- Detailed Patent List (Asymmetric approach) -->
+<div class="mt-20">
+<div class="flex flex-col md:flex-row justify-between items-end gap-6 mb-12">
+<div class="max-w-xl">
+<h3 class="font-headline text-4xl font-extrabold tracking-tight text-on-surface">Registros Recentes em Foco</h3>
+<p class="text-on-surface-variant mt-2 font-medium">Detalhamento dos últimos depósitos identificados por nosso motor de IA.</p>
+</div>
+<div class="flex gap-4">
+<div class="relative group">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-on-surface-variant text-lg" data-icon="search">search</span>
+<input class="bg-surface-container-low border-none focus:ring-1 focus:ring-primary pl-10 pr-4 py-2 text-sm w-64 transition-all" placeholder="Filtrar por IPC ou Titular" type="text"/>
+</div>
+</div>
+</div>
+<div class="space-y-4">
+<!-- Patent Item 1 -->
+<div class="grid grid-cols-12 items-center py-6 px-8 bg-surface-container-low/50 hover:bg-surface-container-low transition-colors group">
+<div class="col-span-1">
+<span class="text-tertiary font-bold text-xs">#INT-001</span>
+</div>
+<div class="col-span-5">
+<p class="font-headline font-bold text-on-surface text-lg">Sistema de Otimização Termodinâmica em Microgravidade</p>
+</div>
+<div class="col-span-2">
+<p class="text-xs font-bold text-on-surface-variant">TITULAR</p>
+<p class="text-sm font-medium">AstroDynamics</p>
+</div>
+<div class="col-span-2">
+<p class="text-xs font-bold text-on-surface-variant">IPC</p>
+<p class="text-sm font-medium">B64G 1/50</p>
+</div>
+<div class="col-span-2 text-right">
+<span class="inline-block px-3 py-1 rounded-full bg-primary-container text-on-primary-container text-[10px] font-bold uppercase tracking-wider">Prioridade Alta</span>
+</div>
+</div>
+<!-- Patent Item 2 -->
+<div class="grid grid-cols-12 items-center py-6 px-8 bg-surface-container-low/50 hover:bg-surface-container-low transition-colors group">
+<div class="col-span-1">
+<span class="text-tertiary font-bold text-xs">#INT-002</span>
+</div>
+<div class="col-span-5">
+<p class="font-headline font-bold text-on-surface text-lg">Protocolo de Comunicação Neural de Baixa Latência</p>
+</div>
+<div class="col-span-2">
+<p class="text-xs font-bold text-on-surface-variant">TITULAR</p>
+<p class="text-sm font-medium">NeuralLink Corp</p>
+</div>
+<div class="col-span-2">
+<p class="text-xs font-bold text-on-surface-variant">IPC</p>
+<p class="text-sm font-medium">A61B 5/04</p>
+</div>
+<div class="col-span-2 text-right">
+<span class="inline-block px-3 py-1 rounded-full bg-slate-200 text-slate-700 text-[10px] font-bold uppercase tracking-wider">Em Análise</span>
+</div>
+</div>
+<!-- Patent Item 3 -->
+<div class="grid grid-cols-12 items-center py-6 px-8 bg-surface-container-low/50 hover:bg-surface-container-low transition-colors group">
+<div class="col-span-1">
+<span class="text-tertiary font-bold text-xs">#INT-003</span>
+</div>
+<div class="col-span-5">
+<p class="font-headline font-bold text-on-surface text-lg">Arquitetura de Processador Quântico Criogênico</p>
+</div>
+<div class="col-span-2">
+<p class="text-xs font-bold text-on-surface-variant">TITULAR</p>
+<p class="text-sm font-medium">QuantumX Labs</p>
+</div>
+<div class="col-span-2">
+<p class="text-xs font-bold text-on-surface-variant">IPC</p>
+<p class="text-sm font-medium">G06N 10/00</p>
+</div>
+<div class="col-span-2 text-right">
+<span class="inline-block px-3 py-1 rounded-full bg-primary-container text-on-primary-container text-[10px] font-bold uppercase tracking-wider">Nova Descoberta</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<footer class="mt-20 py-12 px-12 bg-slate-900 text-slate-400">
+<div class="max-w-screen-2xl mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
+<div class="flex items-center gap-3">
+<div class="w-6 h-6 primary-gradient rounded flex items-center justify-center">
+<span class="material-symbols-outlined text-[10px] text-white" data-icon="monolith">monorail</span>
+</div>
+<span class="font-headline font-bold text-slate-100">Aura Patent Intelligence</span>
+</div>
+<div class="flex gap-12 text-sm">
+<a class="hover:text-emerald-400 transition-colors" href="#">Termos de Uso</a>
+<a class="hover:text-emerald-400 transition-colors" href="#">Privacidade</a>
+<a class="hover:text-emerald-400 transition-colors" href="#">Suporte</a>
+</div>
+<p class="text-[10px] uppercase tracking-widest">© 2024 Aura Intelligence. Todos os direitos reservados.</p>
+</div>
+</footer>
+</main>
+</body></html>

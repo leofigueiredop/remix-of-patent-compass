@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+
+<html class="light" lang="pt-BR"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Aura Patent Intelligence | Painel de Controle</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&amp;family=Inter:wght@100..900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "surface-dim": "#cfdce3",
+                        "secondary-fixed": "#d5e3fc",
+                        "primary": "#3a665d",
+                        "on-primary-fixed-variant": "#38635a",
+                        "secondary-fixed-dim": "#c7d5ed",
+                        "error-container": "#fe8983",
+                        "error": "#9f403d",
+                        "surface-container-highest": "#d9e4ea",
+                        "outline-variant": "#a9b4b9",
+                        "inverse-surface": "#0b0f10",
+                        "on-primary": "#ddfff5",
+                        "secondary": "#526074",
+                        "on-error-container": "#752121",
+                        "on-surface": "#2a3439",
+                        "on-secondary-fixed": "#324053",
+                        "tertiary": "#4a4bd7",
+                        "on-error": "#fff7f6",
+                        "background": "#f7f9fb",
+                        "on-primary-container": "#2d5950",
+                        "on-tertiary-container": "#000000",
+                        "inverse-primary": "#cbfbee",
+                        "on-background": "#2a3439",
+                        "on-tertiary-fixed-variant": "#010028",
+                        "secondary-dim": "#465468",
+                        "tertiary-dim": "#3d3dcb",
+                        "primary-fixed": "#bdece0",
+                        "primary-dim": "#2e5a51",
+                        "surface-container-lowest": "#ffffff",
+                        "on-primary-fixed": "#19473e",
+                        "on-surface-variant": "#566166",
+                        "primary-fixed-dim": "#afded2",
+                        "inverse-on-surface": "#9a9d9f",
+                        "secondary-container": "#d5e3fc",
+                        "surface": "#f7f9fb",
+                        "tertiary-fixed-dim": "#6366f1",
+                        "surface-tint": "#3a665d",
+                        "surface-container-high": "#e1e9ee",
+                        "surface-container": "#e8eff3",
+                        "error-dim": "#4e0309",
+                        "on-secondary-container": "#455367",
+                        "outline": "#717c82",
+                        "on-secondary": "#f8f8ff",
+                        "primary-container": "#bdece0",
+                        "surface-container-low": "#f0f4f7",
+                        "tertiary-fixed": "#7073ff",
+                        "surface-variant": "#d9e4ea",
+                        "surface-bright": "#f7f9fb",
+                        "on-tertiary-fixed": "#000000",
+                        "on-tertiary": "#fbf7ff",
+                        "tertiary-container": "#7073ff",
+                        "on-secondary-fixed-variant": "#4e5c71"
+                    },
+                    fontFamily: {
+                        "headline": ["Manrope"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    },
+                    borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .premium-gradient {
+            background: linear-gradient(135deg, #3a665d 0%, #2e5a51 100%);
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+        }
+    </style>
+</head>
+<body class="bg-surface font-body text-on-surface antialiased">
+<!-- TopNavBar -->
+<header class="bg-slate-50/80 backdrop-blur-xl docked full-width top-0 sticky z-50">
+<div class="flex items-center justify-between px-8 py-4 w-full max-w-screen-2xl mx-auto font-['Manrope'] tracking-tight antialiased">
+<div class="flex items-center gap-12">
+<span class="text-2xl font-bold tracking-tighter text-emerald-950">Aura</span>
+<nav class="hidden md:flex gap-8">
+<div class="group relative">
+<button class="flex items-center gap-1 text-emerald-900 font-semibold border-b-2 border-emerald-800 pb-1">
+                            Monitoramento
+                            <span class="material-symbols-outlined text-sm">expand_more</span>
+</button>
+<!-- Dropdown -->
+<div class="absolute top-full left-0 mt-2 w-48 bg-surface-container-lowest shadow-xl rounded-xl border border-outline-variant/10 py-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all">
+<a class="block px-4 py-2 text-sm text-on-surface-variant hover:bg-surface-container-low" href="#">Colisão</a>
+<a class="block px-4 py-2 text-sm text-on-surface-variant hover:bg-surface-container-low" href="#">Mercado</a>
+<a class="block px-4 py-2 text-sm text-on-surface-variant hover:bg-surface-container-low" href="#">Processo</a>
+</div>
+</div>
+<a class="text-slate-600 font-medium hover:text-emerald-800 transition-colors" href="#">Dashboard</a>
+</nav>
+</div>
+<div class="flex items-center gap-6">
+<div class="hidden lg:flex items-center gap-2 bg-surface-container-low px-4 py-2 rounded-full border border-outline-variant/20">
+<span class="material-symbols-outlined text-slate-400">search</span>
+<input class="bg-transparent border-none focus:ring-0 text-sm w-48 placeholder-slate-400" placeholder="Buscar patente..." type="text"/>
+</div>
+<div class="flex items-center gap-3">
+<button class="p-2 hover:bg-slate-100/50 rounded-md transition-all relative">
+<span class="material-symbols-outlined text-slate-600">notifications</span>
+<span class="absolute top-2 right-2 w-2 h-2 bg-error rounded-full border-2 border-white"></span>
+</button>
+<button class="p-2 hover:bg-slate-100/50 rounded-md transition-all">
+<span class="material-symbols-outlined text-slate-600">settings</span>
+</button>
+<div class="h-8 w-[1px] bg-slate-200"></div>
+<img alt="User profile" class="w-9 h-9 rounded-full bg-slate-200 object-cover" data-alt="Imagem de perfil do usuário" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDUkCv_vI5Mucaox7dRNw3w6nB2gwRLXwSmDhvSLljM-ZAUdummWvYgf9oQ5P03xTl1qJvHwEAMVRnLBlKC4_Hl_ONF5Dkjcedwa8wotUaDu9BKJoUrsnt8b_t82wm8GT-xes-pCoxg37p6N3XIi-wvFul8LYldSi5XuJ5PhV_0xEGTrZECvBw9tlfDL7Bw8vvCJeBlb9tlaV_s_l_NP0pZ7SgNSxjOJXNwyLiE1AdysDn9htup3T4yWjzkUJ0vA1jLI_uKqXdmlso"/>
+</div>
+</div>
+</div>
+<div class="bg-slate-200/50 h-[1px] w-full"></div>
+</header>
+<div class="flex min-h-screen">
+<!-- SideNavBar -->
+<aside class="h-screen w-64 fixed left-0 top-0 bg-slate-100 hidden xl:block pt-24">
+<div class="flex flex-col gap-2 p-6 font-['Manrope'] text-sm font-medium">
+<div class="mb-8 px-2">
+<h3 class="text-lg font-black text-slate-900 uppercase tracking-widest">Aura Patent</h3>
+<p class="text-xs text-slate-500 font-normal">Intellectual Monolith</p>
+</div>
+<a class="flex items-center gap-3 p-3 text-slate-500 hover:bg-slate-200/50 hover:translate-x-1 transition-all rounded-lg" href="#">
+<span class="material-symbols-outlined" data-icon="radar">radar</span>
+<span>Colisão</span>
+</a>
+<a class="flex items-center gap-3 p-3 text-slate-500 hover:bg-slate-200/50 hover:translate-x-1 transition-all rounded-lg" href="#">
+<span class="material-symbols-outlined" data-icon="analytics">analytics</span>
+<span>Mercado</span>
+</a>
+<a class="flex items-center gap-3 p-3 text-slate-500 hover:bg-slate-200/50 hover:translate-x-1 transition-all rounded-lg" href="#">
+<span class="material-symbols-outlined" data-icon="account_tree">account_tree</span>
+<span>Processo</span>
+</a>
+<a class="flex items-center gap-3 p-3 bg-white text-emerald-900 shadow-sm rounded-lg hover:translate-x-1 transition-all" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span>Geral</span>
+</a>
+<button class="mt-8 premium-gradient text-white py-3 px-4 rounded-lg flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider shadow-lg active:scale-[0.98] transition-transform">
+<span class="material-symbols-outlined text-sm">add</span>
+                    Novo Monitoramento
+                </button>
+</div>
+</aside>
+<!-- Main Content Canvas -->
+<main class="flex-1 xl:ml-64 p-8 lg:p-12">
+<div class="max-w-7xl mx-auto space-y-12">
+<!-- Hero Section / Header -->
+<header class="flex flex-col md:flex-row justify-between items-end gap-6">
+<div class="space-y-2">
+<span class="text-primary font-bold tracking-widest text-xs uppercase">Visão Consolidada</span>
+<h1 class="font-headline text-5xl font-extrabold tracking-tighter text-on-surface">Painel de Inteligência</h1>
+<p class="text-on-surface-variant max-w-lg leading-relaxed">Bem-vindo, Aura Analyst. Analisamos 1.2M de novas patentes hoje para identificar riscos estratégicos ao seu portfólio.</p>
+</div>
+<div class="flex gap-3">
+<button class="px-6 py-3 text-xs font-bold tracking-widest uppercase border border-outline-variant/30 hover:bg-surface-container-low transition-colors rounded-md">Exportar PDF</button>
+<button class="px-6 py-3 text-xs font-bold tracking-widest uppercase premium-gradient text-on-primary rounded-md shadow-lg shadow-primary/20">Configurar Alertas</button>
+</div>
+</header>
+<!-- Bento Grid Layout -->
+<div class="grid grid-cols-1 md:grid-cols-12 gap-6">
+<!-- Prazos Críticos Widget (Large) -->
+<section class="md:col-span-8 bg-surface-container-low p-8 rounded-xl relative overflow-hidden flex flex-col justify-between min-h-[400px]">
+<div class="z-10 relative">
+<div class="flex justify-between items-start mb-8">
+<div>
+<h2 class="font-headline text-2xl font-bold tracking-tight mb-1">Prazos Críticos</h2>
+<p class="text-on-surface-variant text-sm">Ações regulatórias requeridas nos próximos 30 dias</p>
+</div>
+<span class="bg-error-container text-on-error-container px-3 py-1 text-xs font-bold rounded-full">3 URGENTES</span>
+</div>
+<div class="space-y-4">
+<!-- Timeline Item -->
+<div class="bg-surface-container-lowest p-5 rounded-lg border-l-4 border-error flex justify-between items-center group hover:translate-x-2 transition-transform cursor-pointer">
+<div class="flex items-center gap-5">
+<div class="text-center">
+<span class="block text-xs uppercase font-bold text-slate-400">Out</span>
+<span class="block text-xl font-black text-on-surface">24</span>
+</div>
+<div>
+<p class="text-tertiary text-[10px] font-bold uppercase tracking-tighter mb-1">BR 10 2023 004561-2</p>
+<p class="font-bold text-on-surface">Pagamento de Anuidade (3º Ano)</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-slate-300 group-hover:text-primary transition-colors">arrow_forward_ios</span>
+</div>
+<div class="bg-surface-container-lowest p-5 rounded-lg border-l-4 border-primary flex justify-between items-center group hover:translate-x-2 transition-transform cursor-pointer">
+<div class="flex items-center gap-5">
+<div class="text-center">
+<span class="block text-xs uppercase font-bold text-slate-400">Nov</span>
+<span class="block text-xl font-black text-on-surface">02</span>
+</div>
+<div>
+<p class="text-tertiary text-[10px] font-bold uppercase tracking-tighter mb-1">US 11,245,678 B2</p>
+<p class="font-bold text-on-surface">Resposta a Parecer Técnico (USPTO)</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-slate-300 group-hover:text-primary transition-colors">arrow_forward_ios</span>
+</div>
+</div>
+</div>
+<!-- Visual Noise / Decoration -->
+<div class="absolute -bottom-20 -right-20 w-64 h-64 bg-primary/5 rounded-full blur-3xl"></div>
+</section>
+<!-- Saúde do Portfólio (Donut Chart Minimalista) -->
+<section class="md:col-span-4 bg-surface-container-lowest p-8 rounded-xl border border-outline-variant/10 flex flex-col items-center justify-center text-center shadow-sm">
+<h2 class="font-headline text-xl font-bold mb-6">Saúde do Portfólio</h2>
+<!-- Minimalist SVG Donut -->
+<div class="relative w-48 h-48 mb-6 flex items-center justify-center">
+<svg class="w-full h-full transform -rotate-90">
+<circle cx="96" cy="96" fill="transparent" r="80" stroke="#f0f4f7" stroke-width="12"></circle>
+<circle cx="96" cy="96" fill="transparent" r="80" stroke="#3a665d" stroke-dasharray="502" stroke-dashoffset="120" stroke-linecap="round" stroke-width="12"></circle>
+<circle cx="96" cy="96" fill="transparent" r="80" stroke="#4a4bd7" stroke-dasharray="502" stroke-dashoffset="450" stroke-linecap="round" stroke-width="12"></circle>
+</svg>
+<div class="absolute inset-0 flex flex-col items-center justify-center">
+<span class="text-4xl font-black text-on-surface">82%</span>
+<span class="text-[10px] font-bold uppercase text-slate-400 tracking-widest">Ativo</span>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-4 w-full">
+<div class="text-left p-3 bg-surface-container-low rounded-lg">
+<span class="block text-[10px] uppercase font-bold text-primary mb-1">Concedidas</span>
+<span class="text-lg font-black">142</span>
+</div>
+<div class="text-left p-3 bg-surface-container-low rounded-lg">
+<span class="block text-[10px] uppercase font-bold text-tertiary mb-1">Em Exame</span>
+<span class="text-lg font-black">28</span>
+</div>
+</div>
+</section>
+<!-- Novas Colisões Widget -->
+<section class="md:col-span-6 bg-surface-container p-8 rounded-xl min-h-[300px]">
+<div class="flex justify-between items-center mb-6">
+<h2 class="font-headline text-2xl font-bold">Novas Colisões</h2>
+<button class="text-primary text-xs font-bold uppercase tracking-wider hover:underline">Ver Mapa Térmico</button>
+</div>
+<div class="space-y-4">
+<div class="flex items-start gap-4 p-4 hover:bg-surface-container-high transition-colors rounded-lg cursor-pointer">
+<div class="w-12 h-12 rounded bg-white flex items-center justify-center text-primary border border-outline-variant/10">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">warning</span>
+</div>
+<div class="flex-1">
+<div class="flex justify-between">
+<h4 class="font-bold text-on-surface">TechCorp Systems Inc.</h4>
+<span class="text-[10px] font-bold text-error uppercase">94% Match</span>
+</div>
+<p class="text-sm text-on-surface-variant line-clamp-2 mt-1">Pedido de patente relacionado a sistemas de resfriamento criogênico em data centers...</p>
+</div>
+</div>
+<div class="flex items-start gap-4 p-4 hover:bg-surface-container-high transition-colors rounded-lg cursor-pointer">
+<div class="w-12 h-12 rounded bg-white flex items-center justify-center text-slate-400 border border-outline-variant/10">
+<span class="material-symbols-outlined">radar</span>
+</div>
+<div class="flex-1">
+<div class="flex justify-between">
+<h4 class="font-bold text-on-surface">Global Nano Labs</h4>
+<span class="text-[10px] font-bold text-slate-500 uppercase">72% Match</span>
+</div>
+<p class="text-sm text-on-surface-variant line-clamp-2 mt-1">Utilização de grafeno em interfaces de carregamento ultra-rápido para dispositivos móveis...</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Alertas de Mercado (Asymmetric Visual) -->
+<section class="md:col-span-6 glass-panel border border-outline-variant/10 p-8 rounded-xl flex flex-col justify-between">
+<div>
+<div class="flex items-center gap-2 mb-6">
+<span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+<h2 class="font-headline text-2xl font-bold">Alertas de Mercado</h2>
+</div>
+<!-- Activity Feed -->
+<div class="space-y-6 relative before:absolute before:left-2 before:top-2 before:bottom-2 before:w-[1px] before:bg-outline-variant/20">
+<div class="relative pl-8">
+<div class="absolute left-0 top-1 w-4 h-4 rounded-full bg-white border-2 border-primary"></div>
+<p class="text-xs text-on-surface-variant mb-1">Há 2 horas</p>
+<p class="font-medium text-sm">Novo concorrente "InnoFlow" entrou no segmento de **Saneamento Digital** na Alemanha.</p>
+</div>
+<div class="relative pl-8">
+<div class="absolute left-0 top-1 w-4 h-4 rounded-full bg-white border-2 border-slate-300"></div>
+<p class="text-xs text-on-surface-variant mb-1">Há 5 horas</p>
+<p class="font-medium text-sm">Destaque: Relatório de IA indica 15% de aumento em depósitos de **Baterias de Estado Sólido** na Ásia.</p>
+</div>
+<div class="relative pl-8">
+<div class="absolute left-0 top-1 w-4 h-4 rounded-full bg-white border-2 border-slate-300"></div>
+<p class="text-xs text-on-surface-variant mb-1">Ontem</p>
+<p class="font-medium text-sm">Aquisição estratégica: **MegaBio** comprou portfólio de patentes da BioStartup por $45M.</p>
+</div>
+</div>
+</div>
+<div class="mt-8 p-4 bg-primary/10 rounded-lg border border-primary/20 flex items-center justify-between">
+<span class="text-xs font-bold text-on-primary-container">Relatório Semanal de Tendências</span>
+<span class="material-symbols-outlined text-primary">download</span>
+</div>
+</section>
+</div>
+<!-- Portfolio Health Trends (Bar Chart Section) -->
+<section class="bg-surface-container-low p-8 rounded-xl">
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-10">
+<div>
+<h2 class="font-headline text-2xl font-bold tracking-tight">Crescimento de Ativos</h2>
+<p class="text-on-surface-variant text-sm">Evolução do portfólio global nos últimos 12 meses</p>
+</div>
+<div class="flex bg-surface-container-highest p-1 rounded-md">
+<button class="px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-white rounded shadow-sm">Mensal</button>
+<button class="px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-500">Trimestral</button>
+</div>
+</div>
+<!-- Minimalist Bar Chart (Simulated with HTML/Tailwind) -->
+<div class="h-64 flex items-end justify-between gap-2 md:gap-4 px-4">
+<div class="flex-1 flex flex-col items-center gap-2 group">
+<div class="w-full bg-slate-300 rounded-t-sm h-[30%] group-hover:bg-primary transition-colors"></div>
+<span class="text-[10px] text-slate-400 font-bold uppercase">Jan</span>
+</div>
+<div class="flex-1 flex flex-col items-center gap-2 group">
+<div class="w-full bg-slate-300 rounded-t-sm h-[35%] group-hover:bg-primary transition-colors"></div>
+<span class="text-[10px] text-slate-400 font-bold uppercase">Fev</span>
+</div>
+<div class="flex-1 flex flex-col items-center gap-2 group">
+<div class="w-full bg-slate-300 rounded-t-sm h-[45%] group-hover:bg-primary transition-colors"></div>
+<span class="text-[10px] text-slate-400 font-bold uppercase">Mar</span>
+</div>
+<div class="flex-1 flex flex-col items-center gap-2 group">
+<div class="w-full bg-slate-300 rounded-t-sm h-[40%] group-hover:bg-primary transition-colors"></div>
+<span class="text-[10px] text-slate-400 font-bold uppercase">Abr</span>
+</div>
+<div class="flex-1 flex flex-col items-center gap-2 group">
+<div class="w-full bg-slate-300 rounded-t-sm h-[60%] group-hover:bg-primary transition-colors"></div>
+<span class="text-[10px] text-slate-400 font-bold uppercase">Mai</span>
+</div>
+<div class="flex-1 flex flex-col items-center gap-2 group">
+<div class="w-full bg-slate-300 rounded-t-sm h-[55%] group-hover:bg-primary transition-colors"></div>
+<span class="text-[10px] text-slate-400 font-bold uppercase">Jun</span>
+</div>
+<div class="flex-1 flex flex-col items-center gap-2 group">
+<div class="w-full bg-slate-300 rounded-t-sm h-[75%] group-hover:bg-primary transition-colors"></div>
+<span class="text-[10px] text-slate-400 font-bold uppercase">Jul</span>
+</div>
+<div class="flex-1 flex flex-col items-center gap-2 group">
+<div class="w-full bg-primary rounded-t-sm h-[85%]"></div>
+<span class="text-[10px] text-primary font-bold uppercase">Ago</span>
+</div>
+<div class="flex-1 flex flex-col items-center gap-2 group">
+<div class="w-full bg-slate-300 rounded-t-sm h-[80%] group-hover:bg-primary transition-colors"></div>
+<span class="text-[10px] text-slate-400 font-bold uppercase">Set</span>
+</div>
+<div class="flex-1 flex flex-col items-center gap-2 group">
+<div class="w-full bg-slate-300 rounded-t-sm h-[90%] group-hover:bg-primary transition-colors"></div>
+<span class="text-[10px] text-slate-400 font-bold uppercase">Out</span>
+</div>
+</div>
+</section>
+</div>
+</main>
+</div>
+</body></html>

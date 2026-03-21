@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Aura Intelligence - Patent Monitoring Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "on-secondary-container": "#5c647a",
+              "secondary": "#565e74",
+              "tertiary-fixed-dim": "#4edea3",
+              "surface-tint": "#005ac2",
+              "surface-container-lowest": "#ffffff",
+              "inverse-surface": "#2d3133",
+              "outline-variant": "#c2c6d6",
+              "surface-container-highest": "#e0e3e5",
+              "outline": "#727785",
+              "secondary-fixed-dim": "#bec6e0",
+              "on-primary-fixed-variant": "#004395",
+              "surface-container-high": "#e6e8ea",
+              "on-tertiary-fixed": "#002113",
+              "secondary-container": "#dae2fd",
+              "primary-container": "#2170e4",
+              "on-secondary": "#ffffff",
+              "on-primary-container": "#fefcff",
+              "on-tertiary-fixed-variant": "#005236",
+              "surface": "#f7f9fb",
+              "primary-fixed": "#d8e2ff",
+              "background": "#f7f9fb",
+              "on-secondary-fixed": "#131b2e",
+              "surface-container-low": "#f2f4f6",
+              "on-tertiary": "#ffffff",
+              "on-error-container": "#93000a",
+              "error-container": "#ffdad6",
+              "on-error": "#ffffff",
+              "tertiary": "#006947",
+              "on-surface-variant": "#424754",
+              "on-primary": "#ffffff",
+              "inverse-primary": "#adc6ff",
+              "surface-bright": "#f7f9fb",
+              "tertiary-container": "#00855b",
+              "primary-fixed-dim": "#adc6ff",
+              "surface-dim": "#d8dadc",
+              "on-primary-fixed": "#001a42",
+              "on-tertiary-container": "#f5fff6",
+              "on-surface": "#191c1e",
+              "on-secondary-fixed-variant": "#3f465c",
+              "on-background": "#191c1e",
+              "surface-variant": "#e0e3e5",
+              "surface-container": "#eceef0",
+              "error": "#ba1a1a",
+              "tertiary-fixed": "#6ffbbe",
+              "primary": "#0058be",
+              "inverse-on-surface": "#eff1f3",
+              "secondary-fixed": "#dae2fd"
+            },
+            fontFamily: {
+              "headline": ["Manrope"],
+              "body": ["Inter"],
+              "label": ["Inter"]
+            },
+            borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            display: inline-block;
+            vertical-align: middle;
+        }
+        body {
+            background-color: #f7f9fb;
+        }
+    </style>
+</head>
+<body class="font-body text-on-surface">
+<!-- SideNavBar Component -->
+<aside class="h-screen w-64 fixed left-0 top-0 flex flex-col bg-[#001e3c] dark:bg-black border-r border-white/10 shadow-2xl z-50">
+<div class="flex flex-col h-full py-6">
+<div class="px-6 mb-8">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 bg-primary-container rounded-lg flex items-center justify-center">
+<span class="material-symbols-outlined text-white" data-icon="radar">radar</span>
+</div>
+<div>
+<h1 class="text-white font-bold text-lg font-headline leading-none">Aura Patent</h1>
+<p class="text-slate-400 text-[10px] uppercase tracking-widest mt-1">Digital Watchtower</p>
+</div>
+</div>
+</div>
+<nav class="flex-1 space-y-1">
+<!-- Dashboard Active -->
+<a class="bg-[#0058be] text-white rounded-lg mx-2 my-1 px-4 py-3 flex items-center gap-3 transition-all duration-150 active:translate-x-1 font-headline text-sm font-semibold" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span>Dashboard</span>
+</a>
+<a class="text-slate-300 hover:bg-white/5 rounded-lg mx-2 my-1 px-4 py-3 flex items-center gap-3 transition-all duration-150 font-headline text-sm font-semibold" href="#">
+<span class="material-symbols-outlined" data-icon="radar">radar</span>
+<span>Collision Monitoring</span>
+</a>
+<a class="text-slate-300 hover:bg-white/5 rounded-lg mx-2 my-1 px-4 py-3 flex items-center gap-3 transition-all duration-150 font-headline text-sm font-semibold" href="#">
+<span class="material-symbols-outlined" data-icon="account_tree">account_tree</span>
+<span>Process Monitoring</span>
+</a>
+<a class="text-slate-300 hover:bg-white/5 rounded-lg mx-2 my-1 px-4 py-3 flex items-center gap-3 transition-all duration-150 font-headline text-sm font-semibold" href="#">
+<span class="material-symbols-outlined" data-icon="insights">insights</span>
+<span>Market Monitoring</span>
+</a>
+<a class="text-slate-300 hover:bg-white/5 rounded-lg mx-2 my-1 px-4 py-3 flex items-center gap-3 transition-all duration-150 font-headline text-sm font-semibold" href="#">
+<span class="material-symbols-outlined" data-icon="description">description</span>
+<span>My Patents</span>
+</a>
+<a class="text-slate-300 hover:bg-white/5 rounded-lg mx-2 my-1 px-4 py-3 flex items-center gap-3 transition-all duration-150 font-headline text-sm font-semibold" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span>Settings</span>
+</a>
+</nav>
+<div class="px-4 mt-6">
+<button class="w-full py-3 bg-gradient-to-r from-primary to-primary-container text-white rounded-lg font-headline font-bold flex items-center justify-center gap-2 shadow-lg hover:opacity-90 transition-opacity">
+<span class="material-symbols-outlined" data-icon="add">add</span>
+<span>New Search</span>
+</button>
+</div>
+<div class="mt-auto border-t border-white/10 pt-4">
+<a class="text-slate-300 hover:bg-white/5 rounded-lg mx-2 my-1 px-4 py-3 flex items-center gap-3 font-headline text-sm font-semibold" href="#">
+<span class="material-symbols-outlined" data-icon="help">help</span>
+<span>Help Center</span>
+</a>
+<a class="text-slate-300 hover:bg-white/5 rounded-lg mx-2 my-1 px-4 py-3 flex items-center gap-3 font-headline text-sm font-semibold" href="#">
+<span class="material-symbols-outlined" data-icon="gavel">gavel</span>
+<span>Legal</span>
+</a>
+</div>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="ml-64 min-h-screen flex flex-col">
+<!-- TopNavBar Component -->
+<header class="w-full sticky top-0 z-40 bg-[#f7f9fb] dark:bg-slate-900 h-20 flex items-center justify-between px-8 font-headline antialiased tracking-tight">
+<div class="flex items-center gap-6 flex-1">
+<div class="relative w-full max-w-md">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-outline" data-icon="search">search</span>
+<input class="w-full bg-surface-container-low border-none rounded-lg pl-10 py-2.5 text-sm focus:ring-2 focus:ring-primary focus:bg-surface-container-lowest transition-all" placeholder="Search patents, companies, or keywords..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-4">
+<button class="p-2 text-secondary hover:text-primary transition-colors">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+</button>
+<button class="p-2 text-secondary hover:text-primary transition-colors">
+<span class="material-symbols-outlined" data-icon="help">help</span>
+</button>
+</div>
+<div class="h-8 w-px bg-outline-variant/30"></div>
+<div class="flex items-center gap-3">
+<div class="text-right">
+<p class="text-sm font-bold text-on-surface leading-tight">Alex Sterling</p>
+<button class="text-[11px] font-bold text-primary hover:underline uppercase tracking-tighter">Sign Out</button>
+</div>
+<img alt="User Profile" class="w-10 h-10 rounded-full object-cover ring-2 ring-primary-container/20" data-alt="Corporate professional headshot of male user" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA1jOcoCgVQ_udMaCbvq1zP0SUzLNtys-b_uKD9nOcKsJ8Y45ySPM1Bir0JWU5htMVOF5ylI37mGr03a7d8t070x5F6vHD6RwejHdi2E_XvOautsofqulrM7sB_90lsfQBT8XqJsoTnvEItplV4666x2QktYp1FNWB2xWOh9FCHpDBKY8OEAdb3zN8WIkg0pD5YdLUgliNjgLvwjpaOTxTL_rjFHAcMNe0EWukHaULvt-ftBMg00mQ3PUOPx43VVEHxdNV8qYbpPQk"/>
+</div>
+</div>
+</header>
+<!-- Dashboard Canvas -->
+<div class="p-10 max-w-[1600px] w-full mx-auto space-y-10">
+<!-- Welcome Header -->
+<section>
+<h2 class="text-4xl font-headline font-black text-on-surface tracking-tighter">Intelligence Hub</h2>
+<p class="text-on-surface-variant mt-2 font-body">Real-time monitoring of your intellectual property frontier.</p>
+</section>
+<!-- KPI Bento Grid -->
+<section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+<!-- KPI 1 -->
+<div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/10 shadow-sm transition-transform hover:scale-[1.01]">
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-primary/10 rounded-lg">
+<span class="material-symbols-outlined text-primary" data-icon="radar">radar</span>
+</div>
+<span class="text-[10px] font-bold text-tertiary bg-tertiary/10 px-2 py-1 rounded">+12%</span>
+</div>
+<p class="text-on-surface-variant text-xs font-label uppercase tracking-widest">Active Collision Checks</p>
+<h3 class="text-3xl font-headline font-black text-on-surface mt-1">1,284</h3>
+</div>
+<!-- KPI 2 -->
+<div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/10 shadow-sm transition-transform hover:scale-[1.01]">
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-secondary/10 rounded-lg">
+<span class="material-symbols-outlined text-secondary" data-icon="update">update</span>
+</div>
+<span class="text-[10px] font-bold text-primary bg-primary/10 px-2 py-1 rounded">Update</span>
+</div>
+<p class="text-on-surface-variant text-xs font-label uppercase tracking-widest">Unseen Process Updates</p>
+<h3 class="text-3xl font-headline font-black text-on-surface mt-1">42</h3>
+</div>
+<!-- KPI 3 -->
+<div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/10 shadow-sm transition-transform hover:scale-[1.01]">
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-error-container/20 rounded-lg">
+<span class="material-symbols-outlined text-error" data-icon="priority_high">priority_high</span>
+</div>
+<span class="text-[10px] font-bold text-error bg-error/10 px-2 py-1 rounded">Urgent</span>
+</div>
+<p class="text-on-surface-variant text-xs font-label uppercase tracking-widest">Critical Deadlines (Next 7 Days)</p>
+<h3 class="text-3xl font-headline font-black text-on-surface mt-1">08</h3>
+</div>
+<!-- KPI 4 -->
+<div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/10 shadow-sm transition-transform hover:scale-[1.01]">
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-tertiary/10 rounded-lg">
+<span class="material-symbols-outlined text-tertiary" data-icon="analytics">analytics</span>
+</div>
+<span class="text-[10px] font-bold text-secondary bg-secondary/10 px-2 py-1 rounded">Active</span>
+</div>
+<p class="text-on-surface-variant text-xs font-label uppercase tracking-widest">New Competitor Filings</p>
+<h3 class="text-3xl font-headline font-black text-on-surface mt-1">156</h3>
+</div>
+</section>
+<!-- Main Intelligence Layout -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-10">
+<!-- Left Column: Deadlines & Collisions -->
+<div class="lg:col-span-8 space-y-10">
+<!-- Recent Collisions Section -->
+<section class="bg-surface-container-lowest rounded-xl overflow-hidden shadow-sm">
+<div class="px-8 py-6 flex items-center justify-between border-b border-surface-container">
+<h3 class="text-xl font-headline font-bold text-on-surface">Recent Collisions</h3>
+<button class="text-primary text-sm font-bold hover:underline">View All Intelligence</button>
+</div>
+<div class="p-0">
+<!-- List Item 1 -->
+<div class="px-8 py-6 hover:bg-surface-container-low transition-colors group flex items-center justify-between">
+<div class="flex items-center gap-6">
+<div class="w-12 h-12 bg-surface-container-high rounded-lg flex items-center justify-center">
+<span class="material-symbols-outlined text-primary" data-icon="gavel">gavel</span>
+</div>
+<div>
+<h4 class="font-bold text-on-surface group-hover:text-primary transition-colors">Potential Infringement: US-10294-B2</h4>
+<p class="text-sm text-on-surface-variant">Detected overlap with "Quantum Neural Fabric" portfolio in South Korea region.</p>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<span class="px-3 py-1 bg-primary/10 text-primary text-[10px] font-bold rounded-full uppercase tracking-tighter">High Confidence</span>
+<button class="bg-surface-container-high text-on-surface font-bold py-2 px-6 rounded-lg text-sm hover:bg-primary hover:text-white transition-all">Action</button>
+</div>
+</div>
+<!-- List Item 2 -->
+<div class="px-8 py-6 hover:bg-surface-container-low transition-colors group flex items-center justify-between">
+<div class="flex items-center gap-6">
+<div class="w-12 h-12 bg-surface-container-high rounded-lg flex items-center justify-center">
+<span class="material-symbols-outlined text-secondary" data-icon="description">description</span>
+</div>
+<div>
+<h4 class="font-bold text-on-surface group-hover:text-primary transition-colors">Duplicate Filing Alert: EP-9921-A1</h4>
+<p class="text-sm text-on-surface-variant">Prior art collision found in recent USPTO publication data.</p>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<span class="px-3 py-1 bg-secondary/10 text-secondary text-[10px] font-bold rounded-full uppercase tracking-tighter">Medium Priority</span>
+<button class="bg-surface-container-high text-on-surface font-bold py-2 px-6 rounded-lg text-sm hover:bg-primary hover:text-white transition-all">Action</button>
+</div>
+</div>
+</div>
+</section>
+<!-- Market Pulse Chart Simulation -->
+<section class="bg-surface-container-lowest p-8 rounded-xl shadow-sm">
+<div class="flex items-center justify-between mb-8">
+<div>
+<h3 class="text-xl font-headline font-bold text-on-surface">Market Pulse</h3>
+<p class="text-sm text-on-surface-variant">Filing activity by monitored competitors (Last 30 Days)</p>
+</div>
+<div class="flex gap-2">
+<span class="flex items-center gap-2 text-xs font-bold text-on-surface-variant"><span class="w-2 h-2 rounded-full bg-primary"></span> Competitor A</span>
+<span class="flex items-center gap-2 text-xs font-bold text-on-surface-variant"><span class="w-2 h-2 rounded-full bg-tertiary"></span> Competitor B</span>
+</div>
+</div>
+<!-- Abstract Visual Chart -->
+<div class="h-48 w-full flex items-end gap-2 relative">
+<div class="absolute inset-0 border-b border-outline-variant/20 flex flex-col justify-between">
+<div class="w-full h-px bg-outline-variant/10"></div>
+<div class="w-full h-px bg-outline-variant/10"></div>
+<div class="w-full h-px bg-outline-variant/10"></div>
+<div class="w-full h-px bg-outline-variant/10"></div>
+</div>
+<!-- Bars -->
+<div class="flex-1 bg-primary/20 rounded-t-sm h-[40%] transition-all hover:bg-primary/40"></div>
+<div class="flex-1 bg-primary/20 rounded-t-sm h-[60%] transition-all hover:bg-primary/40"></div>
+<div class="flex-1 bg-primary/20 rounded-t-sm h-[55%] transition-all hover:bg-primary/40"></div>
+<div class="flex-1 bg-primary/20 rounded-t-sm h-[80%] transition-all hover:bg-primary/40"></div>
+<div class="flex-1 bg-tertiary/20 rounded-t-sm h-[30%] transition-all hover:bg-tertiary/40"></div>
+<div class="flex-1 bg-tertiary/20 rounded-t-sm h-[45%] transition-all hover:bg-tertiary/40"></div>
+<div class="flex-1 bg-primary/20 rounded-t-sm h-[90%] transition-all hover:bg-primary/40"></div>
+<div class="flex-1 bg-primary/20 rounded-t-sm h-[70%] transition-all hover:bg-primary/40"></div>
+<div class="flex-1 bg-tertiary/20 rounded-t-sm h-[20%] transition-all hover:bg-tertiary/40"></div>
+<div class="flex-1 bg-tertiary/20 rounded-t-sm h-[50%] transition-all hover:bg-tertiary/40"></div>
+<div class="flex-1 bg-primary/20 rounded-t-sm h-[65%] transition-all hover:bg-primary/40"></div>
+<div class="flex-1 bg-primary/20 rounded-t-sm h-[85%] transition-all hover:bg-primary/40"></div>
+</div>
+<div class="flex justify-between mt-4 text-[10px] text-on-surface-variant font-bold uppercase tracking-widest">
+<span>Week 01</span>
+<span>Week 02</span>
+<span>Week 03</span>
+<span>Week 04</span>
+</div>
+</section>
+</div>
+<!-- Right Column: Critical Deadlines -->
+<div class="lg:col-span-4">
+<section class="bg-surface-container-lowest rounded-xl p-8 shadow-sm h-fit">
+<div class="flex items-center gap-3 mb-8">
+<span class="material-symbols-outlined text-error" data-icon="event_busy">event_busy</span>
+<h3 class="text-xl font-headline font-bold text-on-surface">Critical Deadlines</h3>
+</div>
+<div class="space-y-6">
+<!-- Deadline Card 1 -->
+<div class="relative pl-4 border-l-4 border-error">
+<div class="flex items-center justify-between mb-1">
+<span class="px-2 py-0.5 bg-error-container text-on-error-container text-[10px] font-bold rounded uppercase">Immediate</span>
+<span class="text-xs font-bold text-error">2 Days left</span>
+</div>
+<h4 class="text-sm font-bold text-on-surface">Requirement 6.1 - Patent BR10</h4>
+<p class="text-[11px] text-on-surface-variant mt-1 leading-relaxed">Office Action response required for biometric authentication module.</p>
+</div>
+<!-- Deadline Card 2 -->
+<div class="relative pl-4 border-l-4 border-error">
+<div class="flex items-center justify-between mb-1">
+<span class="px-2 py-0.5 bg-error-container text-on-error-container text-[10px] font-bold rounded uppercase">Urgent</span>
+<span class="text-xs font-bold text-error">4 Days left</span>
+</div>
+<h4 class="text-sm font-bold text-on-surface">Maintenance Fee - US9912</h4>
+<p class="text-[11px] text-on-surface-variant mt-1 leading-relaxed">3.5-year maintenance fee window closing for hardware acceleration unit.</p>
+</div>
+<!-- Deadline Card 3 -->
+<div class="relative pl-4 border-l-4 border-outline-variant">
+<div class="flex items-center justify-between mb-1">
+<span class="px-2 py-0.5 bg-surface-container-high text-on-surface-variant text-[10px] font-bold rounded uppercase">Warning</span>
+<span class="text-xs font-bold text-on-surface-variant">7 Days left</span>
+</div>
+<h4 class="text-sm font-bold text-on-surface">EPO Translation Filing</h4>
+<p class="text-[11px] text-on-surface-variant mt-1 leading-relaxed">Mandatory German translation for "Cloud Mesh 4.0" specification.</p>
+</div>
+</div>
+<button class="w-full mt-10 py-3 border border-outline-variant/30 rounded-lg text-sm font-bold text-secondary hover:bg-surface-container hover:text-primary transition-all flex items-center justify-center gap-2">
+<span class="material-symbols-outlined" data-icon="calendar_month">calendar_month</span>
+                            View Legal Calendar
+                        </button>
+</section>
+</div>
+</div>
+</div>
+<!-- Footer Component -->
+<footer class="w-full border-t border-slate-200 dark:border-slate-800 bg-[#f7f9fb] dark:bg-slate-950 mt-auto">
+<div class="flex justify-between items-center px-12 py-8 w-full">
+<p class="font-['Inter'] text-[11px] uppercase tracking-widest text-[#565e74] dark:text-slate-500">
+                    © 2024 Aura Patent Intelligence. Data synchronized with USPTO/EPO.
+                </p>
+<div class="flex gap-8">
+<a class="font-['Inter'] text-[11px] uppercase tracking-widest text-[#565e74] hover:text-[#0058be] transition-opacity duration-300" href="#">Terms of Service</a>
+<a class="font-['Inter'] text-[11px] uppercase tracking-widest text-[#565e74] hover:text-[#0058be] transition-opacity duration-300" href="#">Privacy Policy</a>
+<a class="font-['Inter'] text-[11px] uppercase tracking-widest text-[#565e74] hover:text-[#0058be] transition-opacity duration-300" href="#">Data Sources</a>
+</div>
+</div>
+</footer>
+</main>
+</body></html>

@@ -454,7 +454,7 @@ export default function Keywords() {
       )}
       <WizardSteps currentStep={3} steps={steps} />
 
-      <div className="max-w-6xl space-y-8">
+      <div className="w-full space-y-8">
         <div>
           <h1 className="text-2xl font-bold mb-1">Estratégia de Busca Avançada</h1>
           <p className="text-muted-foreground text-sm">

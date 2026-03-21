@@ -25,44 +25,11 @@ type NavItem = {
 
 const dashboardItems: NavItem[] = [
   {
-    label: "Dashboard Pesquisa",
+    label: "Dashboard Central",
     icon: LayoutDashboard,
-    path: "/research/dashboard",
-    description: "Visão do pipeline e produtividade",
-  },
-  {
-    label: "Dashboard Monitoramento",
-    icon: ShieldCheck,
-    path: "/monitoring/dashboard",
-    description: "Alertas, riscos e prazos críticos",
-  },
-];
-
-const monitoringItems: NavItem[] = [
-  {
-    label: "Mercado",
-    icon: SearchCheck,
-    path: "/monitoring/base",
-    description: "Base para análise competitiva",
-  },
-  {
-    label: "Colisão",
-    icon: ShieldCheck,
-    path: "/monitoring/patents",
-    description: "Patentes monitoradas e conflitos",
-  },
-  {
-    label: "Processo",
-    icon: Workflow,
-    path: "/monitoring/background-workers",
-    description: "Filas, reprocessos e ingestão",
-  },
-  {
-    label: "Configurações Monitoramento",
-    icon: Settings,
-    path: "/monitoring/settings",
-    description: "Parâmetros operacionais",
-  },
+    path: "/dashboard",
+    description: "Visão gerencial da inteligência",
+  }
 ];
 
 const researchItems: NavItem[] = [
@@ -73,29 +40,89 @@ const researchItems: NavItem[] = [
     description: "Fluxo assistido de patenteabilidade",
   },
   {
-    label: "Busca Rápida",
-    icon: SearchCheck,
-    path: "/search",
-    description: "Consulta direta por número e termo",
-  },
-  {
-    label: "Histórico",
+    label: "Pesquisas Salvas",
     icon: FileText,
     path: "/research/history",
     description: "Resultados e versões anteriores",
+  }
+];
+
+const monitoringItems: NavItem[] = [
+  {
+    label: "Colidência",
+    icon: ShieldCheck,
+    path: "/monitoring/collision",
+    description: "Conflitos entre ativos monitorados e RPI",
   },
   {
-    label: "Configurações Pesquisa",
-    icon: Settings,
-    path: "/research/settings",
-    description: "Preferências do fluxo de pesquisa",
+    label: "Processo",
+    icon: Workflow,
+    path: "/monitoring/process",
+    description: "Acompanhamento de exigências e anuidades",
   },
   {
-    label: "Base de Conhecimento",
+    label: "Mercado",
+    icon: SearchCheck,
+    path: "/monitoring/market",
+    description: "Tendências por titular e tecnologias",
+  },
+  {
+    label: "Meus Ativos",
+    icon: FileText,
+    path: "/monitoring/assets",
+    description: "Patentes monitoradas do portfólio",
+  }
+];
+
+const baseItems: NavItem[] = [
+  {
+    label: "Base Local",
     icon: BookOpen,
-    path: "/knowledge-base",
-    description: "Conhecimento interno e guias",
+    path: "/base/patents",
+    description: "Patentes extraídas e consolidadas",
   },
+  {
+    label: "Busca Rápida",
+    icon: Search,
+    path: "/search",
+    description: "Consulta direta por número e termo",
+  }
+];
+
+const crmItems: NavItem[] = [
+  {
+    label: "Clientes",
+    icon: FileText,
+    path: "/clients",
+    description: "Gestão do portfólio de clientes",
+  },
+  {
+    label: "Demandas",
+    icon: Workflow,
+    path: "/demands",
+    description: "Pipeline de tarefas e orçamentos",
+  }
+];
+
+const opsItems: NavItem[] = [
+  {
+    label: "Alertas",
+    icon: Bell,
+    path: "/alerts",
+    description: "Central unificada de notificações",
+  },
+  {
+    label: "Background Workers",
+    icon: Settings,
+    path: "/operations/workers",
+    description: "Filas, reprocessos e ingestão",
+  },
+  {
+    label: "Saúde do Sistema",
+    icon: ShieldCheck,
+    path: "/operations/system-health",
+    description: "Monitoramento de integrações",
+  }
 ];
 
 function isPathActive(currentPath: string, itemPath: string) {
@@ -155,7 +182,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-sky-50 via-cyan-50 to-emerald-100/50">
       <header className="sticky top-0 z-40 border-b border-emerald-100/70 bg-white/75 backdrop-blur-xl">
-        <div className="mx-auto flex h-16 max-w-[1440px] items-center justify-between px-4 sm:px-6 lg:px-8">
+        <div className="mx-auto flex h-16 max-w-[1800px] items-center justify-between px-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-8">
             <button
               onClick={() => navigate("/research/dashboard")}
@@ -172,17 +199,20 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
             <nav className="hidden items-center gap-2 lg:flex">
               <DropdownNav label="Dashboard" items={dashboardItems} currentPath={location.pathname} onNavigate={navigate} />
-              <DropdownNav label="Monitoramento" items={monitoringItems} currentPath={location.pathname} onNavigate={navigate} />
-              <DropdownNav label="Pesquisa" items={researchItems} currentPath={location.pathname} onNavigate={navigate} />
+              <DropdownNav label="Pesquisas" items={researchItems} currentPath={location.pathname} onNavigate={navigate} />
+              <DropdownNav label="Monitoramentos" items={monitoringItems} currentPath={location.pathname} onNavigate={navigate} />
+              <DropdownNav label="Base" items={baseItems} currentPath={location.pathname} onNavigate={navigate} />
+              <DropdownNav label="CRM" items={crmItems} currentPath={location.pathname} onNavigate={navigate} />
+              <DropdownNav label="Operações" items={opsItems} currentPath={location.pathname} onNavigate={navigate} />
             </nav>
           </div>
 
           <div className="flex items-center gap-2">
-            <button className="relative rounded-lg p-2 text-slate-600 transition-colors hover:bg-white hover:text-cyan-700">
+            <button onClick={() => navigate("/alerts")} className="relative rounded-lg p-2 text-slate-600 transition-colors hover:bg-white hover:text-cyan-700">
               <Bell className="h-4 w-4" />
               <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-rose-500" />
             </button>
-            <button className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-white hover:text-cyan-700">
+            <button onClick={() => navigate("/settings")} className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-white hover:text-cyan-700">
               <Settings className="h-4 w-4" />
             </button>
             <div className="mx-1 h-6 w-px bg-slate-200" />
@@ -205,10 +235,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <main className="mx-auto w-full max-w-[1800px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <div className="rounded-2xl border border-cyan-100/80 bg-white/78 p-4 shadow-sm backdrop-blur-sm sm:p-6 lg:p-8 animate-fade-in">
           <div className="mb-5 flex flex-wrap items-center gap-2 lg:hidden">
-            {[...dashboardItems, ...monitoringItems, ...researchItems].map((item) => (
+            {[...dashboardItems, ...researchItems, ...monitoringItems, ...baseItems, ...crmItems, ...opsItems].map((item) => (
               <button
                 key={item.path}
                 onClick={() => navigate(item.path)}

@@ -105,56 +105,58 @@ export default function PatentBase() {
 
     return (
         <AppLayout>
-            <div className="space-y-8 max-w-[1400px] mx-auto">
+            <div className="flex flex-col gap-6 w-full mx-auto">
                 <div className="flex justify-between items-start">
                     <div className="animate-in fade-in slide-in-from-left duration-700">
-                        <h1 className="text-3xl font-extrabold tracking-tight text-foreground/90 mb-2 bg-gradient-to-r from-foreground to-foreground/60 bg-clip-text text-transparent">
-                            Base de Patentes
+                        <h1 className="text-2xl font-bold flex items-center gap-3 text-slate-900 mb-2">
+                            <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center">
+                                <Database className="w-5 h-5 text-emerald-600" />
+                            </div>
+                            Base Local de Patentes
                         </h1>
-                        <p className="text-muted-foreground">
-                            Gerencie sua base local de patentes sincronizadas.
+                        <p className="text-muted-foreground text-sm mt-1">
+                            Gerencie sua base local de patentes extraídas e consolidadas.
                         </p>
                     </div>
                     <div className="flex gap-3">
                         <Button 
                             variant="outline" 
                             size="sm" 
-                            className="glass-effect"
+                            className="bg-white border-slate-200"
                             onClick={() => fetchData()}
                             disabled={loading}
                         >
-                            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                            Atualizar
+                            <RefreshCw className={`w-4 h-4 mr-2 text-slate-500 ${loading ? 'animate-spin' : ''}`} />
+                            Atualizar Base
                         </Button>
                     </div>
                 </div>
 
                 <div className="space-y-6">
                     <div className="animate-in fade-in zoom-in-95 duration-500">
-                        <Card className="border-none shadow-2xl glass-effect-dark overflow-hidden">
-                            <CardHeader className="border-b bg-muted/20">
-                                <div className="flex justify-between items-center">
+                        <Card className="border-slate-200 shadow-sm bg-white overflow-hidden rounded-xl">
+                            <CardHeader className="border-b border-slate-100 bg-slate-50/50 py-4">
+                                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                                     <div>
-                                        <CardTitle className="text-lg flex items-center gap-2">
-                                            <Database className="w-5 h-5 text-primary" />
-                                            Acervo Local de Patentes
+                                        <CardTitle className="text-sm font-bold text-slate-800">
+                                            Acervo Consolidado
                                         </CardTitle>
-                                        <CardDescription>
-                                            Patentes conhecidas na base local. Use o filtro para buscar por número, título, titular ou inventor.
+                                        <CardDescription className="text-xs mt-0.5">
+                                            Pesquise e gerencie as patentes sincronizadas do INPI e outras fontes
                                         </CardDescription>
                                     </div>
-                                    <div className="flex gap-2">
-                                        <div className="relative">
-                                            <Search className="absolute left-2.5 top-2.5 h-4 h-4 text-muted-foreground" />
+                                    <div className="flex gap-2 w-full md:w-auto">
+                                        <div className="relative w-full md:w-64">
+                                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                                             <input 
                                                 type="search" 
-                                                placeholder="Filtrar base..." 
+                                                placeholder="Filtrar base (número, titular...)" 
                                                 value={query}
                                                 onChange={(event) => {
                                                     setPage(1);
                                                     setQuery(event.target.value);
                                                 }}
-                                                className="h-9 w-64 pl-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                className="h-9 w-full pl-9 rounded-lg border border-slate-200 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500"
                                             />
                                         </div>
                                     </div>
@@ -175,62 +177,62 @@ export default function PatentBase() {
                                 ) : (
                                     <>
                                         <Table>
-                                            <TableHeader className="bg-muted/30">
-                                                <TableRow>
-                                                    <TableHead>Número</TableHead>
-                                                    <TableHead>Resumo / Titular</TableHead>
-                                                    <TableHead className="text-center">Dados Capturados</TableHead>
-                                                    <TableHead>Última Raspagem</TableHead>
-                                                    <TableHead className="text-right">Ações</TableHead>
+                                            <TableHeader className="bg-slate-50 border-b border-slate-100">
+                                                <TableRow className="hover:bg-transparent">
+                                                    <TableHead className="font-semibold text-slate-700">Número</TableHead>
+                                                    <TableHead className="font-semibold text-slate-700">Resumo / Titular</TableHead>
+                                                    <TableHead className="font-semibold text-slate-700 text-center">Dados Capturados</TableHead>
+                                                    <TableHead className="font-semibold text-slate-700">Última Raspagem</TableHead>
+                                                    <TableHead className="font-semibold text-slate-700 text-right">Ações</TableHead>
                                                 </TableRow>
                                             </TableHeader>
                                             <TableBody>
                                                 {patents.map((patent) => (
-                                                    <TableRow key={patent.cod_pedido} className="hover:bg-muted/10 transition-colors border-b-muted/20">
-                                                        <TableCell className="font-mono font-medium text-xs">
+                                                    <TableRow key={patent.cod_pedido} className="hover:bg-slate-50/50 transition-colors border-b-slate-100">
+                                                        <TableCell className="font-mono font-medium text-xs text-slate-700">
                                                             {patent.numero_publicacao || patent.cod_pedido}
                                                         </TableCell>
                                                         <TableCell className="py-4">
-                                                            <div className="font-semibold text-sm line-clamp-1" title={patent.title}>
+                                                            <div className="font-semibold text-sm text-slate-800 line-clamp-1" title={patent.title}>
                                                                 {patent.title}
                                                             </div>
-                                                            <div className="text-[10px] text-muted-foreground mt-0.5 uppercase tracking-wider font-medium truncate max-w-[300px]">
+                                                            <div className="text-[10px] text-slate-500 mt-0.5 uppercase tracking-wider font-medium truncate max-w-[300px]">
                                                                 {patent.applicant}
                                                             </div>
                                                         </TableCell>
                                                         <TableCell>
-                                                            <div className="flex gap-1.5 justify-center">
-                                                                <Badge variant="outline" className="text-[9px] h-4.5 bg-background shadow-sm" title="Publicações">
-                                                                    PUB: {patent._count.publications}
+                                                            <div className="flex flex-wrap gap-1.5 justify-center items-center max-w-[150px] mx-auto">
+                                                                <Badge variant="outline" className="text-[10px] whitespace-nowrap py-0.5 px-2 h-5 bg-slate-50 text-slate-600 border-slate-200 font-mono" title="Publicações">
+                                                                    PUB: {patent._count?.publications || 0}
                                                                 </Badge>
-                                                                <Badge variant="outline" className="text-[9px] h-4.5 bg-background shadow-sm border-blue-200/50" title="Petições">
-                                                                    PET: {patent._count.petitions}
+                                                                <Badge variant="outline" className="text-[10px] whitespace-nowrap py-0.5 px-2 h-5 bg-blue-50 text-blue-700 border-blue-200 font-mono" title="Petições">
+                                                                    PET: {patent._count?.petitions || 0}
                                                                 </Badge>
-                                                                <Badge variant="outline" className="text-[9px] h-4.5 bg-background shadow-sm border-amber-200/50" title="Anuidades">
-                                                                    ANU: {patent._count.annuities}
+                                                                <Badge variant="outline" className="text-[10px] whitespace-nowrap py-0.5 px-2 h-5 bg-amber-50 text-amber-700 border-amber-200 font-mono" title="Anuidades">
+                                                                    ANU: {patent._count?.annuities || 0}
                                                                 </Badge>
                                                             </div>
                                                         </TableCell>
-                                                        <TableCell className="text-muted-foreground text-xs font-mono">
+                                                        <TableCell className="text-slate-500 text-xs font-mono">
                                                             {format(new Date(patent.updated_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
                                                         </TableCell>
                                                         <TableCell className="text-right">
                                                             <div className="flex justify-end gap-1">
                                                                 <Button
                                                                     variant="ghost"
-                                                                    size="xs"
-                                                                    className="text-emerald-600 hover:bg-emerald-50"
+                                                                    size="sm"
+                                                                    className="text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 text-xs h-8"
                                                                     onClick={() => void addToMonitoring(patent)}
                                                                 >
-                                                                    <Bell className="w-3 h-3 mr-1" /> Monitorar
+                                                                    <Bell className="w-3.5 h-3.5 mr-1.5" /> Monitorar
                                                                 </Button>
                                                                 <Button
                                                                     variant="ghost"
-                                                                    size="xs"
-                                                                    className="text-primary hover:bg-primary/10"
+                                                                    size="sm"
+                                                                    className="text-slate-600 hover:bg-slate-100 hover:text-slate-900 text-xs h-8"
                                                                     onClick={() => openPatentModal(patent)}
                                                                 >
-                                                                    <Download className="w-3 h-3 mr-1" /> Abrir
+                                                                    <Download className="w-3.5 h-3.5 mr-1.5" /> Abrir
                                                                 </Button>
                                                             </div>
                                                         </TableCell>
@@ -239,14 +241,15 @@ export default function PatentBase() {
                                             </TableBody>
                                         </Table>
                                         
-                                        <div className="p-4 border-t bg-muted/10 flex justify-between items-center bg-card">
-                                            <div className="text-xs text-muted-foreground">
+                                        <div className="p-4 border-t border-slate-100 bg-slate-50/50 flex justify-between items-center">
+                                            <div className="text-xs text-slate-500 font-medium">
                                                 Mostrando {patents.length} de {totalPatents} patentes no acervo
                                             </div>
                                             <div className="flex gap-2">
                                                 <Button 
                                                     variant="outline" 
-                                                    size="xs" 
+                                                    size="sm" 
+                                                    className="h-8 text-xs bg-white"
                                                     disabled={page === 1}
                                                     onClick={() => setPage(p => p - 1)}
                                                 >
@@ -254,7 +257,8 @@ export default function PatentBase() {
                                                 </Button>
                                                 <Button 
                                                     variant="outline" 
-                                                    size="xs" 
+                                                    size="sm" 
+                                                    className="h-8 text-xs bg-white"
                                                     disabled={page >= Math.ceil(totalPatents / 20)}
                                                     onClick={() => setPage(p => p + 1)}
                                                 >

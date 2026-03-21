@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+
+<html class="light" lang="pt-BR"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "on-tertiary-fixed": "#002113",
+              "surface-container": "#eceef0",
+              "on-secondary": "#ffffff",
+              "on-error": "#ffffff",
+              "inverse-primary": "#adc6ff",
+              "surface-container-low": "#f2f4f6",
+              "on-background": "#191c1e",
+              "background": "#f7f9fb",
+              "surface-container-lowest": "#ffffff",
+              "on-tertiary": "#ffffff",
+              "on-surface": "#191c1e",
+              "surface-dim": "#d8dadc",
+              "on-secondary-fixed": "#131b2e",
+              "surface": "#f7f9fb",
+              "surface-variant": "#e0e3e5",
+              "surface-bright": "#f7f9fb",
+              "secondary-fixed": "#dae2fd",
+              "inverse-on-surface": "#eff1f3",
+              "on-tertiary-container": "#f5fff6",
+              "surface-container-highest": "#e0e3e5",
+              "outline-variant": "#c2c6d6",
+              "primary-container": "#2170e4",
+              "on-surface-variant": "#424754",
+              "on-primary-fixed": "#001a42",
+              "tertiary": "#006947",
+              "on-primary-container": "#fefcff",
+              "primary": "#0058be",
+              "error": "#ba1a1a",
+              "secondary-container": "#dae2fd",
+              "on-primary": "#ffffff",
+              "inverse-surface": "#2d3133",
+              "primary-fixed": "#d8e2ff",
+              "tertiary-container": "#00855b",
+              "on-tertiary-fixed-variant": "#005236",
+              "outline": "#727785",
+              "tertiary-fixed-dim": "#4edea3",
+              "secondary": "#565e74",
+              "on-secondary-fixed-variant": "#3f465c",
+              "error-container": "#ffdad6",
+              "surface-container-high": "#e6e8ea",
+              "secondary-fixed-dim": "#bec6e0",
+              "on-primary-fixed-variant": "#004395",
+              "on-error-container": "#93000a",
+              "tertiary-fixed": "#6ffbbe",
+              "primary-fixed-dim": "#adc6ff",
+              "surface-tint": "#005ac2",
+              "on-secondary-container": "#5c647a"
+            },
+            fontFamily: {
+              "headline": ["Manrope"],
+              "body": ["Inter"],
+              "label": ["Inter"]
+            },
+            borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+      .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      }
+      .glass-effect {
+        background: rgba(255, 255, 255, 0.7);
+        backdrop-filter: blur(12px);
+      }
+      body {
+        font-family: 'Inter', sans-serif;
+        background-color: #f7f9fb;
+      }
+      h1, h2, h3 {
+        font-family: 'Manrope', sans-serif;
+      }
+    </style>
+</head>
+<body class="text-on-surface">
+<!-- Top Navigation Bar -->
+<nav class="w-full sticky top-0 z-50 bg-[#f7f9fb] dark:bg-slate-900">
+<div class="flex items-center justify-between px-8 py-4 max-w-[1440px] mx-auto w-full font-['Manrope'] antialiased text-sm font-medium tracking-tight">
+<div class="flex items-center gap-12">
+<span class="text-2xl font-black tracking-tighter text-[#0058be] dark:text-blue-400">Aura</span>
+<div class="hidden md:flex items-center gap-8">
+<a class="text-[#0058be] dark:text-blue-400 font-bold border-b-2 border-[#0058be] pb-1" href="#">Dashboard</a>
+<div class="group relative">
+<button class="flex items-center gap-1 text-[#565e74] dark:text-slate-400 hover:text-[#0058be] transition-colors">
+                            Monitoramento
+                            <span class="material-symbols-outlined text-sm">expand_more</span>
+</button>
+</div>
+<a class="text-[#565e74] dark:text-slate-400 hover:text-[#0058be] transition-colors" href="#">Meus Ativos</a>
+<a class="text-[#565e74] dark:text-slate-400 hover:text-[#0058be] transition-colors" href="#">Nova Pesquisa</a>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="relative hidden lg:block">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-lg">search</span>
+<input class="bg-surface-container-low border-none rounded-lg pl-10 pr-4 py-2 text-sm focus:ring-2 focus:ring-primary w-64 transition-all" placeholder="Buscar patentes..." type="text"/>
+</div>
+<button class="p-2 text-secondary hover:bg-slate-100/50 rounded-lg transition-all relative">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+<span class="absolute top-2 right-2 w-2 h-2 bg-error rounded-full"></span>
+</button>
+<div class="flex items-center gap-3 ml-2 pl-6 border-l border-outline-variant/30">
+<div class="text-right hidden sm:block">
+<p class="text-xs font-bold text-on-surface">Ana Silva</p>
+<p class="text-[10px] text-secondary uppercase tracking-wider">Gestora de IP</p>
+</div>
+<img alt="User Profile Avatar" class="w-9 h-9 rounded-full object-cover ring-2 ring-primary/10" data-alt="Portrait of a professional business woman" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB-hTKbVh4adlRAF6TZKalj8E3aB1qOWRiz9AnyyCGdLgnW7sqIn3x0tbervleGWuR9i0TtNG1ao8Kk9_K03SMuGki7NZSbmoSUS8SIz0jz_f5HJGMU86cwqE2o9dIFi-0T5joJT5i0DOIoHjlhHizzTAWKsO37fOSSOcpZkw-yvT2YEEzM9TP4J7xZW_Xm7CoQSy6PtUwr3Lgw4D37mse_GT634SmUUbIxq8RY0N5lI_mp10Cr86NWGH_Uoc0-ixXpRB8lb8e39Eg"/>
+</div>
+</div>
+</div>
+</nav>
+<main class="max-w-[1440px] mx-auto px-8 py-8">
+<!-- Header Section -->
+<header class="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
+<div>
+<p class="text-secondary font-label text-[11px] uppercase tracking-[0.2em] font-bold mb-2">Visão Geral da Propriedade Intelectual</p>
+<h1 class="text-4xl font-extrabold tracking-tight text-on-secondary-fixed">Painel de Controle</h1>
+</div>
+<button class="bg-gradient-to-r from-primary to-primary-container text-white px-6 py-3 rounded-lg font-bold flex items-center gap-2 shadow-lg shadow-primary/20 hover:scale-[1.02] transition-transform active:scale-95">
+<span class="material-symbols-outlined text-xl">analytics</span>
+                Gerar Relatório
+            </button>
+</header>
+<!-- Metrics Bento Grid -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+<!-- Metric 1 -->
+<div class="bg-surface-container-lowest p-6 rounded-xl border-l-4 border-primary shadow-sm">
+<div class="flex justify-between items-start mb-4">
+<span class="text-secondary-fixed-dim material-symbols-outlined p-2 bg-secondary-container/30 rounded-lg" data-icon="security">security</span>
+<span class="text-tertiary text-xs font-bold bg-tertiary/10 px-2 py-1 rounded">+3 esta semana</span>
+</div>
+<p class="text-on-surface-variant text-sm font-medium">Colisões Ativas</p>
+<h3 class="text-3xl font-black mt-1">12</h3>
+</div>
+<!-- Metric 2 -->
+<div class="bg-surface-container-lowest p-6 rounded-xl border-l-4 border-tertiary shadow-sm">
+<div class="flex justify-between items-start mb-4">
+<span class="text-tertiary-fixed-dim material-symbols-outlined p-2 bg-tertiary/10 rounded-lg" data-icon="clinical_notes">clinical_notes</span>
+<span class="text-primary text-xs font-bold bg-primary/5 px-2 py-1 rounded">Taxa de Sucesso</span>
+</div>
+<p class="text-on-surface-variant text-sm font-medium">Processos em Análise</p>
+<h3 class="text-3xl font-black mt-1">82%</h3>
+</div>
+<!-- Metric 3 -->
+<div class="bg-surface-container-lowest p-6 rounded-xl border-l-4 border-error shadow-sm">
+<div class="flex justify-between items-start mb-4">
+<span class="text-error material-symbols-outlined p-2 bg-error-container/30 rounded-lg" data-icon="alarm">alarm</span>
+<span class="text-error text-xs font-bold bg-error/10 px-2 py-1 rounded">Ação Necessária</span>
+</div>
+<p class="text-on-surface-variant text-sm font-medium">Prazos Críticos</p>
+<h3 class="text-3xl font-black mt-1">08</h3>
+</div>
+<!-- Metric 4 -->
+<div class="bg-surface-container-lowest p-6 rounded-xl border-l-4 border-secondary shadow-sm">
+<div class="flex justify-between items-start mb-4">
+<span class="text-secondary material-symbols-outlined p-2 bg-secondary-container/30 rounded-lg" data-icon="app_registration">app_registration</span>
+<span class="text-secondary text-xs font-bold bg-secondary/10 px-2 py-1 rounded">Este Mês</span>
+</div>
+<p class="text-on-surface-variant text-sm font-medium">Novos Registros</p>
+<h3 class="text-3xl font-black mt-1">42</h3>
+</div>
+</div>
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+<!-- Main Content: Recent Collisions -->
+<div class="lg:col-span-8 space-y-8">
+<section>
+<div class="flex items-center justify-between mb-6">
+<h2 class="text-xl font-extrabold flex items-center gap-2">
+<span class="w-1.5 h-6 bg-primary rounded-full"></span>
+                            Colisões Recentes
+                        </h2>
+<button class="text-primary text-sm font-bold hover:underline">Ver todas</button>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<!-- Patent Card 1 -->
+<div class="bg-surface-container-lowest p-6 rounded-xl shadow-sm hover:shadow-md transition-shadow border border-outline-variant/10">
+<div class="flex justify-between items-start mb-6">
+<div>
+<span class="text-xs font-bold text-error bg-error/10 px-2 py-1 rounded-full uppercase tracking-wider mb-2 inline-block">Risco Alto</span>
+<h4 class="text-lg font-bold text-on-surface">US-9283-X1</h4>
+<p class="text-xs text-secondary">Sistemas de IA Processamento Temporal</p>
+</div>
+<button class="text-outline hover:text-primary transition-colors">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</div>
+<div class="space-y-4 mb-6">
+<div class="flex justify-between text-xs">
+<span class="text-secondary">Similaridade:</span>
+<span class="font-bold text-on-surface">94%</span>
+</div>
+<div class="w-full bg-surface-container-low h-1.5 rounded-full overflow-hidden">
+<div class="bg-error h-full" style="width: 94%"></div>
+</div>
+</div>
+<div class="flex items-center justify-between pt-4 border-t border-outline-variant/20">
+<div class="flex -space-x-2">
+<img class="w-6 h-6 rounded-full border-2 border-white object-cover" data-alt="Analyst avatar" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBKSB1AxhR6Tr_Dnh7NyvI6nBZ8QQd6kLLuoN2wNR_YnJXk5tilsf147FDRu4z3q872apdzqbSM71EqyggX9RBLy-dCMiJtigFOdZ8fC9Yi9y4vTXiAgqePQ5hEQg9vAxVnInw-c42WzKb0oJdrodYoC6soVxyJ7oOcrNghJT34icOHsoQuBWH_nij0bsWve1WmwD63pg-ckuttmRu8beSyvb9y6S5RzVHkg3iNeNKpggZyVDzS3avze_Hx2nNm6Ox7m6yvhTgnDvE"/>
+<div class="w-6 h-6 rounded-full bg-primary-fixed text-[10px] flex items-center justify-center font-bold text-primary border-2 border-white">+2</div>
+</div>
+<button class="text-xs font-bold text-primary flex items-center gap-1">
+                                    Analisar agora
+                                    <span class="material-symbols-outlined text-sm">arrow_forward</span>
+</button>
+</div>
+</div>
+<!-- Patent Card 2 -->
+<div class="bg-surface-container-lowest p-6 rounded-xl shadow-sm hover:shadow-md transition-shadow border border-outline-variant/10">
+<div class="flex justify-between items-start mb-6">
+<div>
+<span class="text-xs font-bold text-primary bg-primary/10 px-2 py-1 rounded-full uppercase tracking-wider mb-2 inline-block">Risco Médio</span>
+<h4 class="text-lg font-bold text-on-surface">EP-0042-B9</h4>
+<p class="text-xs text-secondary">Interface Hática Estendida</p>
+</div>
+<button class="text-outline hover:text-primary transition-colors">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</div>
+<div class="space-y-4 mb-6">
+<div class="flex justify-between text-xs">
+<span class="text-secondary">Similaridade:</span>
+<span class="font-bold text-on-surface">62%</span>
+</div>
+<div class="w-full bg-surface-container-low h-1.5 rounded-full overflow-hidden">
+<div class="bg-primary h-full" style="width: 62%"></div>
+</div>
+</div>
+<div class="flex items-center justify-between pt-4 border-t border-outline-variant/20">
+<div class="flex -space-x-2">
+<img class="w-6 h-6 rounded-full border-2 border-white object-cover" data-alt="Reviewer avatar" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCao9W67IkfQ_vCBLdaAZgVuPVIdTXzRp1WvMqRZDsm-a-lvwWX51SVi3nfsUfMCfzQYfJ0tCrlXvg4LLcaht39_p5RfifhHaNcLPpKH7-NUeA86oiqitJ3g2IMnXW4oZUIR9byOeFroht0FGB3g9uxVVEDfPf1sYVnWJ9Sg7cHOzRnmdq5V0CGS-yvPlQy14Ii8mnWgAzWCeuXo733mCiakH3WYlp_fX4ZEJh0GGJ0EOKy_Z_3KIwJlHFzhDeGn0CefhnKuq0O9DM"/>
+</div>
+<button class="text-xs font-bold text-primary flex items-center gap-1">
+                                    Analisar agora
+                                    <span class="material-symbols-outlined text-sm">arrow_forward</span>
+</button>
+</div>
+</div>
+</div>
+</section>
+<!-- Status Insights -->
+<section class="bg-on-secondary-fixed text-white p-8 rounded-2xl relative overflow-hidden">
+<div class="absolute top-0 right-0 w-64 h-64 bg-primary/10 blur-[100px] rounded-full -mr-20 -mt-20"></div>
+<div class="relative z-10 grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+<div>
+<h2 class="text-2xl font-extrabold mb-4">Saúde do Portfolio</h2>
+<p class="text-secondary-fixed-dim text-sm mb-6 leading-relaxed">Sua taxa de proteção aumentou 12% em comparação ao último trimestre. Recomendamos revisão da classe G06F para 3 ativos pendentes.</p>
+<div class="flex gap-4">
+<div class="flex flex-col">
+<span class="text-3xl font-black text-tertiary-fixed">142</span>
+<span class="text-[10px] uppercase tracking-widest text-secondary-fixed-dim">Patentes Ativas</span>
+</div>
+<div class="w-px h-10 bg-white/10 mx-4 self-center"></div>
+<div class="flex flex-col">
+<span class="text-3xl font-black text-primary-fixed">18</span>
+<span class="text-[10px] uppercase tracking-widest text-secondary-fixed-dim">Em Depósito</span>
+</div>
+</div>
+</div>
+<div class="hidden md:flex justify-end">
+<div class="w-32 h-32 rounded-full border-[10px] border-tertiary-fixed border-r-transparent flex items-center justify-center relative">
+<span class="text-xl font-black">88%</span>
+<div class="absolute inset-0 rounded-full border border-white/5 scale-125"></div>
+</div>
+</div>
+</div>
+</section>
+</div>
+<!-- Sidebar: Upcoming Deadlines -->
+<div class="lg:col-span-4">
+<section class="bg-surface-container-low p-6 rounded-2xl h-full border border-outline-variant/10">
+<div class="flex items-center justify-between mb-8">
+<h2 class="text-lg font-extrabold">Próximos Prazos</h2>
+<span class="material-symbols-outlined text-primary cursor-pointer">calendar_today</span>
+</div>
+<div class="space-y-6">
+<!-- Date Item 1 -->
+<div class="flex gap-4 group cursor-pointer">
+<div class="flex flex-col items-center justify-center bg-surface-container-lowest w-14 h-16 rounded-xl shadow-sm border-b-4 border-error group-hover:bg-error group-hover:text-white transition-all">
+<span class="text-[10px] uppercase font-bold opacity-60">Out</span>
+<span class="text-xl font-black">24</span>
+</div>
+<div class="flex-1 pt-1">
+<p class="text-xs font-bold text-error uppercase tracking-tighter mb-1">Resposta de Exigência</p>
+<h4 class="text-sm font-bold text-on-surface leading-snug">BR 10 2023 004561-2</h4>
+<p class="text-[10px] text-secondary mt-1">Prazo fatal em 48 horas</p>
+</div>
+</div>
+<!-- Date Item 2 -->
+<div class="flex gap-4 group cursor-pointer">
+<div class="flex flex-col items-center justify-center bg-surface-container-lowest w-14 h-16 rounded-xl shadow-sm border-b-4 border-primary group-hover:bg-primary group-hover:text-white transition-all">
+<span class="text-[10px] uppercase font-bold opacity-60">Nov</span>
+<span class="text-xl font-black">02</span>
+</div>
+<div class="flex-1 pt-1">
+<p class="text-xs font-bold text-primary uppercase tracking-tighter mb-1">Depósito de Prioridade</p>
+<h4 class="text-sm font-bold text-on-surface leading-snug">PCT/US2024/00129</h4>
+<p class="text-[10px] text-secondary mt-1">Expansão para Fase Nacional</p>
+</div>
+</div>
+<!-- Date Item 3 -->
+<div class="flex gap-4 group cursor-pointer">
+<div class="flex flex-col items-center justify-center bg-surface-container-lowest w-14 h-16 rounded-xl shadow-sm border-b-4 border-secondary group-hover:bg-secondary group-hover:text-white transition-all">
+<span class="text-[10px] uppercase font-bold opacity-60">Nov</span>
+<span class="text-xl font-black">15</span>
+</div>
+<div class="flex-1 pt-1">
+<p class="text-xs font-bold text-secondary uppercase tracking-tighter mb-1">Pagamento de Anuidades</p>
+<h4 class="text-sm font-bold text-on-surface leading-snug">Lote #4 - Portfolio Global</h4>
+<p class="text-[10px] text-secondary mt-1">Aguardando aprovação financeira</p>
+</div>
+</div>
+</div>
+<div class="mt-12 p-6 bg-primary-container rounded-xl text-white">
+<span class="material-symbols-outlined text-white/50 mb-3" data-weight="fill">lightbulb</span>
+<h4 class="font-bold text-sm mb-2">Dica de Especialista</h4>
+<p class="text-xs text-white/80 leading-relaxed">Você possui 12 ativos sem monitoramento de colisão ativo na jurisdição Asiática.</p>
+<button class="mt-4 w-full bg-white text-primary font-bold py-2 rounded-lg text-xs hover:bg-opacity-90 transition-all">Ativar agora</button>
+</div>
+</section>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="w-full border-t border-slate-200/20 bg-[#f7f9fb] dark:bg-slate-950 mt-12">
+<div class="flex flex-col md:flex-row justify-between items-center px-12 py-8 w-full font-['Inter'] text-xs uppercase tracking-widest font-semibold">
+<p class="text-[#565e74] dark:text-slate-500 order-2 md:order-1 mt-6 md:mt-0">© 2024 Aura Patent Intelligence. Todos os direitos reservados.</p>
+<div class="flex gap-8 order-1 md:order-2">
+<a class="text-[#565e74] dark:text-slate-500 hover:text-[#0058be] dark:hover:text-blue-300 transition-colors" href="#">Termos de Uso</a>
+<a class="text-[#565e74] dark:text-slate-500 hover:text-[#0058be] dark:hover:text-blue-300 transition-colors" href="#">Privacidade</a>
+<a class="text-[#565e74] dark:text-slate-500 hover:text-[#0058be] dark:hover:text-blue-300 transition-colors" href="#">Suporte</a>
+</div>
+</div>
+</footer>
+</body></html>

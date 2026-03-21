@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { RefreshCw, Clock, CheckCircle2, AlertCircle, FileDown, Files, PauseCircle, PlayCircle } from "lucide-react";
+import { RefreshCw, Clock, CheckCircle2, AlertCircle, FileDown, Files, PauseCircle, PlayCircle, Settings } from "lucide-react";
 
 const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000").replace(/\/+$/, "");
 
@@ -561,45 +561,50 @@ export default function BackgroundWorkers() {
 
   return (
     <AppLayout>
-      <div className="space-y-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-extrabold tracking-tight">Background Workers</h1>
-            <p className="text-muted-foreground mt-1">
-              Controle da fila de importação de RPI e da fila de download de documentos (S3, OPS, Google Patents e fallback).
+      <div className="flex flex-col gap-6 w-full mx-auto">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="animate-in fade-in slide-in-from-left duration-700">
+            <h1 className="text-2xl font-bold flex items-center gap-3 text-slate-900 mb-2">
+                <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center">
+                    <Settings className="w-5 h-5 text-slate-600" />
+                </div>
+                Background Workers
+            </h1>
+            <p className="text-muted-foreground text-sm mt-1">
+              Controle das filas de ingestão (RPI, INPI, Docs, OPS) e processamento em lote.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 animate-in fade-in zoom-in-95 duration-500">
             <Button
               variant="outline"
               onClick={() => controlWorkers("all", state.rpiPaused && state.docsPaused && state.opsPaused && state.inpiPaused && state.bqPaused ? "resume" : "pause")}
               disabled={loading}
-              className="gap-2"
+              className="gap-2 h-9 text-xs bg-white"
             >
-              {state.rpiPaused && state.docsPaused && state.opsPaused && state.inpiPaused && state.bqPaused ? <PlayCircle className="w-4 h-4" /> : <PauseCircle className="w-4 h-4" />}
+              {state.rpiPaused && state.docsPaused && state.opsPaused && state.inpiPaused && state.bqPaused ? <PlayCircle className="w-3.5 h-3.5 text-emerald-600" /> : <PauseCircle className="w-3.5 h-3.5 text-amber-600" />}
               {state.rpiPaused && state.docsPaused && state.opsPaused && state.inpiPaused && state.bqPaused ? "Retomar Workers" : "Pausar Workers"}
             </Button>
-            <Button variant="outline" onClick={bootstrapRpi} disabled={loading} className="gap-2">
-              <Files className="w-4 h-4" />
+            <Button variant="outline" onClick={bootstrapRpi} disabled={loading} className="gap-2 h-9 text-xs bg-white">
+              <Files className="w-3.5 h-3.5" />
               Enfileirar 5 anos de RPI
             </Button>
-            <Button variant="outline" onClick={clearProcessingAndErrors} disabled={loading} className="gap-2">
+            <Button variant="outline" onClick={clearProcessingAndErrors} disabled={loading} className="gap-2 h-9 text-xs bg-white text-red-600 hover:text-red-700 hover:bg-red-50">
               Limpar Erros/Processando
             </Button>
-            <Button variant="default" onClick={reprocessAllFiveYears} disabled={loading} className="gap-2">
+            <Button variant="default" onClick={reprocessAllFiveYears} disabled={loading} className="gap-2 h-9 text-xs bg-slate-900 text-white hover:bg-slate-800">
               Reprocessar Tudo (5 anos)
             </Button>
-            <Button variant="outline" onClick={fetchQueues} disabled={loading} className="gap-2">
-              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            <Button variant="outline" onClick={fetchQueues} disabled={loading} className="gap-2 h-9 text-xs bg-white">
+              <RefreshCw className={`w-3.5 h-3.5 text-slate-500 ${loading ? "animate-spin" : ""}`} />
               Atualizar
             </Button>
-            <Badge variant={state.bigQueryEnabled ? "default" : "destructive"}>
+            <Badge variant={state.bigQueryEnabled ? "default" : "secondary"} className="h-9 rounded-md px-3 border border-slate-200 bg-white text-slate-700 shadow-sm font-medium">
               BQ {state.bigQueryEnabled ? `ON ${state.bigQueryProject || ""} ${state.bigQueryFirstEnabled ? "(PRIORIDADE)" : ""}` : "OFF"}
             </Badge>
           </div>
         </div>
 
-        <Tabs value={mainTab} onValueChange={setMainTab}>
+        <Tabs value={mainTab} onValueChange={setMainTab} className="animate-in fade-in duration-500">
           <Card>
             <CardHeader>
               <CardTitle>Enfileiramento por Filtro</CardTitle>

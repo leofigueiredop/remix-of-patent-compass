@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+
+<html class="light" lang="pt-BR"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;400;500;600;700;800&amp;family=Inter:wght@300;400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "surface-dim": "#cfdce3",
+              "secondary-fixed": "#d5e3fc",
+              "primary": "#3a665d",
+              "on-primary-fixed-variant": "#38635a",
+              "secondary-fixed-dim": "#c7d5ed",
+              "error-container": "#fe8983",
+              "error": "#9f403d",
+              "surface-container-highest": "#d9e4ea",
+              "outline-variant": "#a9b4b9",
+              "inverse-surface": "#0b0f10",
+              "on-primary": "#ddfff5",
+              "secondary": "#526074",
+              "on-error-container": "#752121",
+              "on-surface": "#2a3439",
+              "on-secondary-fixed": "#324053",
+              "tertiary": "#4a4bd7",
+              "on-error": "#fff7f6",
+              "background": "#f7f9fb",
+              "on-primary-container": "#2d5950",
+              "on-tertiary-container": "#000000",
+              "inverse-primary": "#cbfbee",
+              "on-background": "#2a3439",
+              "on-tertiary-fixed-variant": "#010028",
+              "secondary-dim": "#465468",
+              "tertiary-dim": "#3d3dcb",
+              "primary-fixed": "#bdece0",
+              "primary-dim": "#2e5a51",
+              "surface-container-lowest": "#ffffff",
+              "on-primary-fixed": "#19473e",
+              "on-surface-variant": "#566166",
+              "primary-fixed-dim": "#afded2",
+              "inverse-on-surface": "#9a9d9f",
+              "secondary-container": "#d5e3fc",
+              "surface": "#f7f9fb",
+              "tertiary-fixed-dim": "#6366f1",
+              "surface-tint": "#3a665d",
+              "surface-container-high": "#e1e9ee",
+              "surface-container": "#e8eff3",
+              "error-dim": "#4e0309",
+              "on-secondary-container": "#455367",
+              "outline": "#717c82",
+              "on-secondary": "#f8f8ff",
+              "primary-container": "#bdece0",
+              "surface-container-low": "#f0f4f7",
+              "tertiary-fixed": "#7073ff",
+              "surface-variant": "#d9e4ea",
+              "surface-bright": "#f7f9fb",
+              "on-tertiary-fixed": "#000000",
+              "on-tertiary": "#fbf7ff",
+              "tertiary-container": "#7073ff",
+              "on-secondary-fixed-variant": "#4e5c71"
+            },
+            fontFamily: {
+              "headline": ["Manrope"],
+              "body": ["Inter"],
+              "label": ["Inter"]
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .glass-header {
+            background: rgba(247, 249, 251, 0.8);
+            backdrop-filter: blur(12px);
+        }
+        .primary-gradient {
+            background: linear-gradient(135deg, #3a665d 0%, #2e5a51 100%);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body antialiased">
+<!-- SideNavBar -->
+<aside class="h-screen w-64 fixed left-0 top-0 bg-surface-container-low flex flex-col gap-2 p-6 z-40">
+<div class="mb-10">
+<h1 class="text-lg font-black text-on-surface font-headline tracking-tighter">Aura Patent</h1>
+<p class="text-[10px] uppercase tracking-widest text-secondary opacity-60">Intellectual Monolith</p>
+</div>
+<nav class="flex flex-col gap-2 flex-grow">
+<a class="bg-surface-container-lowest text-primary shadow-sm rounded-lg flex items-center gap-3 px-4 py-3 transition-transform duration-200 hover:translate-x-1" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">radar</span>
+<span class="font-headline text-sm font-semibold">Colisão</span>
+</a>
+<a class="text-secondary hover:bg-surface-container/50 flex items-center gap-3 px-4 py-3 rounded-lg transition-transform duration-200 hover:translate-x-1" href="#">
+<span class="material-symbols-outlined">analytics</span>
+<span class="font-headline text-sm font-medium">Mercado</span>
+</a>
+<a class="text-secondary hover:bg-surface-container/50 flex items-center gap-3 px-4 py-3 rounded-lg transition-transform duration-200 hover:translate-x-1" href="#">
+<span class="material-symbols-outlined">account_tree</span>
+<span class="font-headline text-sm font-medium">Processo</span>
+</a>
+<a class="text-secondary hover:bg-surface-container/50 flex items-center gap-3 px-4 py-3 rounded-lg transition-transform duration-200 hover:translate-x-1" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="font-headline text-sm font-medium">Geral</span>
+</a>
+</nav>
+<div class="mt-auto">
+<button class="w-full primary-gradient text-white rounded-md py-3 text-[10px] font-bold tracking-widest uppercase flex items-center justify-center gap-2 shadow-lg">
+<span class="material-symbols-outlined text-sm">add</span>
+                Novo Monitoramento
+            </button>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="ml-64 min-h-screen">
+<!-- TopAppBar -->
+<header class="bg-surface-dim/30 backdrop-blur-xl docked full-width top-0 sticky z-30">
+<div class="flex items-center justify-between px-12 py-6 w-full max-w-screen-2xl mx-auto">
+<div class="flex items-center gap-12">
+<span class="text-2xl font-bold tracking-tighter text-on-surface font-headline">Aura</span>
+<nav class="hidden md:flex gap-8">
+<a class="text-primary font-semibold border-b-2 border-primary pb-1 font-headline tracking-tight" href="#">Monitoramento</a>
+<a class="text-secondary font-medium hover:text-primary transition-colors font-headline tracking-tight" href="#">Dashboard</a>
+</nav>
+</div>
+<div class="flex items-center gap-6">
+<div class="relative">
+<span class="material-symbols-outlined text-secondary cursor-pointer hover:bg-surface-container-high p-2 rounded-md transition-all">notifications</span>
+<span class="absolute top-2 right-2 w-2 h-2 bg-error rounded-full"></span>
+</div>
+<span class="material-symbols-outlined text-secondary cursor-pointer hover:bg-surface-container-high p-2 rounded-md transition-all">settings</span>
+<div class="w-10 h-10 rounded-full overflow-hidden border border-outline-variant/30">
+<img class="w-full h-full object-cover" data-alt="User profile portrait in a minimalist circle" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD-_rwt9XsRR4Z2caTlRkjrUOzY9BAu31IjvP80Beek6Yi1YW9BuV6Qr5zse9MtEL4HiU3m0oGw5minRJj4XPXb-yBYgOnLpkDv_VZ6KSDmwCkLgCwSXObP4OlL9okWWYLMVYv14ZuRysXCfjHHIgNJ8_It9WmV5UQxaYrmBDGO4Z4J47zTE0yox6DGUZJYAn03JnT3wU1Jo8mpMBBJS2qNijDSj_KIDN-VqTrw6XE3JGlgCBTQ7SInZq2WwsTXPlxXvPEGQQMifVM"/>
+</div>
+</div>
+</div>
+<div class="bg-outline-variant/10 h-[1px] w-full"></div>
+</header>
+<section class="p-12 max-w-screen-2xl mx-auto">
+<!-- Hero Title -->
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-16">
+<div class="max-w-2xl">
+<h2 class="font-headline text-5xl font-extrabold tracking-tighter text-on-surface mb-4">Monitoramento de Colisão</h2>
+<p class="font-body text-secondary text-lg leading-relaxed">
+                        Análise em tempo real de novos depósitos e publicações RPI para identificação de similaridades técnicas e potenciais conflitos de PI.
+                    </p>
+</div>
+<div class="flex items-center gap-3">
+<div class="bg-surface-container-high px-4 py-2 rounded-md flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary"></span>
+<span class="text-xs font-bold tracking-widest text-on-surface-variant uppercase">IA Ativa</span>
+</div>
+<div class="bg-primary-container px-4 py-2 rounded-md flex items-center gap-2">
+<span class="text-xs font-bold tracking-widest text-on-primary-container uppercase">12 Novos Conflitos</span>
+</div>
+</div>
+</div>
+<!-- Filters Section -->
+<div class="bg-surface-container-low rounded-xl p-8 mb-12 flex flex-wrap items-end gap-8 shadow-sm">
+<div class="flex flex-col gap-2 min-w-[200px]">
+<label class="text-[10px] uppercase tracking-widest font-bold text-secondary">Edição RPI</label>
+<div class="relative">
+<select class="w-full bg-transparent border-0 border-b border-outline-variant focus:ring-0 focus:border-primary font-body text-sm py-2 px-0">
+<option>RPI 2764 - 15/10/2023</option>
+<option>RPI 2763 - 08/10/2023</option>
+<option>RPI 2762 - 01/10/2023</option>
+</select>
+</div>
+</div>
+<div class="flex flex-col gap-2 min-w-[200px]">
+<label class="text-[10px] uppercase tracking-widest font-bold text-secondary">Tipo de Patente</label>
+<div class="relative">
+<select class="w-full bg-transparent border-0 border-b border-outline-variant focus:ring-0 focus:border-primary font-body text-sm py-2 px-0">
+<option>Todos os tipos</option>
+<option>Invenção (PI)</option>
+<option>Modelo de Utilidade (MU)</option>
+</select>
+</div>
+</div>
+<div class="flex flex-col gap-2 min-w-[200px]">
+<label class="text-[10px] uppercase tracking-widest font-bold text-secondary">Nível de Risco</label>
+<div class="relative">
+<select class="w-full bg-transparent border-0 border-b border-outline-variant focus:ring-0 focus:border-primary font-body text-sm py-2 px-0">
+<option>Todos os riscos</option>
+<option>Alto (Vermelho)</option>
+<option>Médio (Amarelo)</option>
+</select>
+</div>
+</div>
+<button class="bg-on-surface text-surface py-3 px-8 rounded-md text-[10px] font-bold tracking-widest uppercase hover:opacity-90 transition-opacity ml-auto">
+                    Aplicar Filtros
+                </button>
+</div>
+<!-- Collision Table / Grid -->
+<div class="space-y-6">
+<!-- Collision Card 1 -->
+<div class="bg-surface-container-lowest p-8 rounded-xl border border-outline-variant/10 shadow-sm hover:shadow-md transition-shadow group">
+<div class="grid grid-cols-12 gap-8 items-start">
+<!-- Risk Indicator & Score -->
+<div class="col-span-12 md:col-span-2 flex flex-col items-center justify-center border-r border-outline-variant/10 pr-8">
+<div class="relative w-20 h-20 flex items-center justify-center">
+<svg class="w-full h-full transform -rotate-90">
+<circle class="text-surface-container-high" cx="40" cy="40" fill="transparent" r="36" stroke="currentColor" stroke-width="4"></circle>
+<circle class="text-error" cx="40" cy="40" fill="transparent" r="36" stroke="currentColor" stroke-dasharray="226" stroke-dashoffset="22.6" stroke-width="4"></circle>
+</svg>
+<span class="absolute font-headline font-bold text-xl text-on-surface">90%</span>
+</div>
+<span class="mt-4 text-[10px] font-bold tracking-widest uppercase text-error">Alto Risco</span>
+</div>
+<!-- Patent Info -->
+<div class="col-span-12 md:col-span-7 space-y-3">
+<div class="flex items-center gap-4">
+<span class="text-tertiary font-headline font-bold text-xs tracking-wider px-2 py-1 bg-tertiary/5 rounded">BR 10 2023 019485 0</span>
+<span class="text-secondary-dim text-xs font-medium">Publicado em: 15/10/2023 (RPI 2764)</span>
+</div>
+<h3 class="text-xl font-headline font-bold text-on-surface leading-tight">Sistema de Arrefecimento Autônomo para Servidores de Alta Densidade</h3>
+<p class="text-sm text-secondary leading-relaxed line-clamp-2">
+                                A presente invenção refere-se a um sistema de gerenciamento térmico que utiliza algoritmos de predição de carga para ajustar o fluxo de fluido refrigerante em racks de processamento paralelo...
+                            </p>
+<div class="flex gap-2 pt-2">
+<span class="bg-surface-container px-3 py-1 rounded text-[10px] font-medium text-secondary">H01L 23/473</span>
+<span class="bg-surface-container px-3 py-1 rounded text-[10px] font-medium text-secondary">G06F 1/20</span>
+</div>
+</div>
+<!-- Actions -->
+<div class="col-span-12 md:col-span-3 flex flex-col gap-2 justify-center">
+<button class="w-full py-3 bg-primary/5 text-primary text-[10px] font-bold tracking-widest uppercase rounded-md hover:bg-primary hover:text-white transition-all">
+                                Abrir Detalhes
+                            </button>
+<div class="grid grid-cols-2 gap-2">
+<button class="py-3 border border-outline-variant/30 text-on-surface-variant text-[10px] font-bold tracking-widest uppercase rounded-md hover:bg-surface-container transition-all">
+                                    Ignorar
+                                </button>
+<button class="py-3 border border-outline-variant/30 text-on-surface-variant text-[10px] font-bold tracking-widest uppercase rounded-md hover:bg-surface-container transition-all">
+                                    Monitorar
+                                </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Collision Card 2 -->
+<div class="bg-surface-container-lowest p-8 rounded-xl border border-outline-variant/10 shadow-sm hover:shadow-md transition-shadow group">
+<div class="grid grid-cols-12 gap-8 items-start">
+<div class="col-span-12 md:col-span-2 flex flex-col items-center justify-center border-r border-outline-variant/10 pr-8">
+<div class="relative w-20 h-20 flex items-center justify-center">
+<svg class="w-full h-full transform -rotate-90">
+<circle class="text-surface-container-high" cx="40" cy="40" fill="transparent" r="36" stroke="currentColor" stroke-width="4"></circle>
+<circle class="text-[#eab308]" cx="40" cy="40" fill="transparent" r="36" stroke="currentColor" stroke-dasharray="226" stroke-dashoffset="101.7" stroke-width="4"></circle>
+</svg>
+<span class="absolute font-headline font-bold text-xl text-on-surface">55%</span>
+</div>
+<span class="mt-4 text-[10px] font-bold tracking-widest uppercase text-[#eab308]">Risco Médio</span>
+</div>
+<div class="col-span-12 md:col-span-7 space-y-3">
+<div class="flex items-center gap-4">
+<span class="text-tertiary font-headline font-bold text-xs tracking-wider px-2 py-1 bg-tertiary/5 rounded">BR 20 2023 008122 1</span>
+<span class="text-secondary-dim text-xs font-medium">Publicado em: 15/10/2023 (RPI 2764)</span>
+</div>
+<h3 class="text-xl font-headline font-bold text-on-surface leading-tight">Dispositivo Modular de Conexão Óptica com Trava de Segurança Reforçada</h3>
+<p class="text-sm text-secondary leading-relaxed line-clamp-2">
+                                Um modelo de utilidade para conectores de fibra óptica que incorpora uma luva deslizante com molas de compressão para evitar desconexão acidental em ambientes de vibração intensa...
+                            </p>
+<div class="flex gap-2 pt-2">
+<span class="bg-surface-container px-3 py-1 rounded text-[10px] font-medium text-secondary">G02B 6/38</span>
+</div>
+</div>
+<div class="col-span-12 md:col-span-3 flex flex-col gap-2 justify-center">
+<button class="w-full py-3 bg-primary/5 text-primary text-[10px] font-bold tracking-widest uppercase rounded-md hover:bg-primary hover:text-white transition-all">
+                                Abrir Detalhes
+                            </button>
+<div class="grid grid-cols-2 gap-2">
+<button class="py-3 border border-outline-variant/30 text-on-surface-variant text-[10px] font-bold tracking-widest uppercase rounded-md hover:bg-surface-container transition-all">
+                                    Ignorar
+                                </button>
+<button class="py-3 border border-outline-variant/30 text-on-surface-variant text-[10px] font-bold tracking-widest uppercase rounded-md hover:bg-surface-container transition-all">
+                                    Monitorar
+                                </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Collision Card 3 -->
+<div class="bg-surface-container-lowest p-8 rounded-xl border border-outline-variant/10 shadow-sm hover:shadow-md transition-shadow group">
+<div class="grid grid-cols-12 gap-8 items-start">
+<div class="col-span-12 md:col-span-2 flex flex-col items-center justify-center border-r border-outline-variant/10 pr-8">
+<div class="relative w-20 h-20 flex items-center justify-center">
+<svg class="w-full h-full transform -rotate-90">
+<circle class="text-surface-container-high" cx="40" cy="40" fill="transparent" r="36" stroke="currentColor" stroke-width="4"></circle>
+<circle class="text-primary" cx="40" cy="40" fill="transparent" r="36" stroke="currentColor" stroke-dasharray="226" stroke-dashoffset="180.8" stroke-width="4"></circle>
+</svg>
+<span class="absolute font-headline font-bold text-xl text-on-surface">20%</span>
+</div>
+<span class="mt-4 text-[10px] font-bold tracking-widest uppercase text-primary">Risco Baixo</span>
+</div>
+<div class="col-span-12 md:col-span-7 space-y-3">
+<div class="flex items-center gap-4">
+<span class="text-tertiary font-headline font-bold text-xs tracking-wider px-2 py-1 bg-tertiary/5 rounded">BR 10 2023 015522 6</span>
+<span class="text-secondary-dim text-xs font-medium">Publicado em: 08/10/2023 (RPI 2763)</span>
+</div>
+<h3 class="text-xl font-headline font-bold text-on-surface leading-tight">Composto Polimérico Biodegradável para Embalagens de Alimentos</h3>
+<p class="text-sm text-secondary leading-relaxed line-clamp-2">
+                                Formulação de polímero à base de amido de milho modificado e fibras de celulose reciclada, apresentando alta barreira contra umidade e oxigênio...
+                            </p>
+<div class="flex gap-2 pt-2">
+<span class="bg-surface-container px-3 py-1 rounded text-[10px] font-medium text-secondary">C08L 3/02</span>
+<span class="bg-surface-container px-3 py-1 rounded text-[10px] font-medium text-secondary">B65D 65/46</span>
+</div>
+</div>
+<div class="col-span-12 md:col-span-3 flex flex-col gap-2 justify-center">
+<button class="w-full py-3 bg-primary/5 text-primary text-[10px] font-bold tracking-widest uppercase rounded-md hover:bg-primary hover:text-white transition-all">
+                                Abrir Detalhes
+                            </button>
+<div class="grid grid-cols-2 gap-2">
+<button class="py-3 border border-outline-variant/30 text-on-surface-variant text-[10px] font-bold tracking-widest uppercase rounded-md hover:bg-surface-container transition-all">
+                                    Ignorar
+                                </button>
+<button class="py-3 border border-outline-variant/30 text-on-surface-variant text-[10px] font-bold tracking-widest uppercase rounded-md hover:bg-surface-container transition-all">
+                                    Monitorar
+                                </button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Pagination or Footer State -->
+<div class="mt-16 flex items-center justify-between border-t border-outline-variant/10 pt-8">
+<span class="text-xs text-secondary-dim font-medium tracking-tight">Exibindo 1-12 de 124 conflitos detectados</span>
+<div class="flex gap-4">
+<button class="p-2 border border-outline-variant/20 rounded hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-sm">chevron_left</span>
+</button>
+<div class="flex items-center gap-2">
+<span class="w-8 h-8 flex items-center justify-center bg-primary text-white rounded font-bold text-xs">1</span>
+<span class="w-8 h-8 flex items-center justify-center text-secondary-dim rounded font-medium text-xs hover:bg-surface-container cursor-pointer">2</span>
+<span class="w-8 h-8 flex items-center justify-center text-secondary-dim rounded font-medium text-xs hover:bg-surface-container cursor-pointer">3</span>
+</div>
+<button class="p-2 border border-outline-variant/20 rounded hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-sm">chevron_right</span>
+</button>
+</div>
+</div>
+</section>
+</main>
+<!-- Floating Action Button (FAB) - Suppression logic: Primary on Dashboard/Home -->
+<div class="fixed bottom-12 right-12 z-50">
+<button class="w-14 h-14 primary-gradient text-white rounded-full shadow-2xl flex items-center justify-center hover:scale-105 transition-transform duration-200">
+<span class="material-symbols-outlined">help_outline</span>
+</button>
+</div>
+</body></html>

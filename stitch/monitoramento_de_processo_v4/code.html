@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+
+<html class="light" lang="pt-BR"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "surface-dim": "#cfdce3",
+              "secondary-fixed": "#d5e3fc",
+              "primary": "#3a665d",
+              "on-primary-fixed-variant": "#38635a",
+              "secondary-fixed-dim": "#c7d5ed",
+              "error-container": "#fe8983",
+              "error": "#9f403d",
+              "surface-container-highest": "#d9e4ea",
+              "outline-variant": "#a9b4b9",
+              "inverse-surface": "#0b0f10",
+              "on-primary": "#ddfff5",
+              "secondary": "#526074",
+              "on-error-container": "#752121",
+              "on-surface": "#2a3439",
+              "on-secondary-fixed": "#324053",
+              "tertiary": "#4a4bd7",
+              "on-error": "#fff7f6",
+              "background": "#f7f9fb",
+              "on-primary-container": "#2d5950",
+              "on-tertiary-container": "#000000",
+              "inverse-primary": "#cbfbee",
+              "on-background": "#2a3439",
+              "on-tertiary-fixed-variant": "#010028",
+              "secondary-dim": "#465468",
+              "tertiary-dim": "#3d3dcb",
+              "primary-fixed": "#bdece0",
+              "primary-dim": "#2e5a51",
+              "surface-container-lowest": "#ffffff",
+              "on-primary-fixed": "#19473e",
+              "on-surface-variant": "#566166",
+              "primary-fixed-dim": "#afded2",
+              "inverse-on-surface": "#9a9d9f",
+              "secondary-container": "#d5e3fc",
+              "surface": "#f7f9fb",
+              "tertiary-fixed-dim": "#6366f1",
+              "surface-tint": "#3a665d",
+              "surface-container-high": "#e1e9ee",
+              "surface-container": "#e8eff3",
+              "error-dim": "#4e0309",
+              "on-secondary-container": "#455367",
+              "outline": "#717c82",
+              "on-secondary": "#f8f8ff",
+              "primary-container": "#bdece0",
+              "surface-container-low": "#f0f4f7",
+              "tertiary-fixed": "#7073ff",
+              "surface-variant": "#d9e4ea",
+              "surface-bright": "#f7f9fb",
+              "on-tertiary-fixed": "#000000",
+              "on-tertiary": "#fbf7ff",
+              "tertiary-container": "#7073ff",
+              "on-secondary-fixed-variant": "#4e5c71"
+            },
+            fontFamily: {
+              "headline": ["Manrope"],
+              "body": ["Inter"],
+              "label": ["Inter"]
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+          },
+        },
+      }
+    </script>
+<style>
+      .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      }
+      body { font-family: 'Inter', sans-serif; }
+      h1, h2, h3 { font-family: 'Manrope', sans-serif; }
+      .glass-card {
+        background: rgba(255, 255, 255, 0.7);
+        backdrop-filter: blur(12px);
+      }
+    </style>
+</head>
+<body class="bg-background text-on-background antialiased flex">
+<!-- SideNavBar (Shared Component) -->
+<aside class="h-screen w-64 fixed left-0 top-0 bg-slate-100 dark:bg-slate-900 flex flex-col gap-2 p-6 font-['Manrope'] text-sm font-medium z-40">
+<div class="mb-8">
+<h1 class="text-lg font-black text-slate-900 dark:text-slate-100">Aura Patent</h1>
+<p class="text-[10px] uppercase tracking-widest text-secondary opacity-60">Intellectual Monolith</p>
+</div>
+<nav class="flex flex-col gap-2 flex-grow">
+<a class="flex items-center gap-3 p-3 text-slate-500 dark:text-slate-400 hover:bg-slate-200/50 dark:hover:bg-slate-800/50 hover:translate-x-1 transition-transform duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="radar">radar</span>
+                Colisão
+            </a>
+<a class="flex items-center gap-3 p-3 text-slate-500 dark:text-slate-400 hover:bg-slate-200/50 dark:hover:bg-slate-800/50 hover:translate-x-1 transition-transform duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="analytics">analytics</span>
+                Mercado
+            </a>
+<a class="flex items-center gap-3 p-3 bg-white dark:bg-slate-800 text-emerald-900 dark:text-emerald-300 shadow-sm rounded-lg hover:translate-x-1 transition-transform duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="account_tree">account_tree</span>
+                Processo
+            </a>
+<a class="flex items-center gap-3 p-3 text-slate-500 dark:text-slate-400 hover:bg-slate-200/50 dark:hover:bg-slate-800/50 hover:translate-x-1 transition-transform duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+                Geral
+            </a>
+</nav>
+<button class="mt-auto bg-primary text-on-primary py-3 rounded-md font-bold text-xs tracking-widest uppercase hover:opacity-90 transition-opacity">
+            Novo Monitoramento
+        </button>
+</aside>
+<main class="ml-64 flex-1 min-h-screen">
+<!-- TopNavBar (Shared Component) -->
+<header class="bg-slate-50/80 dark:bg-slate-950/80 backdrop-blur-xl docked full-width top-0 sticky z-50 font-['Manrope'] tracking-tight antialiased">
+<div class="flex items-center justify-between px-8 py-4 w-full max-w-screen-2xl mx-auto">
+<div class="flex items-center gap-8">
+<span class="text-2xl font-bold tracking-tighter text-emerald-950 dark:text-emerald-50">Aura</span>
+<nav class="hidden md:flex gap-6">
+<a class="text-slate-600 dark:text-slate-400 font-medium hover:text-emerald-800 dark:hover:text-emerald-300 transition-colors" href="#">Monitoramento</a>
+<a class="text-emerald-900 dark:text-emerald-400 font-semibold border-b-2 border-emerald-800 dark:border-emerald-400 pb-1" href="#">Dashboard</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<div class="relative">
+<span class="material-symbols-outlined p-2 text-slate-600 hover:bg-slate-100/50 rounded-md transition-all cursor-pointer" data-icon="notifications">notifications</span>
+</div>
+<span class="material-symbols-outlined p-2 text-slate-600 hover:bg-slate-100/50 rounded-md transition-all cursor-pointer" data-icon="settings">settings</span>
+<div class="h-8 w-8 rounded-full bg-slate-200 overflow-hidden border border-outline-variant/20">
+<img alt="User profile" class="w-full h-full object-cover" data-alt="User professional portrait avatar" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA3PwdnOA6_MjVVZB6iQyY7996RgXb2OelQ7i2ueiB9a-wamVarCTcw3wE3Za3rfZXU1Lpw0Ey9ClmCJBv8BFdHrk4JK_Rh5VOPxaG_gwBDYtdENg9A8HviMbUQM0D3kut1zLmORREzWqvlJeuoDrkOHT7WYEqlNnFS9NFpQMpAuw2JTpfoy8-CjIF_ar2nf4rW0aF2q7iXOx0OjjaRFEhiZsStgEXPhK1sE6XBM0jvSBdOi4_AfDWQSmBfHprQCaidlhbftVcrKug"/>
+</div>
+</div>
+</div>
+<div class="bg-slate-200/50 dark:bg-slate-800/50 h-[1px] w-full"></div>
+</header>
+<!-- Content Canvas -->
+<div class="p-12 max-w-7xl mx-auto">
+<!-- Page Header -->
+<div class="flex flex-col md:flex-row justify-between items-end gap-6 mb-16">
+<div class="max-w-2xl">
+<p class="text-tertiary font-medium text-sm mb-2 tracking-wide">MONITORAMENTO DE PROCESSO</p>
+<h2 class="text-5xl font-extrabold text-on-surface tracking-tight leading-tight">US 11,452,903 B2</h2>
+<p class="text-on-surface-variant mt-4 text-lg">Sistemas de IA distribuídos para otimização de redes neurais em tempo real.</p>
+</div>
+<div class="flex gap-3">
+<button class="px-6 py-3 bg-surface-container-lowest border border-outline-variant/20 rounded-lg text-sm font-semibold flex items-center gap-2 hover:bg-white transition-all shadow-sm">
+<span class="material-symbols-outlined text-sm" data-icon="download">download</span>
+                        Exportar dossiê
+                    </button>
+</div>
+</div>
+<!-- Lifecycle Timeline (Hero) -->
+<section class="mb-16">
+<div class="bg-surface-container-low rounded-xl p-10 relative overflow-hidden">
+<div class="relative z-10">
+<h3 class="text-xl font-bold mb-12 text-on-surface">Ciclo de Vida do Processo</h3>
+<!-- Timeline Track -->
+<div class="relative flex justify-between">
+<!-- Background line -->
+<div class="absolute top-1/2 left-0 w-full h-0.5 bg-outline-variant/30 -translate-y-1/2"></div>
+<!-- Active line progress -->
+<div class="absolute top-1/2 left-0 w-[80%] h-1 bg-primary -translate-y-1/2"></div>
+<!-- Step 1 -->
+<div class="relative flex flex-col items-center">
+<div class="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-on-primary ring-8 ring-background/50 mb-4">
+<span class="material-symbols-outlined text-xl" data-icon="inventory_2" style="font-variation-settings: 'FILL' 1;">inventory_2</span>
+</div>
+<span class="text-sm font-bold text-on-surface">Depósito</span>
+<span class="text-xs text-on-surface-variant">12 Jan 2021</span>
+</div>
+<!-- Step 2 -->
+<div class="relative flex flex-col items-center">
+<div class="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-on-primary ring-8 ring-background/50 mb-4">
+<span class="material-symbols-outlined text-xl" data-icon="public" style="font-variation-settings: 'FILL' 1;">public</span>
+</div>
+<span class="text-sm font-bold text-on-surface">Publicação</span>
+<span class="text-xs text-on-surface-variant">15 Out 2021</span>
+</div>
+<!-- Step 3 -->
+<div class="relative flex flex-col items-center">
+<div class="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-on-primary ring-8 ring-background/50 mb-4">
+<span class="material-symbols-outlined text-xl" data-icon="find_in_page" style="font-variation-settings: 'FILL' 1;">find_in_page</span>
+</div>
+<span class="text-sm font-bold text-on-surface">Exame</span>
+<span class="text-xs text-on-surface-variant">03 Mar 2022</span>
+</div>
+<!-- Step 4 (Current) -->
+<div class="relative flex flex-col items-center">
+<div class="w-12 h-12 rounded-full bg-white border-4 border-primary flex items-center justify-center text-primary ring-8 ring-primary/10 mb-4 -mt-1 scale-110">
+<span class="material-symbols-outlined text-2xl" data-icon="task_alt" style="font-variation-settings: 'FILL' 1;">task_alt</span>
+</div>
+<span class="text-sm font-bold text-primary">Deferimento</span>
+<span class="text-xs text-on-surface-variant">28 Jul 2023</span>
+</div>
+<!-- Step 5 -->
+<div class="relative flex flex-col items-center opacity-40">
+<div class="w-10 h-10 rounded-full bg-outline-variant flex items-center justify-center text-on-surface-variant mb-4">
+<span class="material-symbols-outlined text-xl" data-icon="verified_user">verified_user</span>
+</div>
+<span class="text-sm font-bold text-on-surface">Concessão</span>
+<span class="text-xs text-on-surface-variant">Pendente</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-12">
+<!-- Main Content: Active Requirements -->
+<div class="lg:col-span-2 space-y-12">
+<div>
+<div class="flex items-center justify-between mb-8">
+<h3 class="text-2xl font-bold text-on-surface">Exigências Ativas</h3>
+<span class="px-3 py-1 bg-error-container/20 text-error text-[10px] font-bold uppercase tracking-widest rounded">Atenção Necessária</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<!-- Card 6.1 -->
+<div class="bg-surface-container-lowest border border-outline-variant/10 p-6 rounded-lg shadow-sm hover:shadow-md transition-all">
+<div class="flex justify-between items-start mb-6">
+<div class="h-10 w-10 rounded bg-slate-100 flex items-center justify-center font-bold text-slate-600">6.1</div>
+<div class="text-right">
+<p class="text-[10px] text-on-surface-variant uppercase tracking-tighter">Prazo Restante</p>
+<p class="text-2xl font-black text-error">12 Dias</p>
+</div>
+</div>
+<h4 class="font-bold text-on-surface mb-2">Exigência Técnica Formal</h4>
+<p class="text-sm text-on-surface-variant leading-relaxed">Regularização do quadro reivindicatório conforme o Art. 25 da LPI.</p>
+<div class="mt-6 pt-6 border-t border-outline-variant/10 flex justify-between items-center">
+<span class="text-xs text-secondary font-medium">Publicado em 04/08/2023</span>
+<button class="text-primary text-xs font-bold uppercase hover:underline">Resolver</button>
+</div>
+</div>
+<!-- Card 7.1 -->
+<div class="bg-surface-container-lowest border border-outline-variant/10 p-6 rounded-lg shadow-sm hover:shadow-md transition-all">
+<div class="flex justify-between items-start mb-6">
+<div class="h-10 w-10 rounded bg-slate-100 flex items-center justify-center font-bold text-slate-600">7.1</div>
+<div class="text-right">
+<p class="text-[10px] text-on-surface-variant uppercase tracking-tighter">Prazo Restante</p>
+<p class="text-2xl font-black text-on-surface">45 Dias</p>
+</div>
+</div>
+<h4 class="font-bold text-on-surface mb-2">Pagamento de Retribuição</h4>
+<p class="text-sm text-on-surface-variant leading-relaxed">Taxa de expedição de carta patente e anuidades pendentes.</p>
+<div class="mt-6 pt-6 border-t border-outline-variant/10 flex justify-between items-center">
+<span class="text-xs text-secondary font-medium">Vencimento em 15/10/2023</span>
+<button class="text-primary text-xs font-bold uppercase hover:underline">Emitir GRU</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Asymmetric Section for Documents -->
+<div class="pt-8">
+<h3 class="text-xl font-bold mb-6 text-on-surface">Histórico Recente</h3>
+<div class="space-y-1">
+<div class="flex items-center p-4 bg-surface-container-low rounded hover:bg-surface-container-high transition-colors group">
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-primary transition-colors" data-icon="description">description</span>
+<div class="ml-4 flex-grow">
+<p class="text-sm font-semibold">Réplica ao Parecer Técnico</p>
+<p class="text-[10px] text-on-surface-variant uppercase tracking-widest">Protocolo: 2023000542</p>
+</div>
+<span class="text-xs font-mono text-secondary">22 Jul 2023</span>
+</div>
+<div class="flex items-center p-4 bg-surface-container-low rounded hover:bg-surface-container-high transition-colors group">
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-primary transition-colors" data-icon="payments">payments</span>
+<div class="ml-4 flex-grow">
+<p class="text-sm font-semibold">Comprovante de Pagamento de Taxas</p>
+<p class="text-[10px] text-on-surface-variant uppercase tracking-widest">Protocolo: 2023000411</p>
+</div>
+<span class="text-xs font-mono text-secondary">10 Jun 2023</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Intelligence Sidebar -->
+<div class="space-y-8">
+<div class="glass-card rounded-xl p-8 border border-white shadow-2xl">
+<h3 class="text-xs font-black uppercase tracking-[0.2em] mb-8 text-primary">Inteligência do Ciclo de Vida</h3>
+<div class="space-y-10">
+<!-- Stat 1 -->
+<div class="flex flex-col gap-1">
+<span class="text-[10px] uppercase font-bold text-secondary opacity-60">Tempo Médio de Concessão</span>
+<div class="flex items-baseline gap-2">
+<span class="text-4xl font-black text-on-surface">3.4</span>
+<span class="text-lg font-medium text-secondary">anos</span>
+</div>
+<div class="w-full bg-slate-200 h-1 mt-2 rounded-full overflow-hidden">
+<div class="bg-primary h-full w-[65%]"></div>
+</div>
+<p class="text-[10px] text-on-surface-variant mt-2 italic">Abaixo da média setorial (4.1 anos)</p>
+</div>
+<!-- Stat 2 -->
+<div class="flex flex-col gap-1">
+<span class="text-[10px] uppercase font-bold text-secondary opacity-60">Taxa de Sucesso</span>
+<div class="flex items-baseline gap-2">
+<span class="text-4xl font-black text-emerald-700">82%</span>
+</div>
+<div class="flex gap-1 mt-2">
+<div class="h-2 w-full bg-primary rounded-sm"></div>
+<div class="h-2 w-full bg-primary rounded-sm"></div>
+<div class="h-2 w-full bg-primary rounded-sm"></div>
+<div class="h-2 w-full bg-primary rounded-sm"></div>
+<div class="h-2 w-full bg-slate-200 rounded-sm"></div>
+</div>
+<p class="text-[10px] text-on-surface-variant mt-2 italic">Probabilidade baseada em examinador</p>
+</div>
+<!-- Examiner Card -->
+<div class="bg-surface-container p-5 rounded-lg border border-outline-variant/10">
+<p class="text-[10px] font-bold uppercase text-secondary mb-3">Examinador Designado</p>
+<div class="flex items-center gap-3">
+<div class="h-10 w-10 rounded-full bg-slate-300 overflow-hidden">
+<img alt="Examiner avatar" class="w-full h-full object-cover" data-alt="Portrait of a professional patent examiner" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDQOGm3QmIkpPFqX1fUpYxZfbOhdZctFjy6gHGaAppNmIKmSRmFYrwFMHYnS38_8xM5OnCnGgMm6j1L0ZJCwXwdslpvu1C-xifZVcjNpGlCuI8zleYsIZ94sNp7_ge8jS9Nosj9X-a2-LM62Nb4HsC4pXbTMhu8UHmR6l47yPskGmiOuZuAFr44QiEUt4DpdDPvyP9hdu-UcwwsH0vcTqPEZ-1NjkBWy0na2h0MSyw2dkUsHW_pdCpfEmmmyPN25QN8Jd6Uqtp4Z50"/>
+</div>
+<div>
+<p class="text-sm font-bold text-on-surface">Dr. Ricardo Neves</p>
+<p class="text-[10px] text-on-surface-variant uppercase">Especialista: IA e Cloud</p>
+</div>
+</div>
+<div class="mt-4 flex gap-2">
+<span class="px-2 py-1 bg-white rounded text-[9px] font-bold text-slate-500 border border-outline-variant/10">RIGOROSO</span>
+<span class="px-2 py-1 bg-white rounded text-[9px] font-bold text-slate-500 border border-outline-variant/10">PRECISO</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Visual Insight Chart -->
+<div class="bg-slate-900 text-slate-100 rounded-xl p-6 overflow-hidden relative group">
+<div class="absolute inset-0 opacity-20 group-hover:opacity-30 transition-opacity">
+<svg class="w-full h-full" viewbox="0 0 100 100">
+<path d="M0 80 Q 25 20 50 50 T 100 30" fill="none" stroke="white" stroke-width="0.5"></path>
+<path d="M0 90 Q 30 40 60 70 T 100 50" fill="none" stroke="white" stroke-width="0.5"></path>
+</svg>
+</div>
+<h4 class="text-xs font-bold uppercase tracking-widest mb-4 relative z-10">Projeção de Concessão</h4>
+<p class="text-3xl font-light mb-2 relative z-10">Nov 2024</p>
+<p class="text-[10px] opacity-60 leading-relaxed relative z-10">Data estimada com 90% de confiança baseada em padrões históricos similares.</p>
+</div>
+</div>
+</div>
+</div>
+</main>
+</body></html>

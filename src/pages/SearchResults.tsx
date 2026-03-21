@@ -110,7 +110,7 @@ export default function SearchResults() {
       )}
       <WizardSteps currentStep={4} steps={steps} />
 
-      <div className="max-w-6xl space-y-6">
+      <div className="w-full space-y-6">
         <div>
           <h1 className="text-2xl font-bold mb-1">Resultados de Busca</h1>
           <p className="text-muted-foreground text-sm">

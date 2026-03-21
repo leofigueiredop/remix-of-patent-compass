@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Process Monitoring | Aura Patent Intelligence</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Inter:wght@400;500;600&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+        h1, h2, h3, .font-headline {
+            font-family: 'Manrope', sans-serif;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+        .radar-ring {
+            border: 0.5px solid rgba(0, 88, 190, 0.2);
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              colors: {
+                "on-secondary-container": "#5c647a",
+                "secondary": "#565e74",
+                "tertiary-fixed-dim": "#4edea3",
+                "surface-tint": "#005ac2",
+                "surface-container-lowest": "#ffffff",
+                "inverse-surface": "#2d3133",
+                "outline-variant": "#c2c6d6",
+                "surface-container-highest": "#e0e3e5",
+                "outline": "#727785",
+                "secondary-fixed-dim": "#bec6e0",
+                "on-primary-fixed-variant": "#004395",
+                "surface-container-high": "#e6e8ea",
+                "on-tertiary-fixed": "#002113",
+                "secondary-container": "#dae2fd",
+                "primary-container": "#2170e4",
+                "on-secondary": "#ffffff",
+                "on-primary-container": "#fefcff",
+                "on-tertiary-fixed-variant": "#005236",
+                "surface": "#f7f9fb",
+                "primary-fixed": "#d8e2ff",
+                "background": "#f7f9fb",
+                "on-secondary-fixed": "#131b2e",
+                "surface-container-low": "#f2f4f6",
+                "on-tertiary": "#ffffff",
+                "on-error-container": "#93000a",
+                "error-container": "#ffdad6",
+                "on-error": "#ffffff",
+                "tertiary": "#006947",
+                "on-surface-variant": "#424754",
+                "on-primary": "#ffffff",
+                "inverse-primary": "#adc6ff",
+                "surface-bright": "#f7f9fb",
+                "tertiary-container": "#00855b",
+                "primary-fixed-dim": "#adc6ff",
+                "surface-dim": "#d8dadc",
+                "on-primary-fixed": "#001a42",
+                "on-tertiary-container": "#f5fff6",
+                "on-surface": "#191c1e",
+                "on-secondary-fixed-variant": "#3f465c",
+                "on-background": "#191c1e",
+                "surface-variant": "#e0e3e5",
+                "surface-container": "#eceef0",
+                "error": "#ba1a1a",
+                "tertiary-fixed": "#6ffbbe",
+                "primary": "#0058be",
+                "inverse-on-surface": "#eff1f3",
+                "secondary-fixed": "#dae2fd"
+              },
+              fontFamily: {
+                "headline": ["Manrope"],
+                "body": ["Inter"],
+                "label": ["Inter"]
+              },
+              borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+            },
+          },
+        }
+    </script>
+</head>
+<body class="bg-surface text-on-surface">
+<!-- SideNavBar -->
+<aside class="h-screen w-64 fixed left-0 top-0 flex flex-col bg-[#001e3c] border-r border-white/10 shadow-2xl z-50">
+<div class="flex flex-col h-full py-6">
+<div class="px-6 mb-8">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 bg-primary-container rounded-lg flex items-center justify-center">
+<span class="material-symbols-outlined text-white" data-icon="radar">radar</span>
+</div>
+<div>
+<h1 class="text-white font-bold text-lg leading-tight">Aura Patent</h1>
+<p class="text-slate-400 text-[10px] uppercase tracking-widest font-bold">Digital Watchtower</p>
+</div>
+</div>
+</div>
+<nav class="flex-1 space-y-1">
+<a class="text-slate-300 hover:bg-white/5 rounded-lg mx-2 my-1 px-4 py-3 flex items-center gap-3 transition-all duration-150" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span class="font-headline text-sm font-semibold">Dashboard</span>
+</a>
+<a class="text-slate-300 hover:bg-white/5 rounded-lg mx-2 my-1 px-4 py-3 flex items-center gap-3 transition-all duration-150" href="#">
+<span class="material-symbols-outlined" data-icon="radar">radar</span>
+<span class="font-headline text-sm font-semibold">Collision Monitoring</span>
+</a>
+<a class="bg-primary text-white rounded-lg mx-2 my-1 px-4 py-3 flex items-center gap-3 translate-x-1 shadow-lg shadow-primary/20" href="#">
+<span class="material-symbols-outlined" data-icon="account_tree">account_tree</span>
+<span class="font-headline text-sm font-semibold">Process Monitoring</span>
+</a>
+<a class="text-slate-300 hover:bg-white/5 rounded-lg mx-2 my-1 px-4 py-3 flex items-center gap-3 transition-all duration-150" href="#">
+<span class="material-symbols-outlined" data-icon="insights">insights</span>
+<span class="font-headline text-sm font-semibold">Market Monitoring</span>
+</a>
+<a class="text-slate-300 hover:bg-white/5 rounded-lg mx-2 my-1 px-4 py-3 flex items-center gap-3 transition-all duration-150" href="#">
+<span class="material-symbols-outlined" data-icon="description">description</span>
+<span class="font-headline text-sm font-semibold">My Patents</span>
+</a>
+<a class="text-slate-300 hover:bg-white/5 rounded-lg mx-2 my-1 px-4 py-3 flex items-center gap-3 transition-all duration-150" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-headline text-sm font-semibold">Settings</span>
+</a>
+</nav>
+<div class="mt-auto px-4 py-4">
+<button class="w-full bg-gradient-to-r from-primary to-primary-container text-white rounded-lg py-3 px-4 font-headline text-sm font-bold flex items-center justify-center gap-2 shadow-xl shadow-primary/20 active:scale-[0.98] transition-transform">
+<span class="material-symbols-outlined text-sm" data-icon="add">add</span>
+                    New Search
+                </button>
+<div class="mt-6 space-y-1">
+<a class="text-slate-400 hover:text-white text-xs flex items-center gap-3 px-4 py-2" href="#">
+<span class="material-symbols-outlined text-sm" data-icon="help">help</span>
+                        Help Center
+                    </a>
+<a class="text-slate-400 hover:text-white text-xs flex items-center gap-3 px-4 py-2" href="#">
+<span class="material-symbols-outlined text-sm" data-icon="gavel">gavel</span>
+                        Legal
+                    </a>
+</div>
+</div>
+</div>
+</aside>
+<!-- Main Content -->
+<main class="ml-64 min-h-screen flex flex-col">
+<!-- TopAppBar -->
+<header class="w-full sticky top-0 z-40 bg-surface/80 backdrop-blur-md px-8 h-20 flex items-center justify-between">
+<div class="flex items-center gap-8">
+<h2 class="text-2xl font-black tracking-tighter text-primary font-headline">Process Monitoring</h2>
+<div class="relative w-96">
+<span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-outline" data-icon="search">search</span>
+<input class="w-full bg-surface-container-low border-none rounded-xl pl-12 pr-4 py-2.5 text-sm focus:ring-2 focus:ring-primary/20 focus:bg-white transition-all" placeholder="Search processes, patent IDs, or requirements..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<button class="text-secondary hover:text-primary transition-colors">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+</button>
+<button class="text-secondary hover:text-primary transition-colors">
+<span class="material-symbols-outlined" data-icon="help">help</span>
+</button>
+<div class="h-8 w-[1px] bg-outline-variant/30"></div>
+<div class="flex items-center gap-3">
+<img alt="User Profile" class="w-10 h-10 rounded-full bg-surface-container-high" data-alt="Corporate user profile photo circular" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCDk2g6LBueJexbJpMlQnrpeNUaktiwUqOddP9BmCsj_vyheeszaBfY8n6i6XKzs1o5w6MkF7gDNRFktVotDCFLxFGcGOlEnlvu4tOPNxBFMbF7zakMR4icBdpwRsqCxyHNwKnI0JKEdXBVhAASf6vF7gIqCbz8bjcQ3cChO0jJQ0ZDm7dxJTEaVhYQ-T0YgXlrUDlbuYxVqvRsWee7fBsS4WASoV5hcM64afjjEtXQ9oZvhL9cNtljDLrZSTarjCtpS8ifAcHQijc"/>
+<div class="text-right">
+<p class="text-xs font-bold text-on-surface">Alex Thompson</p>
+<button class="text-[10px] text-primary font-bold uppercase tracking-wider">Sign Out</button>
+</div>
+</div>
+</div>
+</header>
+<div class="p-8 space-y-8 max-w-[1600px]">
+<!-- Hero Process Section: Asymmetric Bento Style -->
+<section class="grid grid-cols-12 gap-6">
+<!-- Main Process Timeline Card -->
+<div class="col-span-8 bg-surface-container-lowest rounded-xl p-8 shadow-sm">
+<div class="flex justify-between items-start mb-10">
+<div>
+<span class="inline-block px-3 py-1 bg-tertiary/10 text-tertiary rounded-full text-[10px] font-bold uppercase tracking-widest mb-2">Active Patent</span>
+<h3 class="text-3xl font-extrabold text-on-secondary-fixed font-headline tracking-tight">US-2023-014592-A1</h3>
+<p class="text-on-surface-variant font-medium mt-1">Adaptive Neural Interface for Quantum Data Processing</p>
+</div>
+<div class="flex gap-3">
+<button class="px-4 py-2 rounded-lg bg-surface-container-low text-primary font-bold text-xs flex items-center gap-2 hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined text-sm" data-icon="file_download">file_download</span>
+                                Export Report
+                            </button>
+<button class="px-4 py-2 rounded-lg bg-primary text-white font-bold text-xs flex items-center gap-2 hover:opacity-90 transition-opacity">
+<span class="material-symbols-outlined text-sm" data-icon="history">history</span>
+                                View Full History
+                            </button>
+</div>
+</div>
+<!-- Process Timeline -->
+<div class="relative mt-12 px-4">
+<div class="absolute top-1/2 left-0 w-full h-0.5 bg-surface-container-high -translate-y-1/2"></div>
+<div class="flex justify-between relative z-10">
+<!-- Milestone 1 -->
+<div class="flex flex-col items-center group">
+<div class="w-10 h-10 rounded-full bg-tertiary flex items-center justify-center text-white ring-8 ring-white mb-4">
+<span class="material-symbols-outlined text-sm" data-icon="check">check</span>
+</div>
+<span class="text-[10px] font-bold text-on-surface uppercase tracking-wider">Filing</span>
+<span class="text-[11px] text-outline">Oct 12, 2022</span>
+</div>
+<!-- Milestone 2 -->
+<div class="flex flex-col items-center">
+<div class="w-10 h-10 rounded-full bg-tertiary flex items-center justify-center text-white ring-8 ring-white mb-4">
+<span class="material-symbols-outlined text-sm" data-icon="check">check</span>
+</div>
+<span class="text-[10px] font-bold text-on-surface uppercase tracking-wider">Publication</span>
+<span class="text-[11px] text-outline">Apr 15, 2023</span>
+</div>
+<!-- Milestone 3 -->
+<div class="flex flex-col items-center">
+<div class="w-12 h-12 rounded-full bg-primary-container flex items-center justify-center text-white ring-8 ring-white mb-3 -mt-1 scale-110">
+<span class="material-symbols-outlined" data-icon="pending">pending</span>
+</div>
+<span class="text-[10px] font-bold text-primary uppercase tracking-wider">Examination</span>
+<span class="text-[11px] text-primary font-bold">In Progress</span>
+</div>
+<!-- Milestone 4 -->
+<div class="flex flex-col items-center opacity-40">
+<div class="w-10 h-10 rounded-full bg-surface-container-high flex items-center justify-center text-outline ring-8 ring-white mb-4">
+<span class="material-symbols-outlined text-sm" data-icon="assignment_turned_in">assignment_turned_in</span>
+</div>
+<span class="text-[10px] font-bold text-on-surface uppercase tracking-wider">Allowance</span>
+<span class="text-[11px] text-outline">Est. Q4 2024</span>
+</div>
+<!-- Milestone 5 -->
+<div class="flex flex-col items-center opacity-40">
+<div class="w-10 h-10 rounded-full bg-surface-container-high flex items-center justify-center text-outline ring-8 ring-white mb-4">
+<span class="material-symbols-outlined text-sm" data-icon="verified">verified</span>
+</div>
+<span class="text-[10px] font-bold text-on-surface uppercase tracking-wider">Grant</span>
+<span class="text-[11px] text-outline">Est. 2025</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Recent Updates Sidebar (Internal) -->
+<div class="col-span-4 bg-surface-container-lowest rounded-xl p-6 shadow-sm overflow-hidden relative">
+<div class="flex items-center justify-between mb-6">
+<h4 class="font-headline font-extrabold text-on-secondary-fixed">Recent Updates</h4>
+<span class="text-[10px] text-primary font-bold cursor-pointer hover:underline">View All</span>
+</div>
+<div class="space-y-6">
+<div class="flex gap-4">
+<div class="w-2 bg-primary rounded-full h-12 shrink-0"></div>
+<div>
+<p class="text-xs font-bold text-on-surface">New USPTO Office Action</p>
+<p class="text-[11px] text-on-surface-variant line-clamp-2">The examiner has requested a technical clarification on claim 4-12 regarding prior art reference...</p>
+<span class="text-[9px] text-outline uppercase font-bold mt-1 block">2 hours ago</span>
+</div>
+</div>
+<div class="flex gap-4">
+<div class="w-2 bg-tertiary rounded-full h-12 shrink-0"></div>
+<div>
+<p class="text-xs font-bold text-on-surface">Payment Confirmed</p>
+<p class="text-[11px] text-on-surface-variant">Maintenance fee for BR-112019-0054-A has been successfully processed by the treasury.</p>
+<span class="text-[9px] text-outline uppercase font-bold mt-1 block">Yesterday</span>
+</div>
+</div>
+<div class="flex gap-4">
+<div class="w-2 bg-error rounded-full h-12 shrink-0"></div>
+<div>
+<p class="text-xs font-bold text-on-surface">Critical Deadline Approach</p>
+<p class="text-[11px] text-on-surface-variant">Requirement 6.1 for EP-394411 expires in 48 hours. No protocol found in system.</p>
+<span class="text-[9px] text-outline uppercase font-bold mt-1 block">3 days ago</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Requirements Grid -->
+<section>
+<div class="flex items-end justify-between mb-6">
+<div>
+<h3 class="text-xl font-extrabold text-on-secondary-fixed font-headline">Active Requirements</h3>
+<p class="text-sm text-on-surface-variant">Mandatory actions and legal deadlines across monitored portfolio</p>
+</div>
+<div class="flex gap-2">
+<button class="p-2 rounded-lg bg-white border border-outline-variant/20 shadow-sm text-secondary hover:text-primary transition-all">
+<span class="material-symbols-outlined" data-icon="filter_list">filter_list</span>
+</button>
+<button class="p-2 rounded-lg bg-white border border-outline-variant/20 shadow-sm text-secondary hover:text-primary transition-all">
+<span class="material-symbols-outlined" data-icon="sort">sort</span>
+</button>
+</div>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+<!-- Req Card 1: Critical -->
+<div class="bg-white rounded-xl overflow-hidden shadow-sm group hover:shadow-md transition-shadow">
+<div class="h-1 bg-error w-full"></div>
+<div class="p-6">
+<div class="flex justify-between items-start mb-4">
+<span class="px-2 py-0.5 bg-error/10 text-error rounded text-[10px] font-bold uppercase tracking-wide">Critical</span>
+<span class="text-[11px] font-bold text-outline">Req 6.1</span>
+</div>
+<h5 class="font-headline font-bold text-on-secondary-fixed mb-1">Amended Claim Submission</h5>
+<p class="text-xs text-on-surface-variant mb-4">US-2023-014592-A1</p>
+<div class="grid grid-cols-2 gap-4 mb-6">
+<div class="bg-surface-container-low p-3 rounded-lg">
+<p class="text-[9px] text-outline uppercase font-bold mb-1">Deadline</p>
+<p class="text-xs font-bold text-error">Dec 22, 2023</p>
+</div>
+<div class="bg-surface-container-low p-3 rounded-lg">
+<p class="text-[9px] text-outline uppercase font-bold mb-1">Fee Status</p>
+<p class="text-xs font-bold text-on-surface">Unpaid ($450)</p>
+</div>
+</div>
+<div class="flex items-center gap-2 mb-6">
+<span class="material-symbols-outlined text-outline text-sm" data-icon="attach_file">attach_file</span>
+<span class="text-[11px] text-on-surface-variant">2 Documents attached</span>
+</div>
+<div class="grid grid-cols-2 gap-3">
+<button class="py-2.5 rounded-lg border border-primary/20 text-primary text-[11px] font-bold hover:bg-primary/5 transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-sm" data-icon="upload">upload</span>
+                                    Upload Protocol
+                                </button>
+<button class="py-2.5 rounded-lg bg-primary text-white text-[11px] font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-sm" data-icon="check_circle">check_circle</span>
+                                    Complete
+                                </button>
+</div>
+</div>
+</div>
+<!-- Req Card 2: Pending -->
+<div class="bg-white rounded-xl overflow-hidden shadow-sm group hover:shadow-md transition-shadow">
+<div class="h-1 bg-primary w-full"></div>
+<div class="p-6">
+<div class="flex justify-between items-start mb-4">
+<span class="px-2 py-0.5 bg-primary/10 text-primary rounded text-[10px] font-bold uppercase tracking-wide">Pending</span>
+<span class="text-[11px] font-bold text-outline">Req 7.1</span>
+</div>
+<h5 class="font-headline font-bold text-on-secondary-fixed mb-1">Prior Art Disclosures</h5>
+<p class="text-xs text-on-surface-variant mb-4">EP-394411-B1</p>
+<div class="grid grid-cols-2 gap-4 mb-6">
+<div class="bg-surface-container-low p-3 rounded-lg">
+<p class="text-[9px] text-outline uppercase font-bold mb-1">Deadline</p>
+<p class="text-xs font-bold text-on-surface">Jan 14, 2024</p>
+</div>
+<div class="bg-surface-container-low p-3 rounded-lg">
+<p class="text-[9px] text-outline uppercase font-bold mb-1">Fee Status</p>
+<p class="text-xs font-bold text-tertiary">Paid</p>
+</div>
+</div>
+<div class="flex items-center gap-2 mb-6">
+<span class="material-symbols-outlined text-outline text-sm" data-icon="attach_file">attach_file</span>
+<span class="text-[11px] text-on-surface-variant">No files attached</span>
+</div>
+<div class="grid grid-cols-2 gap-3">
+<button class="py-2.5 rounded-lg border border-primary/20 text-primary text-[11px] font-bold hover:bg-primary/5 transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-sm" data-icon="upload">upload</span>
+                                    Upload Protocol
+                                </button>
+<button class="py-2.5 rounded-lg bg-primary text-white text-[11px] font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-sm" data-icon="check_circle">check_circle</span>
+                                    Complete
+                                </button>
+</div>
+</div>
+</div>
+<!-- Req Card 3: In Review -->
+<div class="bg-white rounded-xl overflow-hidden shadow-sm group hover:shadow-md transition-shadow">
+<div class="h-1 bg-secondary w-full"></div>
+<div class="p-6">
+<div class="flex justify-between items-start mb-4">
+<span class="px-2 py-0.5 bg-secondary/10 text-secondary rounded text-[10px] font-bold uppercase tracking-wide">In Review</span>
+<span class="text-[11px] font-bold text-outline">Req 2.4</span>
+</div>
+<h5 class="font-headline font-bold text-on-secondary-fixed mb-1">Power of Attorney Update</h5>
+<p class="text-xs text-on-surface-variant mb-4">BR-112019-0054-A</p>
+<div class="grid grid-cols-2 gap-4 mb-6">
+<div class="bg-surface-container-low p-3 rounded-lg">
+<p class="text-[9px] text-outline uppercase font-bold mb-1">Deadline</p>
+<p class="text-xs font-bold text-on-surface">Feb 02, 2024</p>
+</div>
+<div class="bg-surface-container-low p-3 rounded-lg">
+<p class="text-[9px] text-outline uppercase font-bold mb-1">Fee Status</p>
+<p class="text-xs font-bold text-on-surface">N/A</p>
+</div>
+</div>
+<div class="flex items-center gap-2 mb-6 text-tertiary">
+<span class="material-symbols-outlined text-sm" data-icon="task_alt" style="font-variation-settings: 'FILL' 1;">task_alt</span>
+<span class="text-[11px] font-bold">Document Verified</span>
+</div>
+<div class="grid grid-cols-1">
+<button class="py-2.5 rounded-lg bg-surface-container-high text-on-surface-variant text-[11px] font-bold cursor-not-allowed flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-sm" data-icon="hourglass_empty">hourglass_empty</span>
+                                    Waiting for Examiner
+                                </button>
+</div>
+</div>
+</div>
+</div>
+</section>
+</div>
+<!-- Footer -->
+<footer class="w-full border-t border-slate-200 bg-surface-container-low mt-auto px-12 py-8 flex justify-between items-center">
+<p class="font-body text-[11px] uppercase tracking-widest text-secondary font-medium">© 2024 Aura Patent Intelligence. Data synchronized with USPTO/EPO.</p>
+<div class="flex gap-8">
+<a class="font-body text-[11px] uppercase tracking-widest text-secondary hover:text-primary transition-colors" href="#">Terms of Service</a>
+<a class="font-body text-[11px] uppercase tracking-widest text-secondary hover:text-primary transition-colors" href="#">Privacy Policy</a>
+<a class="font-body text-[11px] uppercase tracking-widest text-secondary hover:text-primary transition-colors" href="#">Data Sources</a>
+</div>
+</footer>
+</main>
+<!-- Contextual FAB (Only relevant for Process Dashboard) -->
+<button class="fixed bottom-8 right-8 w-14 h-14 rounded-full bg-gradient-to-br from-primary to-primary-container text-white shadow-2xl flex items-center justify-center hover:scale-110 active:scale-95 transition-all group">
+<span class="material-symbols-outlined text-3xl" data-icon="add">add</span>
+<span class="absolute right-16 bg-on-secondary-fixed text-white px-4 py-2 rounded-lg text-xs font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">New Requirement</span>
+</button>
+</body></html>
