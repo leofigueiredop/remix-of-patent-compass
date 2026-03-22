@@ -59,7 +59,8 @@ let loopsStarted = false;
 let rpiRunning = false;
 let docRunning = false;
 let opsRunning = false;
-let inpiRunning = false;
+let inpiTextRunning = false;
+let inpiDocRunning = false;
 let bqRunning = false;
 let rpiPaused = false;
 let docsPaused = false;
@@ -90,6 +91,11 @@ const googlePatentsMetrics = {
 
 function normalizeText(value?: string): string {
     return (value || '').replace(/\s+/g, ' ').trim();
+}
+
+function parseInpiJobMode(value?: string): 'text' | 'document' {
+    const normalized = normalizeText(value).toLowerCase();
+    return normalized.includes('mode=document') ? 'document' : 'text';
 }
 
 function extractDigits(value?: string): string {
@@ -1201,26 +1207,31 @@ async function queueDocumentJobForPatent(params: {
         params.patentId
     ]);
     if (existingStorageKey) {
-        await prisma.documentDownloadJob.upsert({
-            where: { patent_id: params.patentId },
-            update: {
-                status: 'completed',
-                error: null,
-                storage_key: existingStorageKey,
-                publication_number: params.publicationNumber || existing?.publication_number || null,
-                rpi_number: params.rpiNumber,
-                finished_at: new Date()
-            },
-            create: {
-                patent_id: params.patentId,
-                rpi_number: params.rpiNumber,
-                publication_number: params.publicationNumber || null,
-                status: 'completed',
-                storage_key: existingStorageKey,
-                finished_at: new Date()
-            }
-        });
-        return;
+        const existingPdf = await readObjectBufferFromS3(existingStorageKey);
+        const existingQuality = existingPdf ? isLikelyCompletePatentPdf(existingPdf) : { ok: false, pages: 0, reason: 'storage_read_failed' };
+        if (existingQuality.ok) {
+            await prisma.documentDownloadJob.upsert({
+                where: { patent_id: params.patentId },
+                update: {
+                    status: 'completed',
+                    error: null,
+                    storage_key: existingStorageKey,
+                    publication_number: params.publicationNumber || existing?.publication_number || null,
+                    rpi_number: params.rpiNumber,
+                    finished_at: new Date()
+                },
+                create: {
+                    patent_id: params.patentId,
+                    rpi_number: params.rpiNumber,
+                    publication_number: params.publicationNumber || null,
+                    status: 'completed',
+                    storage_key: existingStorageKey,
+                    finished_at: new Date()
+                }
+            });
+            return;
+        }
+        await cleanupInvalidDocumentAssets(existingStorageKey, params.publicationNumber || existing?.publication_number || params.patentId).catch(() => undefined);
     }
     if (existing && ['pending', 'running', 'completed'].includes(existing.status)) return;
     await prisma.documentDownloadJob.upsert({
@@ -1259,6 +1270,34 @@ async function queueOpsBibliographicJob(params: {
             patent_number: params.patentNumber,
             rpi_number: params.rpiNumber,
             status: 'pending'
+        }
+    });
+}
+
+async function queueInpiProcessingJob(params: {
+    patentNumber: string;
+    priority: number;
+    mode: 'text' | 'document';
+}) {
+    const patentNumber = normalizeInpiCodPedido(params.patentNumber);
+    if (!patentNumber) return;
+    const modeTag = `mode=${params.mode}`;
+    await prisma.inpiProcessingJob.upsert({
+        where: { patent_number: patentNumber },
+        update: {
+            priority: params.priority,
+            status: 'pending',
+            attempts: 0,
+            error: modeTag,
+            started_at: null,
+            finished_at: null
+        },
+        create: {
+            patent_number: patentNumber,
+            priority: params.priority,
+            status: 'pending',
+            attempts: 0,
+            error: modeTag
         }
     });
 }
@@ -1577,19 +1616,14 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
             ).catch(() => undefined);
         }
 
+        if (patentId && INPI_SCRAPE_FIRST_ENABLED) {
+            await queueInpiProcessingJob({
+                patentNumber: patentId,
+                priority: 10,
+                mode: 'text'
+            }).catch(() => undefined);
+        }
         if (isDocumentEligible && patentId) {
-            if (INPI_SCRAPE_FIRST_ENABLED) {
-                await prisma.inpiProcessingJob.createMany({
-                    data: [{
-                        patent_number: patentId,
-                        priority: 10,
-                        status: 'pending',
-                        attempts: 0,
-                        created_at: new Date()
-                    }],
-                    skipDuplicates: true
-                }).catch(() => undefined);
-            }
             await queueDocumentJobForPatent({
                 patentId,
                 rpiNumber,
@@ -1872,6 +1906,48 @@ async function downloadOpsPdfByLink(link: string, pages: string): Promise<Buffer
     return Buffer.from(response.data);
 }
 
+function parseOpsPagesHint(value?: string): number {
+    const parsed = Number.parseInt(normalizeText(value || ''), 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+    return parsed;
+}
+
+async function downloadOpsPatentPdf(publicationNumber: string): Promise<{ pdf: Buffer; docdbId: string } | null> {
+    const docdbId = await resolveDocdbId(publicationNumber);
+    if (!docdbId) return null;
+    const instances = await fetchDocumentInstances(docdbId);
+    if (!instances.length) return null;
+    const sortedInstances = [...instances].sort((a, b) => {
+        const leftDesc = normalizeText(a['@desc'] || '').toLowerCase();
+        const rightDesc = normalizeText(b['@desc'] || '').toLowerCase();
+        const score = (text: string) => {
+            if (text.includes('full')) return 5;
+            if (text.includes('description')) return 4;
+            if (text.includes('specification')) return 3;
+            if (text.includes('document')) return 2;
+            if (text.includes('claims')) return 1;
+            return 0;
+        };
+        return score(rightDesc) - score(leftDesc);
+    });
+    for (const instance of sortedInstances) {
+        const link = normalizeText(instance['@link'] || '');
+        if (!link) continue;
+        const pagesHint = parseOpsPagesHint(instance['@number-of-pages']);
+        const range = pagesHint > 0 ? `1-${pagesHint}` : '1-200';
+        try {
+            const pdf = await downloadOpsPdfByLink(link, range);
+            if (!pdf || pdf.length < 1024) continue;
+            const quality = isLikelyCompletePatentPdf(pdf);
+            if (!quality.ok) continue;
+            return { pdf, docdbId };
+        } catch {
+            continue;
+        }
+    }
+    return null;
+}
+
 type OpsBibliographicData = {
     docdbId: string;
     title?: string;
@@ -1887,22 +1963,31 @@ type OpsBibliographicData = {
 };
 
 function extractGooglePatentNumberCandidates(patentNumber: string): string[] {
-    const normalizeGoogleSeed = (value?: string): string => {
+    const normalizeGoogleSeed = (value?: string): string[] => {
         const raw = normalizeText(value || '').toUpperCase();
-        const beforeHyphen = raw.split('-')[0] || raw;
-        let normalized = beforeHyphen.replace(/[^A-Z0-9]/g, '');
         const hasHyphenCheckDigit = /-[0-9X]$/i.test(raw);
-        const brMatch = normalized.match(/^BR(10|11|12|13)(\d+)$/);
-        if (!hasHyphenCheckDigit && brMatch && brMatch[2].length > 10) {
-            normalized = `BR${brMatch[1]}${brMatch[2].slice(0, -1)}`;
+        const rawCompact = raw.replace(/[^A-Z0-9-]/g, '');
+        const fullValue = rawCompact.replace(/[^A-Z0-9]/g, '');
+        const beforeHyphen = (rawCompact.split('-')[0] || rawCompact).replace(/[^A-Z0-9]/g, '');
+        const variants = new Set<string>([fullValue, beforeHyphen].filter(Boolean));
+        const normalizedVariants = new Set<string>();
+        for (const candidate of variants) {
+            let normalized = candidate;
+            const brMatch = normalized.match(/^BR(10|11|12|13)(\d+)$/);
+            if (!hasHyphenCheckDigit && brMatch && brMatch[2].length > 10) {
+                normalized = `BR${brMatch[1]}${brMatch[2].slice(0, -1)}`;
+            }
+            normalizedVariants.add(normalized);
         }
-        return normalized;
+        return Array.from(normalizedVariants).filter(Boolean);
     };
-    const base = normalizeGoogleSeed(patentNumber);
-    if (!base) return [];
-    const variants = new Set<string>([base]);
-    const noBr = base.replace(/^BR/i, '');
-    if (noBr) variants.add(noBr);
+    const bases = normalizeGoogleSeed(patentNumber);
+    if (bases.length === 0) return [];
+    const variants = new Set<string>(bases);
+    for (const base of bases) {
+        const noBr = base.replace(/^BR/i, '');
+        if (noBr) variants.add(noBr);
+    }
     return Array.from(variants).filter(Boolean);
 }
 
@@ -2457,7 +2542,7 @@ async function fetchInpiScrapeBibliographicData(patentNumber: string): Promise<O
     try {
         const module = await import('./inpiWorker');
         if (!module?.processInpiPatent) return null;
-        await module.processInpiPatent(codPedido);
+        await module.processInpiPatent(codPedido, { includeDocuments: false });
         const scraped = await prisma.inpiPatent.findUnique({
             where: { cod_pedido: codPedido },
             select: {
@@ -2533,24 +2618,15 @@ async function fetchOpsBibliographicData(patentNumber: string): Promise<OpsBibli
     };
 }
 
-async function fetchBibliographicDataWithFallbacks(patentNumber: string, attemptNumber = 1): Promise<OpsBibliographicData | null> {
-    // Ordem exigida: 1) INPI worker 2) OPS 3) Google Patents Scrape / BigQuery
-    if (patentNumber.startsWith('BR')) {
-        try {
-            const inpi = await fetchInpiScrapeBibliographicData(patentNumber);
-            if (inpi) return inpi;
-        } catch (error) {
-            if (serializeUnknownError(error).includes('INPI_MAINTENANCE')) {
-                // Se INPI em manutenção, seguimos para OPS sem erro
-            } else {
-                // Qualquer outro erro: seguir para OPS
-            }
-        }
-    }
-    const fromOps = await fetchOpsBibliographicData(patentNumber);
-    if (fromOps) return fromOps;
+async function fetchBibliographicDataWithFallbacks(patentNumber: string, _attemptNumber = 1): Promise<OpsBibliographicData | null> {
     const fromGooglePatents = await fetchGooglePatentsBibliographicData(patentNumber);
     if (fromGooglePatents) return fromGooglePatents;
+    const fromOps = await fetchOpsBibliographicData(patentNumber);
+    if (fromOps) return fromOps;
+    if (patentNumber.startsWith('BR')) {
+        const inpi = await fetchInpiScrapeBibliographicData(patentNumber).catch(() => null);
+        if (inpi) return inpi;
+    }
     return null;
 }
 
@@ -3036,12 +3112,57 @@ async function processNextDocumentJob() {
 
             if (googlePrimaryRecovered) return;
 
-            const errorText = `DOC_GOOGLE_PATENTS_NOT_FOUND publication=${publicationNumber} source=google_patents candidates=${googleSearchCandidates.join('|')}`;
+            let opsBundle: { pdf: Buffer; docdbId: string } | null = null;
+            for (const candidate of googleSearchCandidates.length ? googleSearchCandidates : [publicationNumber]) {
+                opsBundle = await downloadOpsPatentPdf(candidate).catch(() => null);
+                if (opsBundle?.pdf) break;
+            }
+            if (opsBundle?.pdf) {
+                const safeBase = publicationNumber.replace(/[^\w.-]/g, '_');
+                const baseKey = `patent-docs/${safeBase}`;
+                const fullKey = `${baseKey}/full_document.pdf`;
+                await uploadPdfToS3(fullKey, opsBundle.pdf);
+                await ensureDerivedStorageAssets(publicationNumber, opsBundle.pdf);
+                await prisma.documentDownloadJob.update({
+                    where: { id: job.id },
+                    data: {
+                        status: 'completed',
+                        storage_key: fullKey,
+                        finished_at: new Date(),
+                        publication_number: publicationNumber,
+                        error: truncateError(`DOC_PRIMARY source=ops_api docdb=${opsBundle.docdbId}`)
+                    }
+                });
+                documentJobLog({
+                    jobId: job.id,
+                    patentId: job.patent_id,
+                    publicationNumber,
+                    status: 'completed',
+                    code: 'DOC_PRIMARY_OPS_API',
+                    storageKey: fullKey,
+                    docdbId: opsBundle.docdbId
+                });
+                return;
+            }
+
+            await queueInpiProcessingJob({
+                patentNumber: job.patent_id,
+                priority: 95,
+                mode: 'document'
+            }).catch(() => undefined);
+            const errorText = `DOC_FALLBACK_QUEUED_INPI publication=${publicationNumber} source_chain=google_patents>ops_api>inpi_worker candidates=${googleSearchCandidates.join('|')}`;
             await prisma.documentDownloadJob.update({
                 where: { id: job.id },
-                data: { status: 'not_found', error: truncateError(errorText), finished_at: new Date() }
+                data: { status: 'waiting_inpi', error: truncateError(errorText), finished_at: new Date() }
             });
-            documentJobLog({ jobId: job.id, patentId: job.patent_id, publicationNumber, candidatesSearched: googleSearchCandidates, status: 'not_found', code: 'DOC_GOOGLE_PATENTS_NOT_FOUND' });
+            documentJobLog({
+                jobId: job.id,
+                patentId: job.patent_id,
+                publicationNumber,
+                candidatesSearched: googleSearchCandidates,
+                status: 'waiting_inpi',
+                code: 'DOC_FALLBACK_QUEUED_INPI'
+            });
             return;
         } catch (error: unknown) {
             const raw = serializeUnknownError(error);
@@ -3070,6 +3191,7 @@ async function processNextDocumentJob() {
 }
 
 export function getBackgroundWorkerState() {
+    const inpiRunning = inpiTextRunning || inpiDocRunning;
     return {
         rpiPaused,
         docsPaused,
@@ -3080,6 +3202,8 @@ export function getBackgroundWorkerState() {
         docRunning,
         opsRunning,
         inpiRunning,
+        inpiTextRunning,
+        inpiDocRunning,
         bqRunning,
         opsCircuitOpen: opsCircuitOpenUntil > Date.now(),
         opsCircuitOpenUntil: opsCircuitOpenUntil > Date.now() ? new Date(opsCircuitOpenUntil).toISOString() : null,
@@ -3240,8 +3364,8 @@ export async function retryAllRpiErrorJobs(ids?: string[], preferBigQuery = fals
 
 export async function retryAllDocumentErrorJobs(ids?: string[]) {
     const where = ids && ids.length > 0
-        ? { id: { in: Array.from(new Set(ids)) }, status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing'] } }
-        : { status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing'] } };
+        ? { id: { in: Array.from(new Set(ids)) }, status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing', 'waiting_inpi'] } }
+        : { status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing', 'waiting_inpi'] } };
     const result = await prisma.documentDownloadJob.updateMany({
         where,
         data: {
@@ -3520,32 +3644,34 @@ export async function enqueueBigQueryFromFailedSources(source: 'docs' | 'ops' | 
     return { selected: numbers.length, enqueued: result.enqueued, source };
 }
 
-// INPI Worker - Processamento de dados completos do INPI
-async function processNextInpiJob() {
-    if (inpiRunning || inpiPaused) return;
-    inpiRunning = true;
-    
+// INPI Workers - separados por modo (text/doc)
+async function processNextInpiJobByMode(mode: 'text' | 'document') {
+    if (inpiPaused) return;
+    if (mode === 'text' && inpiTextRunning) return;
+    if (mode === 'document' && inpiDocRunning) return;
+    if (mode === 'text') inpiTextRunning = true;
+    else inpiDocRunning = true;
+    const modeTag = `mode=${mode}`;
+    const modeFilter = mode === 'document'
+        ? { error: { contains: 'mode=document' } }
+        : { NOT: { error: { contains: 'mode=document' } } };
     try {
         let job = await prisma.inpiProcessingJob.findFirst({
-            where: { status: 'pending' },
+            where: { status: 'pending', ...modeFilter },
             orderBy: [{ priority: 'desc' }, { created_at: 'asc' }]
         });
-        
         if (!job) {
             job = await prisma.inpiProcessingJob.findFirst({
                 where: {
                     status: 'failed',
-                    attempts: { lt: 3 }
+                    attempts: { lt: 3 },
+                    ...modeFilter
                 },
                 orderBy: [{ attempts: 'asc' }, { updated_at: 'asc' }, { created_at: 'asc' }]
             });
         }
-        
-        if (!job) {
-            inpiRunning = false;
-            return;
-        }
-        
+        if (!job) return;
+        const includeDocuments = mode === 'document';
         const nextAttempt = job.attempts + 1;
         await prisma.inpiProcessingJob.update({
             where: { id: job.id },
@@ -3553,17 +3679,56 @@ async function processNextInpiJob() {
                 status: 'running',
                 started_at: new Date(),
                 attempts: { increment: 1 },
-                error: null
+                error: modeTag
             }
         });
-        
         try {
-            console.log(`🔍 INPI Worker processando: ${job.patent_number}`);
-            
-            // Importar e usar o worker INPI
+            console.log(`🔍 INPI Worker ${mode.toUpperCase()} processando: ${job.patent_number}`);
             const { processInpiPatent } = await import('./inpiWorker');
-            const result = await processInpiPatent(job.patent_number);
-            
+            const result = await processInpiPatent(job.patent_number, { includeDocuments });
+            if (includeDocuments) {
+                const publicationNumber = normalizeText((result as any)?.numeroProcesso || '');
+                const docs = Array.isArray((result as any)?.documentos) ? (result as any).documentos : [];
+                let uploadedStorageKey: string | null = null;
+                for (const doc of docs) {
+                    const localPath = normalizeText(doc?.caminho || '');
+                    if (!doc?.baixado || !localPath) continue;
+                    try {
+                        const pdf = await fs.readFile(localPath);
+                        const quality = isLikelyCompletePatentPdf(pdf);
+                        if (!quality.ok) continue;
+                        const safeBase = (publicationNumber || job.patent_number).replace(/[^\w.-]/g, '_');
+                        const fullKey = `patent-docs/${safeBase}/full_document.pdf`;
+                        await uploadPdfToS3(fullKey, pdf);
+                        await ensureDerivedStorageAssets(publicationNumber || job.patent_number, pdf);
+                        uploadedStorageKey = fullKey;
+                        break;
+                    } catch {
+                        continue;
+                    }
+                }
+                if (uploadedStorageKey) {
+                    await prisma.documentDownloadJob.updateMany({
+                        where: { patent_id: job.patent_number },
+                        data: {
+                            status: 'completed',
+                            storage_key: uploadedStorageKey,
+                            finished_at: new Date(),
+                            publication_number: publicationNumber || undefined,
+                            error: 'source=inpi_worker'
+                        }
+                    }).catch(() => undefined);
+                } else {
+                    await prisma.documentDownloadJob.updateMany({
+                        where: { patent_id: job.patent_number },
+                        data: {
+                            status: 'not_found',
+                            finished_at: new Date(),
+                            error: 'DOC_INPI_FALLBACK_NOT_FOUND source=inpi_worker'
+                        }
+                    }).catch(() => undefined);
+                }
+            }
             await prisma.inpiProcessingJob.update({
                 where: { id: job.id },
                 data: {
@@ -3572,47 +3737,56 @@ async function processNextInpiJob() {
                     result_data: result as any
                 }
             });
-            
-            console.log(`✅ INPI Worker concluído: ${job.patent_number}`);
-            
+            console.log(`✅ INPI Worker ${mode.toUpperCase()} concluído: ${job.patent_number}`);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            console.error(`❌ INPI Worker falhou: ${job.patent_number} - ${errorMessage}`);
+            console.error(`❌ INPI Worker ${mode.toUpperCase()} falhou: ${job.patent_number} - ${errorMessage}`);
             const infraBrowserError = errorMessage.includes('INPI_BROWSER_LAUNCH_FAILED')
                 || errorMessage.includes('Failed to launch the browser process')
                 || errorMessage.includes('spawn ')
                 || errorMessage.includes(' ENOENT');
-            
             await prisma.inpiProcessingJob.update({
                 where: { id: job.id },
                 data: {
                     status: infraBrowserError || nextAttempt >= 3 ? 'failed_permanent' : 'failed',
                     finished_at: new Date(),
-                    error: errorMessage
+                    error: `${modeTag} ${errorMessage}`.trim()
                 }
             });
         }
-        
     } catch (error) {
-        console.error('Erro no INPI Worker loop:', error);
+        console.error(`Erro no INPI Worker ${mode.toUpperCase()} loop:`, error);
     } finally {
-        inpiRunning = false;
+        if (mode === 'text') inpiTextRunning = false;
+        else inpiDocRunning = false;
     }
+}
+
+async function processNextInpiJobs() {
+    await Promise.all([
+        processNextInpiJobByMode('text'),
+        processNextInpiJobByMode('document')
+    ]);
 }
 
 // Funções para gerenciamento do worker INPI
 export async function retryInpiJob(jobId: string) {
+    const current = await prisma.inpiProcessingJob.findUnique({
+        where: { id: jobId },
+        select: { error: true }
+    });
+    const mode = parseInpiJobMode(current?.error || '');
     const updated = await prisma.inpiProcessingJob.update({
         where: { id: jobId },
         data: {
             status: 'pending',
             attempts: 0,
-            error: null,
+            error: `mode=${mode}`,
             started_at: null,
             finished_at: null
         }
     });
-    processNextInpiJob().catch(() => undefined);
+    processNextInpiJobs().catch(() => undefined);
     return updated;
 }
 
@@ -3620,21 +3794,30 @@ export async function retryAllInpiErrorJobs(ids?: string[]) {
     const where = ids && ids.length > 0
         ? { id: { in: Array.from(new Set(ids)) }, status: { in: ['failed', 'failed_permanent'] } }
         : { status: { in: ['failed', 'failed_permanent'] } };
-    const result = await prisma.inpiProcessingJob.updateMany({
+    const rows = await prisma.inpiProcessingJob.findMany({
         where,
-        data: {
-            status: 'pending',
-            attempts: 0,
-            error: null,
-            started_at: null,
-            finished_at: null
-        }
+        select: { id: true, error: true }
     });
-    processNextInpiJob().catch(() => undefined);
-    return { updated: result.count };
+    let updatedCount = 0;
+    for (const row of rows) {
+        const mode = parseInpiJobMode(row.error || '');
+        await prisma.inpiProcessingJob.update({
+            where: { id: row.id },
+            data: {
+                status: 'pending',
+                attempts: 0,
+                error: `mode=${mode}`,
+                started_at: null,
+                finished_at: null
+            }
+        });
+        updatedCount += 1;
+    }
+    processNextInpiJobs().catch(() => undefined);
+    return { updated: updatedCount };
 }
 
-export async function enqueueInpiReprocessing(patentNumbers?: string[], priority = 10) {
+export async function enqueueInpiReprocessing(patentNumbers?: string[], priority = 10, mode: 'text' | 'document' = 'text') {
     if (!patentNumbers || patentNumbers.length === 0) {
         // Se não especificado, enfileira todas as patentes BR existentes
         const existingPatents = await prisma.inpiPatent.findMany({
@@ -3650,6 +3833,7 @@ export async function enqueueInpiReprocessing(patentNumbers?: string[], priority
         priority,
         status: 'pending' as const,
         attempts: 0,
+        error: `mode=${mode}`,
         created_at: new Date()
     }));
     
@@ -3661,19 +3845,23 @@ export async function enqueueInpiReprocessing(patentNumbers?: string[], priority
     return { enqueued: result.count };
 }
 
+export async function enqueueInpiDocumentReprocessing(patentNumbers?: string[], priority = 95) {
+    return enqueueInpiReprocessing(patentNumbers, priority, 'document');
+}
+
 export async function startBackgroundWorkers() {
     if (loopsStarted) return;
     loopsStarted = true;
     recoverStaleRunningJobs().catch(() => undefined);
     quarantineInvalidFutureRpiJobs().catch(() => undefined);
     enqueueLastFiveYearsRpi().catch(() => undefined);
-    processNextInpiJob().catch(() => undefined);
+    processNextInpiJobs().catch(() => undefined);
     processNextRpiImportJob().catch(() => undefined);
     processNextDocumentJob().catch(() => undefined);
     processNextOpsBibliographicJob().catch(() => undefined);
     processNextBigQueryBibliographicJob().catch(() => undefined);
     setInterval(() => {
-        processNextInpiJob().catch(() => undefined);
+        processNextInpiJobs().catch(() => undefined);
     }, 3000);
     setInterval(() => {
         processNextRpiImportJob().catch(() => undefined);

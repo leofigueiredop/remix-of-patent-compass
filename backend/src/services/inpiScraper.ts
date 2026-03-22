@@ -2,13 +2,18 @@ import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import * as cheerio from 'cheerio';
 import * as fs from 'fs';
+import * as path from 'path';
 import { prisma } from '../db';
 import type { Browser, Page } from 'puppeteer';
+
+// Anti-Captcha SDK
+const anticaptcha = require('@antiadmin/anticaptchaofficial');
 
 puppeteer.use(StealthPlugin());
 
 const INPI_USER = process.env.INPI_USER || '';
 const INPI_PASSWORD = process.env.INPI_PASSWORD || '';
+const ANTI_CAPTCHA_API_KEY = process.env.ANTI_CAPTCHA_API_KEY || '';
 const DOWNLOAD_DIR = '/tmp/inpi_pdfs';
 const COOKIE_PATH = '/tmp/inpi_session_cookies.json';
 const INPI_SESSION_TTL_MS = Math.max(5 * 60_000, parseInt(process.env.INPI_SESSION_TTL_MINUTES || '30', 10) * 60_000);
@@ -44,6 +49,82 @@ function humanTypingDelay() {
 async function humanScroll(page: Page) {
     await page.evaluate((delta) => window.scrollBy(0, delta), randomInt(180, 520));
     await humanPause(0.45);
+}
+
+/**
+ * Resolve captcha usando Anti-Captcha
+ * @param page Página do Puppeteer onde o captcha está presente
+ * @returns Solução do captcha ou null se não encontrar captcha
+ */
+async function solveCaptcha(page: Page): Promise<string | null> {
+    if (!ANTI_CAPTCHA_API_KEY) {
+        console.warn('ANTI_CAPTCHA_API_KEY não configurada. Ignorando captcha.');
+        return null;
+    }
+
+    try {
+        // Verificar se há captcha na página
+        const hasCaptcha = await page.$('img[src*="captcha"]') || 
+                          await page.$('iframe[src*="recaptcha"]') ||
+                          await page.$('.g-recaptcha');
+        
+        if (!hasCaptcha) {
+            return null;
+        }
+
+        console.log('Captcha detectado. Resolvendo com Anti-Captcha...');
+        
+        // Configurar API key
+        anticaptcha.setAPIKey(ANTI_CAPTCHA_API_KEY);
+        
+        // Verificar tipo de captcha
+        const recaptchaElement = await page.$('.g-recaptcha');
+        if (recaptchaElement) {
+            // reCAPTCHA v2
+            const siteKey = await page.evaluate(() => {
+                const recaptcha = document.querySelector('.g-recaptcha');
+                return recaptcha?.getAttribute('data-sitekey');
+            });
+            
+            if (siteKey) {
+                const pageUrl = page.url();
+                const balance = await anticaptcha.getBalance();
+                console.log(`Saldo Anti-Captcha: $${balance}`);
+                
+                const solution = await anticaptcha.solveRecaptchaV2Proxyless(
+                    pageUrl,
+                    siteKey
+                );
+                
+                console.log('Captcha resolvido:', solution);
+                return solution;
+            }
+        }
+        
+        // Captcha de imagem tradicional
+        const captchaImage = await page.$('img[src*="captcha"]');
+        if (captchaImage) {
+            const imageSrc = await page.evaluate((img) => img.src, captchaImage);
+            
+            // Fazer download da imagem do captcha
+            const viewSource = await page.goto(imageSrc);
+            if (!viewSource) {
+                console.error('Falha ao carregar imagem do captcha');
+                return null;
+            }
+            const buffer = await viewSource.buffer();
+            
+            // Resolver captcha de imagem
+            const solution = await anticaptcha.solveImage(buffer);
+            console.log('Captcha de imagem resolvido:', solution);
+            return solution;
+        }
+        
+    } catch (error) {
+        console.error('Erro ao resolver captcha:', error);
+    }
+    
+    return null;
 }
 
 function normalizeFlat(value?: string) {
@@ -128,6 +209,19 @@ async function persistCookies(page: Page) {
 async function ensureLoggedIn(page: Page) {
     await page.goto('https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login', { waitUntil: 'networkidle2', timeout: 60000 });
     await humanPause(0.8);
+    
+    // Verificar e resolver captcha se necessário
+    const captchaSolution = await solveCaptcha(page);
+    if (captchaSolution) {
+        console.log('Preenchendo solução do captcha...');
+        // Preencher solução do captcha se houver campo correspondente
+        const captchaInput = await page.$('input[name="captcha"]') || await page.$('input[type="text"]');
+        if (captchaInput) {
+            await captchaInput.type(captchaSolution, { delay: humanTypingDelay() });
+            await humanPause(0.5);
+        }
+    }
+    
     let hasLoginInput = await page.$('input[name="T_Login"]');
     if (!hasLoginInput) {
         await page.evaluate(() => {
@@ -139,6 +233,7 @@ async function ensureLoggedIn(page: Page) {
         await humanPause(0.9);
         hasLoginInput = await page.$('input[name="T_Login"]');
     }
+    
     if (hasLoginInput && INPI_USER && INPI_PASSWORD) {
         console.log(`Logging in as ${INPI_USER}...`);
         await humanPause(0.5);
@@ -146,6 +241,17 @@ async function ensureLoggedIn(page: Page) {
         await humanPause(0.35);
         await page.type('input[name="T_Senha"]', INPI_PASSWORD, { delay: humanTypingDelay() });
         await humanPause(0.65);
+        
+        // Verificar novamente por captcha após preencher credenciais
+        const postCredentialsCaptcha = await solveCaptcha(page);
+        if (postCredentialsCaptcha) {
+            const captchaInput = await page.$('input[name="captcha"]') || await page.$('input[type="text"]');
+            if (captchaInput) {
+                await captchaInput.type(postCredentialsCaptcha, { delay: humanTypingDelay() });
+                await humanPause(0.5);
+            }
+        }
+        
         await Promise.all([
             page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }),
             page.click('input[type="submit"]')
@@ -160,6 +266,7 @@ async function ensureLoggedIn(page: Page) {
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }).catch(() => undefined);
         await humanPause(1.1);
     }
+    
     await persistCookies(page).catch(() => undefined);
 }
 

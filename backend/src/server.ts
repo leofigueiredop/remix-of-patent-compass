@@ -43,6 +43,13 @@ import { promisify } from 'util';
 import { createHash, randomUUID } from 'crypto';
 import pdfParse from 'pdf-parse';
 
+if (typeof (process as any).loadEnvFile === 'function') {
+    try {
+        (process as any).loadEnvFile(path.resolve(process.cwd(), '.env'));
+    } catch (_) {
+    }
+}
+
 const execAsync = promisify(exec);
 
 

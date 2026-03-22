@@ -623,7 +623,12 @@ async function downloadDocument(url: string, filename: string): Promise<string> 
     }
 }
 
-async function extractPatentData(page: Page, codPedido: string) {
+type ProcessInpiPatentOptions = {
+    includeDocuments?: boolean;
+};
+
+async function extractPatentData(page: Page, codPedido: string, options: ProcessInpiPatentOptions = {}) {
+    const includeDocuments = options.includeDocuments === true;
     await rateLimit();
     
     const html = await page.content();
@@ -633,7 +638,7 @@ async function extractPatentData(page: Page, codPedido: string) {
         console.log('🔄 Sessão expirou durante extração, reconectando...');
         await ensureLoggedIn(page);
         await searchAndOpenPatentDetail(page, codPedido);
-        return await extractPatentData(page, codPedido);
+        return await extractPatentData(page, codPedido, options);
     }
     
     const $ = cheerio.load(html);
@@ -908,7 +913,7 @@ async function extractPatentData(page: Page, codPedido: string) {
         return documentos;
     };
     
-    const documentos = await extractDocumentos();
+    const documentos = includeDocuments ? await extractDocumentos() : [];
 
     // Publicações (RPI) completas
     const publicationsTableAll = $('font:contains("Publicações")').closest('table').next('table');
@@ -965,7 +970,7 @@ async function extractPatentData(page: Page, codPedido: string) {
     return data;
 }
 
-export async function processInpiPatent(codPedido: string) {
+export async function processInpiPatent(codPedido: string, options: ProcessInpiPatentOptions = {}) {
     return await withSessionLock(async () => {
         for (let attempt = 1; attempt <= 3; attempt++) {
             try {
@@ -977,7 +982,7 @@ export async function processInpiPatent(codPedido: string) {
                     throw new Error(`Não foi possível encontrar a patente ${codPedido}`);
                 }
                 
-                const patentData = await extractPatentData(page, codPedido);
+                const patentData = await extractPatentData(page, codPedido, options);
                 console.log(`✅ Patente ${codPedido} processada com sucesso`);
                 
                 try {
