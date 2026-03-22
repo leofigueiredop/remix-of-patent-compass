@@ -9,6 +9,13 @@ import { createSign, randomUUID } from 'crypto';
 import { CreateBucketCommand, DeleteObjectCommand, GetObjectCommand, HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { prisma } from '../db';
 
+if (typeof (process as any).loadEnvFile === 'function') {
+    try {
+        (process as any).loadEnvFile(path.resolve(process.cwd(), '.env'));
+    } catch (_) {
+    }
+}
+
 const prismaAny = prisma as any;
 
 const execAsync = promisify(exec);
@@ -866,7 +873,7 @@ function getS3Client() {
 async function ensureS3Bucket() {
     if (s3BucketReady) return;
     if (!S3_ENDPOINT || !S3_ACCESS_KEY || !S3_SECRET_KEY) {
-        throw new Error('Credenciais S3 não configuradas');
+        throw new Error(`Credenciais S3 não configuradas endpoint=${Boolean(S3_ENDPOINT)} accessKey=${Boolean(S3_ACCESS_KEY)} secretKey=${Boolean(S3_SECRET_KEY)} bucket=${normalizeText(S3_BUCKET || '') ? 'ok' : 'missing'}`);
     }
     const s3 = getS3Client();
     try {
