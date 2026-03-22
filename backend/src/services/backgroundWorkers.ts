@@ -58,6 +58,8 @@ const GOOGLE_PATENTS_BREAKER_COOLDOWN_MS = Math.max(30_000, parseInt(process.env
 const MIN_FULL_DOCUMENT_PAGES = Math.max(2, parseInt(process.env.MIN_FULL_DOCUMENT_PAGES || '2', 10));
 const INPI_JOB_MIN_INTERVAL_MS = Math.max(5_000, parseInt(process.env.INPI_JOB_MIN_INTERVAL_MS || '12000', 10));
 const INPI_JOB_DELAY_JITTER_MS = Math.max(500, parseInt(process.env.INPI_JOB_DELAY_JITTER_MS || '4000', 10));
+const INPI_STALE_RUNNING_MS = Math.max(10 * 60_000, parseInt(process.env.INPI_STALE_RUNNING_MS || '3600000', 10));
+const INPI_WORKER_LOCK_KEY = Number.parseInt(process.env.INPI_WORKER_LOCK_KEY || '920105', 10);
 const S3_ENDPOINT = process.env.S3_ENDPOINT || '';
 const S3_REGION = process.env.S3_REGION || 'garage';
 const S3_ACCESS_KEY = process.env.S3_ACCESS_KEY || '';
@@ -87,6 +89,7 @@ let lastGooglePatentsRequestAt = 0;
 let googlePatentsFailureCount = 0;
 let googlePatentsCircuitOpenUntil = 0;
 let lastInpiJobCompletedAt = 0;
+let inpiDbLockHeld = false;
 let bigQueryAccessToken: string | null = null;
 let bigQueryAccessTokenExpiration = 0;
 const googlePatentsMetrics = {
@@ -3789,8 +3792,8 @@ async function processNextInpiJobByMode(mode: 'text' | 'document'): Promise<bool
         if (!job) return false;
         const includeDocuments = mode === 'document';
         const nextAttempt = job.attempts + 1;
-        await prisma.inpiProcessingJob.update({
-            where: { id: job.id },
+        const claimed = await prisma.inpiProcessingJob.updateMany({
+            where: { id: job.id, status: job.status },
             data: {
                 status: 'running',
                 started_at: new Date(),
@@ -3798,6 +3801,7 @@ async function processNextInpiJobByMode(mode: 'text' | 'document'): Promise<bool
                 error: modeTag
             }
         });
+        if (claimed.count === 0) return false;
         try {
             console.log(`🔍 INPI Worker ${mode.toUpperCase()} processando: ${job.patent_number}`);
             const { processInpiPatent } = await import('./inpiWorker');
@@ -3908,15 +3912,63 @@ async function processNextInpiJobByMode(mode: 'text' | 'document'): Promise<bool
 
 async function processNextInpiJobs() {
     if (inpiPaused || inpiTextRunning || inpiDocRunning) return;
-    const elapsed = Date.now() - lastInpiJobCompletedAt;
-    if (lastInpiJobCompletedAt > 0 && elapsed < INPI_JOB_MIN_INTERVAL_MS) return;
-    if (lastInpiJobCompletedAt > 0) {
-        const jitter = Math.floor(Math.random() * INPI_JOB_DELAY_JITTER_MS);
-        if (jitter > 0) await sleep(jitter);
+    const acquireLock = async (): Promise<boolean> => {
+        try {
+            const rows = await prisma.$queryRawUnsafe<any[]>(
+                `select pg_try_advisory_lock($1::bigint) as locked`,
+                INPI_WORKER_LOCK_KEY
+            );
+            inpiDbLockHeld = Boolean(rows?.[0]?.locked);
+            return inpiDbLockHeld;
+        } catch {
+            inpiDbLockHeld = true;
+            return true;
+        }
+    };
+    const releaseLock = async () => {
+        if (!inpiDbLockHeld) return;
+        try {
+            await prisma.$queryRawUnsafe<any[]>(
+                `select pg_advisory_unlock($1::bigint)`,
+                INPI_WORKER_LOCK_KEY
+            );
+        } catch {
+        }
+        inpiDbLockHeld = false;
+    };
+    const recoverStaleRunningJobs = async () => {
+        const staleSince = new Date(Date.now() - INPI_STALE_RUNNING_MS);
+        await prisma.inpiProcessingJob.updateMany({
+            where: {
+                status: 'running',
+                started_at: { lt: staleSince }
+            },
+            data: {
+                status: 'failed',
+                finished_at: new Date(),
+                error: 'INPI_STALE_RUNNING_AUTO_RECOVERY'
+            }
+        }).catch(() => undefined);
+    };
+    if (!(await acquireLock())) return;
+    try {
+        await recoverStaleRunningJobs();
+        const currentlyRunning = await prisma.inpiProcessingJob.count({
+            where: { status: 'running' }
+        });
+        if (currentlyRunning > 0) return;
+        const elapsed = Date.now() - lastInpiJobCompletedAt;
+        if (lastInpiJobCompletedAt > 0 && elapsed < INPI_JOB_MIN_INTERVAL_MS) return;
+        if (lastInpiJobCompletedAt > 0) {
+            const jitter = Math.floor(Math.random() * INPI_JOB_DELAY_JITTER_MS);
+            if (jitter > 0) await sleep(jitter);
+        }
+        const processedDoc = await processNextInpiJobByMode('document');
+        if (processedDoc) return;
+        await processNextInpiJobByMode('text');
+    } finally {
+        await releaseLock();
     }
-    const processedDoc = await processNextInpiJobByMode('document');
-    if (processedDoc) return;
-    await processNextInpiJobByMode('text');
 }
 
 // Funções para gerenciamento do worker INPI
