@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ExternalLink } from "lucide-react";
 import LoadingTransition from "@/components/LoadingTransition";
@@ -26,12 +26,16 @@ function ScoreBadge({ score }: { score: number }) {
 
 export default function SearchResults() {
   const navigate = useNavigate();
-  const { searchResults, briefing, cqlQuery } = useResearch();
+  const { searchResults, briefing, cqlQuery, trackJourneyStep } = useResearch();
   const [tab, setTab] = useState("espacenet");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [patentModalOpen, setPatentModalOpen] = useState(false);
   const [selectedPatent, setSelectedPatent] = useState<PatentDocumentData | null>(null);
+
+  useEffect(() => {
+    trackJourneyStep("step_4_results", "view");
+  }, [trackJourneyStep]);
 
   const espacenetResults = (searchResults?.espacenet || []).map((p: any) => ({
     id: p.publicationNumber || p.number,
@@ -72,12 +76,14 @@ export default function SearchResults() {
     try {
       // Call AI analysis with all patents + briefing
       const response = await aiService.analyzePatents(allResults, briefing);
+      trackJourneyStep("step_4_results", "complete");
       navigate("/research/analysis", {
         state: { results: allResults, analyzed: response.patents }
       });
     } catch (err: any) {
       // If AI fails, proceed without AI analysis
       console.warn("AI analysis failed, proceeding manually:", err.message);
+      trackJourneyStep("step_4_results", "complete");
       navigate("/research/analysis", {
         state: { results: allResults }
       });

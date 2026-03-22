@@ -1,13 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import { Bell, Search, Filter, AlertCircle, ShieldAlert, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import axios from "axios";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-
-const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000").replace(/\/+$/, "");
+import { api } from "@/services/auth";
 
 type AlertRow = {
     id: string;
@@ -30,22 +28,36 @@ export default function Alerts() {
     const [unreadOnly, setUnreadOnly] = useState(false);
     const [severityFilter, setSeverityFilter] = useState<"all" | "critical" | "high" | "medium" | "low">("all");
     const [markingId, setMarkingId] = useState<string | null>(null);
+    const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    const [fromDate, setFromDate] = useState("");
+    const [toDate, setToDate] = useState("");
+    const [despachoFilter, setDespachoFilter] = useState("");
 
-    const loadAlerts = async () => {
+    const loadAlerts = useCallback(async () => {
         setLoading(true);
         try {
-            const { data } = await axios.get(`${API_URL}/monitoring/alerts`, { params: { pageSize: 200 } });
+            const { data } = await api.get(`/monitoring/alerts`, {
+                params: {
+                    pageSize: 200,
+                    severity: severityFilter === "all" ? "" : severityFilter,
+                    unreadOnly,
+                    fromDate: fromDate || "",
+                    toDate: toDate || "",
+                    despachoCode: despachoFilter || ""
+                }
+            });
             setRows(Array.isArray(data?.rows) ? data.rows : []);
+            setSelectedIds([]);
         } catch {
             toast.error("Não foi possível carregar os alertas.");
         } finally {
             setLoading(false);
         }
-    };
+    }, [severityFilter, unreadOnly, fromDate, toDate, despachoFilter]);
 
     useEffect(() => {
         void loadAlerts();
-    }, []);
+    }, [loadAlerts]);
 
     const filteredRows = useMemo(() => {
         const needle = query.trim().toLowerCase();
@@ -73,12 +85,32 @@ export default function Alerts() {
     const markAsRead = async (id: string) => {
         setMarkingId(id);
         try {
-            await axios.post(`${API_URL}/monitoring/alerts/${id}/read`);
+            await api.post(`/monitoring/alerts/${id}/read`);
             setRows((prev) => prev.map((row) => (row.id === id ? { ...row, is_read: true } : row)));
+            setSelectedIds((prev) => prev.filter((item) => item !== id));
         } catch {
             toast.error("Não foi possível marcar o alerta como lido.");
         } finally {
             setMarkingId(null);
+        }
+    };
+
+    const toggleSelected = (id: string, checked: boolean) => {
+        setSelectedIds((prev) => checked ? Array.from(new Set([...prev, id])) : prev.filter((item) => item !== id));
+    };
+
+    const markSelectedAsRead = async () => {
+        if (selectedIds.length === 0) {
+            toast.error("Selecione alertas para marcar como lidos.");
+            return;
+        }
+        try {
+            await api.post(`/monitoring/alerts/read-bulk`, { ids: selectedIds });
+            setRows((prev) => prev.map((row) => (selectedIds.includes(row.id) ? { ...row, is_read: true } : row)));
+            setSelectedIds([]);
+            toast.success("Alertas selecionados marcados como lidos.");
+        } catch {
+            toast.error("Não foi possível marcar os alertas selecionados.");
         }
     };
 
@@ -139,7 +171,7 @@ export default function Alerts() {
                     </div>
                 </div>
 
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                     <div className="relative flex-1">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                         <Input className="pl-9 bg-slate-50 border-slate-200" placeholder="Buscar alertas..." value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -159,8 +191,19 @@ export default function Alerts() {
                         <input type="checkbox" checked={unreadOnly} onChange={(e) => setUnreadOnly(e.target.checked)} />
                         Só não lidos
                     </label>
-                    <Button variant="outline" className="gap-2 bg-white text-slate-600 shrink-0" onClick={() => void loadAlerts()} disabled={loading}>
+                    <Input
+                        className="h-10 w-full sm:w-36 bg-white"
+                        placeholder="Despacho (ex: 6.1)"
+                        value={despachoFilter}
+                        onChange={(e) => setDespachoFilter(e.target.value)}
+                    />
+                    <Input type="date" className="h-10 w-full sm:w-40 bg-white" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+                    <Input type="date" className="h-10 w-full sm:w-40 bg-white" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+                    <Button variant="outline" className="gap-2 bg-white text-slate-600 shrink-0 w-full sm:w-auto" onClick={() => void loadAlerts()} disabled={loading}>
                         <Filter className="w-4 h-4" /> Filtros
+                    </Button>
+                    <Button variant="outline" className="gap-2 bg-white text-slate-600 shrink-0 w-full sm:w-auto" onClick={markSelectedAsRead} disabled={selectedIds.length === 0}>
+                        <CheckCircle2 className="w-4 h-4" /> Marcar selecionados
                     </Button>
                 </div>
 
@@ -181,6 +224,7 @@ export default function Alerts() {
                                 <div key={row.id} className="px-4 py-3 flex items-start justify-between gap-4">
                                     <div className="space-y-1 min-w-0">
                                         <div className="flex items-center gap-2 flex-wrap">
+                                            <input className="h-4 w-4" type="checkbox" checked={selectedIds.includes(row.id)} onChange={(e) => toggleSelected(row.id, e.target.checked)} />
                                             <Badge variant="outline" className="font-mono text-[10px]">{row.patent_number}</Badge>
                                             {row.despacho_code && <Badge variant="outline" className="text-[10px]">{row.despacho_code}</Badge>}
                                             <Badge className={row.is_read ? "bg-slate-100 text-slate-600" : "bg-rose-100 text-rose-700"}>

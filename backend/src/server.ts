@@ -19,8 +19,11 @@ import {
     debugInpiLookup,
     enqueueBigQueryFromFailedSources,
     enqueueBigQueryReprocessing,
+    enqueueIncompletePatentReprocessing,
     enqueueInpiReprocessing,
     enqueueLastFiveYearsRpi,
+    enqueueAllProcessedPatentsDocumentAudit,
+    enqueueShortDocumentReprocessing,
     getBackgroundWorkerState,
     retryAllBigQueryErrorJobs,
     retryAllDocumentErrorJobs,
@@ -295,8 +298,87 @@ async function ensureBusinessTables() {
             created_at timestamptz not null default now(),
             updated_at timestamptz not null default now()
         )`,
+        `alter table if exists crm_demands add column if not exists contact_id text null`,
+        `alter table if exists crm_demands add column if not exists monitoring_origin text null`,
+        `alter table if exists crm_demands add column if not exists monitoring_type text null`,
+        `alter table if exists crm_demands add column if not exists occurrence_id text null`,
+        `alter table if exists crm_demands add column if not exists item_related text null`,
+        `alter table if exists crm_demands add column if not exists ai_summary text null`,
+        `alter table if exists crm_demands add column if not exists sla_due_at timestamptz null`,
+        `alter table if exists crm_demands add column if not exists metadata jsonb not null default '{}'::jsonb`,
         `create index if not exists idx_crm_demands_status on crm_demands(status)`,
         `create index if not exists idx_crm_demands_client on crm_demands(client_id)`,
+        `create index if not exists idx_crm_demands_occurrence on crm_demands(occurrence_id)`,
+        `create table if not exists client_contacts (
+            id text primary key,
+            client_id text not null references "Client"(id) on delete cascade,
+            name text not null,
+            email text not null,
+            phone text null,
+            role_area text not null default 'general',
+            is_primary boolean not null default false,
+            active boolean not null default true,
+            notes text null,
+            created_at timestamptz not null default now(),
+            updated_at timestamptz not null default now()
+        )`,
+        `create index if not exists idx_client_contacts_client on client_contacts(client_id)`,
+        `create index if not exists idx_client_contacts_area on client_contacts(role_area)`,
+        `create table if not exists client_routing_rules (
+            id text primary key,
+            client_id text not null references "Client"(id) on delete cascade,
+            occurrence_type text not null,
+            role_area text not null default 'general',
+            override_contact_id text null,
+            active boolean not null default true,
+            created_at timestamptz not null default now(),
+            updated_at timestamptz not null default now()
+        )`,
+        `create index if not exists idx_client_routing_rules_client on client_routing_rules(client_id)`,
+        `create table if not exists crm_demand_comments (
+            id text primary key,
+            demand_id text not null references crm_demands(id) on delete cascade,
+            body text not null,
+            created_by text null,
+            created_at timestamptz not null default now()
+        )`,
+        `create index if not exists idx_crm_demand_comments_demand on crm_demand_comments(demand_id)`,
+        `create table if not exists crm_demand_history (
+            id text primary key,
+            demand_id text not null references crm_demands(id) on delete cascade,
+            action text not null,
+            old_value text null,
+            new_value text null,
+            created_by text null,
+            created_at timestamptz not null default now()
+        )`,
+        `create index if not exists idx_crm_demand_history_demand on crm_demand_history(demand_id)`,
+        `create table if not exists crm_demand_attachments (
+            id text primary key,
+            demand_id text not null references crm_demands(id) on delete cascade,
+            file_name text not null,
+            file_url text not null,
+            file_type text null,
+            uploaded_by text null,
+            created_at timestamptz not null default now()
+        )`,
+        `create index if not exists idx_crm_demand_attachments_demand on crm_demand_attachments(demand_id)`,
+        `create table if not exists email_delivery_logs (
+            id text primary key,
+            client_id text null references "Client"(id) on delete set null,
+            demand_id text null references crm_demands(id) on delete set null,
+            occurrence_id text null,
+            recipient_email text not null,
+            recipient_name text null,
+            template_key text null,
+            subject text not null,
+            body text not null,
+            status text not null default 'queued',
+            error text null,
+            created_at timestamptz not null default now()
+        )`,
+        `create index if not exists idx_email_delivery_logs_client on email_delivery_logs(client_id)`,
+        `create index if not exists idx_email_delivery_logs_demand on email_delivery_logs(demand_id)`,
         `create table if not exists monitoring_market_watchlists (
             id text primary key,
             name text not null unique,
@@ -311,7 +393,89 @@ async function ensureBusinessTables() {
             key text primary key,
             value jsonb not null,
             updated_at timestamptz not null default now()
-        )`
+        )`,
+        `create table if not exists monitoring_profiles (
+            id text primary key,
+            type text not null,
+            name text not null,
+            client_id text null references "Client"(id) on delete set null,
+            asset_patent_number text null,
+            asset_title text null,
+            owner_name text null,
+            attorney_name text null,
+            sensitivity text not null default 'equilibrado',
+            score_min_alert int not null default 55,
+            score_min_queue int not null default 70,
+            auto_generate_demand boolean not null default false,
+            send_client_after_validation boolean not null default false,
+            feedback_required boolean not null default false,
+            channels jsonb not null default '[]'::jsonb,
+            rules jsonb not null default '{}'::jsonb,
+            tags jsonb not null default '[]'::jsonb,
+            notes text null,
+            status text not null default 'active',
+            created_at timestamptz not null default now(),
+            updated_at timestamptz not null default now()
+        )`,
+        `create index if not exists idx_monitoring_profiles_type on monitoring_profiles(type)`,
+        `create index if not exists idx_monitoring_profiles_status on monitoring_profiles(status)`,
+        `create index if not exists idx_monitoring_profiles_client on monitoring_profiles(client_id)`,
+        `create table if not exists monitoring_occurrences (
+            id text primary key,
+            profile_id text not null references monitoring_profiles(id) on delete cascade,
+            monitoring_type text not null,
+            client_id text null references "Client"(id) on delete set null,
+            patent_number text null,
+            rpi_number text null,
+            publication_id text null,
+            event_type text not null,
+            origin_source text null,
+            title text null,
+            summary text null,
+            detail jsonb not null default '{}'::jsonb,
+            rule_score int not null default 0,
+            semantic_score int not null default 0,
+            legal_score int not null default 0,
+            final_score int not null default 0,
+            priority text not null default 'low',
+            status text not null default 'pending_triage',
+            ia_status text not null default 'not_requested',
+            ia_payload jsonb null,
+            assigned_to text null,
+            crm_demand_id text null,
+            client_feedback_status text not null default 'pending_send',
+            client_feedback_note text null,
+            sent_to_client_at timestamptz null,
+            reviewed_at timestamptz null,
+            created_at timestamptz not null default now(),
+            updated_at timestamptz not null default now()
+        )`,
+        `create index if not exists idx_monitoring_occurrences_profile on monitoring_occurrences(profile_id)`,
+        `create index if not exists idx_monitoring_occurrences_status on monitoring_occurrences(status)`,
+        `create index if not exists idx_monitoring_occurrences_priority on monitoring_occurrences(priority)`,
+        `create index if not exists idx_monitoring_occurrences_type on monitoring_occurrences(monitoring_type)`,
+        `create index if not exists idx_monitoring_occurrences_client on monitoring_occurrences(client_id)`,
+        `create table if not exists monitoring_occurrence_feedback (
+            id text primary key,
+            occurrence_id text not null references monitoring_occurrences(id) on delete cascade,
+            source text not null,
+            feedback text not null,
+            note text null,
+            created_by text null,
+            created_at timestamptz not null default now()
+        )`,
+        `create index if not exists idx_monitoring_feedback_occurrence on monitoring_occurrence_feedback(occurrence_id)`,
+        `create table if not exists monitoring_rpi_runs (
+            id text primary key,
+            rpi_number text not null,
+            run_mode text not null,
+            total_publications int not null default 0,
+            matched_occurrences int not null default 0,
+            status text not null default 'completed',
+            error text null,
+            created_at timestamptz not null default now()
+        )`,
+        `create index if not exists idx_monitoring_rpi_runs_rpi on monitoring_rpi_runs(rpi_number)`
     ];
     for (const sql of statements) {
         await prisma.$executeRawUnsafe(sql);
@@ -899,8 +1063,86 @@ fastify.get('/auth/me', async (request, reply) => {
 // CLIENTS API (CRM)
 // ==========================================
 
-fastify.get('/clients', async (request, reply) => {
+function normalizeOccurrenceArea(value: any): 'patents' | 'financial' | 'brands' | 'general' {
+    const raw = String(value || '').toLowerCase();
+    if (raw.includes('process') || raw.includes('collision') || raw.includes('patent') || raw.includes('exig') || raw.includes('anuidade')) return 'patents';
+    if (raw.includes('finance') || raw.includes('invoice') || raw.includes('cobranca') || raw.includes('proposta')) return 'financial';
+    if (raw.includes('brand') || raw.includes('marca')) return 'brands';
+    return 'general';
+}
+
+async function resolveClientRecipient(clientId: string | null, occurrenceType: string, manualContactId?: string) {
+    if (!clientId) return null;
+    if (manualContactId) {
+        const direct = await prisma.$queryRawUnsafe<any[]>(
+            `select * from client_contacts where id=$1 and client_id=$2 and active=true limit 1`,
+            manualContactId,
+            clientId
+        ).catch(() => []);
+        if (direct?.[0]) return direct[0];
+    }
+    const area = normalizeOccurrenceArea(occurrenceType);
+    const rule = await prisma.$queryRawUnsafe<any[]>(
+        `select * from client_routing_rules
+         where client_id=$1 and occurrence_type=$2 and active=true
+         order by updated_at desc
+         limit 1`,
+        clientId,
+        occurrenceType
+    ).catch(() => []);
+    if (rule?.[0]?.override_contact_id) {
+        const byOverride = await prisma.$queryRawUnsafe<any[]>(
+            `select * from client_contacts where id=$1 and client_id=$2 and active=true limit 1`,
+            rule[0].override_contact_id,
+            clientId
+        ).catch(() => []);
+        if (byOverride?.[0]) return byOverride[0];
+    }
+    const byArea = await prisma.$queryRawUnsafe<any[]>(
+        `select * from client_contacts
+         where client_id=$1 and role_area=$2 and active=true
+         order by is_primary desc, updated_at desc
+         limit 1`,
+        clientId,
+        area
+    ).catch(() => []);
+    if (byArea?.[0]) return byArea[0];
+    const fallback = await prisma.$queryRawUnsafe<any[]>(
+        `select * from client_contacts
+         where client_id=$1 and active=true
+         order by is_primary desc, updated_at desc
+         limit 1`,
+        clientId
+    ).catch(() => []);
+    return fallback?.[0] || null;
+}
+
+fastify.get('/clients/cnpj/:cnpj/autofill', async (request: any, reply: any) => {
+    const cnpj = String(request.params?.cnpj || '').replace(/\D/g, '');
+    if (cnpj.length !== 14) return reply.status(400).send({ error: 'CNPJ inválido' });
     try {
+        const response = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`);
+        if (!response.ok) return reply.status(404).send({ error: 'CNPJ não encontrado' });
+        const data: any = await response.json();
+        return {
+            cnpj,
+            legalName: data?.razao_social || data?.nome_fantasia || '',
+            tradeName: data?.nome_fantasia || '',
+            email: data?.email || '',
+            phone: data?.ddd_telefone_1 || '',
+            city: data?.municipio || '',
+            state: data?.uf || '',
+            mainCnae: data?.cnae_fiscal_descricao || '',
+            raw: data
+        };
+    } catch (error: any) {
+        return reply.status(503).send({ error: error?.message || 'Autofill indisponível no momento' });
+    }
+});
+
+fastify.get('/clients', async (request: any, reply: any) => {
+    try {
+        await ensureBusinessTables();
         const clients = await prisma.client.findMany({
             include: {
                 _count: {
@@ -909,15 +1151,31 @@ fastify.get('/clients', async (request, reply) => {
             },
             orderBy: { name: 'asc' }
         });
-        return clients;
+        const ids = clients.map((client) => client.id);
+        const contactCountRows = ids.length > 0
+            ? await prisma.$queryRawUnsafe<any[]>(
+                `select client_id, count(*)::int as total
+                 from client_contacts
+                 where client_id = any($1::text[]) and active=true
+                 group by client_id`,
+                ids
+            ).catch(() => [])
+            : [];
+        const contactCountMap = new Map<string, number>();
+        for (const row of contactCountRows) contactCountMap.set(String(row.client_id), Number(row.total || 0));
+        return clients.map((client) => ({
+            ...client,
+            contacts_count: contactCountMap.get(client.id) || 0
+        }));
     } catch (error) {
         fastify.log.error(error);
         return reply.status(500).send({ error: 'Erro ao buscar clientes' });
     }
 });
 
-fastify.post('/clients', async (request: any, reply) => {
+fastify.post('/clients', async (request: any, reply: any) => {
     try {
+        await ensureBusinessTables();
         const { name, email, document } = request.body;
         if (!name) {
             return reply.status(400).send({ error: 'Nome é obrigatório' });
@@ -925,6 +1183,16 @@ fastify.post('/clients', async (request: any, reply) => {
         const client = await prisma.client.create({
             data: { name, email, document }
         });
+        if (String(email || '').trim()) {
+            await prisma.$executeRawUnsafe(
+                `insert into client_contacts (id, client_id, name, email, role_area, is_primary, active, created_at, updated_at)
+                 values ($1,$2,$3,$4,'general',true,true,now(),now())`,
+                randomUUID(),
+                client.id,
+                name,
+                String(email).trim()
+            ).catch(() => undefined);
+        }
         return reply.status(201).send(client);
     } catch (error) {
         fastify.log.error(error);
@@ -932,11 +1200,125 @@ fastify.post('/clients', async (request: any, reply) => {
     }
 });
 
+fastify.get('/clients/:id/contacts', async (request: any, reply: any) => {
+    await ensureBusinessTables();
+    const { id } = request.params as { id: string };
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+        `select *
+         from client_contacts
+         where client_id=$1
+         order by is_primary desc, updated_at desc`,
+        id
+    ).catch(() => []);
+    return { rows };
+});
+
+fastify.post('/clients/:id/contacts', async (request: any, reply: any) => {
+    await ensureBusinessTables();
+    const { id } = request.params as { id: string };
+    const name = cleanTextValue(request.body?.name);
+    const email = cleanTextValue(request.body?.email);
+    if (!name || !email) return reply.status(400).send({ error: 'Nome e email são obrigatórios' });
+    const roleArea = cleanTextValue(request.body?.roleArea || 'general').toLowerCase();
+    const isPrimary = Boolean(request.body?.isPrimary);
+    if (isPrimary) {
+        await prisma.$executeRawUnsafe(`update client_contacts set is_primary=false, updated_at=now() where client_id=$1`, id).catch(() => undefined);
+    }
+    const contactId = randomUUID();
+    await prisma.$executeRawUnsafe(
+        `insert into client_contacts (id, client_id, name, email, phone, role_area, is_primary, active, notes, created_at, updated_at)
+         values ($1,$2,$3,$4,nullif($5,''),$6,$7,true,nullif($8,''),now(),now())`,
+        contactId,
+        id,
+        name,
+        email,
+        cleanTextValue(request.body?.phone),
+        ['patents', 'financial', 'brands', 'general'].includes(roleArea) ? roleArea : 'general',
+        isPrimary,
+        cleanTextValue(request.body?.notes)
+    );
+    return reply.status(201).send({ id: contactId });
+});
+
+fastify.patch('/clients/:clientId/contacts/:contactId', async (request: any, reply: any) => {
+    await ensureBusinessTables();
+    const { clientId, contactId } = request.params as { clientId: string; contactId: string };
+    const isPrimary = request.body?.isPrimary === undefined ? undefined : Boolean(request.body?.isPrimary);
+    if (isPrimary) {
+        await prisma.$executeRawUnsafe(`update client_contacts set is_primary=false, updated_at=now() where client_id=$1`, clientId).catch(() => undefined);
+    }
+    const updated = await prisma.$queryRawUnsafe<any[]>(
+        `update client_contacts
+         set
+            name = coalesce(nullif($3,''), name),
+            email = coalesce(nullif($4,''), email),
+            phone = case when $5 is null then phone else nullif($5,'') end,
+            role_area = coalesce(nullif($6,''), role_area),
+            is_primary = coalesce($7, is_primary),
+            active = coalesce($8, active),
+            notes = case when $9 is null then notes else nullif($9,'') end,
+            updated_at = now()
+         where id=$1 and client_id=$2
+         returning id`,
+        contactId,
+        clientId,
+        typeof request.body?.name === 'string' ? request.body.name : null,
+        typeof request.body?.email === 'string' ? request.body.email : null,
+        typeof request.body?.phone === 'string' ? request.body.phone : null,
+        typeof request.body?.roleArea === 'string' ? request.body.roleArea.toLowerCase() : null,
+        isPrimary === undefined ? null : isPrimary,
+        typeof request.body?.active === 'boolean' ? request.body.active : null,
+        typeof request.body?.notes === 'string' ? request.body.notes : null
+    ).catch(() => []);
+    if (!updated?.[0]) return reply.status(404).send({ error: 'Contato não encontrado' });
+    return { id: contactId };
+});
+
+fastify.get('/clients/:id/routing-rules', async (request: any) => {
+    await ensureBusinessTables();
+    const { id } = request.params as { id: string };
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+        `select r.*, c.name as override_contact_name, c.email as override_contact_email
+         from client_routing_rules r
+         left join client_contacts c on c.id=r.override_contact_id
+         where r.client_id=$1
+         order by r.updated_at desc`,
+        id
+    ).catch(() => []);
+    return { rows };
+});
+
+fastify.put('/clients/:id/routing-rules', async (request: any, reply: any) => {
+    await ensureBusinessTables();
+    const { id } = request.params as { id: string };
+    const rules = Array.isArray(request.body?.rules) ? request.body.rules : [];
+    if (!Array.isArray(rules)) return reply.status(400).send({ error: 'rules inválido' });
+    await prisma.$executeRawUnsafe(`delete from client_routing_rules where client_id=$1`, id).catch(() => undefined);
+    for (const rule of rules) {
+        const occurrenceType = cleanTextValue(rule?.occurrenceType).toLowerCase();
+        const roleArea = cleanTextValue(rule?.roleArea || 'general').toLowerCase();
+        if (!occurrenceType) continue;
+        await prisma.$executeRawUnsafe(
+            `insert into client_routing_rules (id, client_id, occurrence_type, role_area, override_contact_id, active, created_at, updated_at)
+             values ($1,$2,$3,$4,nullif($5,''),$6,now(),now())`,
+            randomUUID(),
+            id,
+            occurrenceType,
+            ['patents', 'financial', 'brands', 'general'].includes(roleArea) ? roleArea : 'general',
+            cleanTextValue(rule?.overrideContactId),
+            rule?.active === undefined ? true : Boolean(rule.active)
+        );
+    }
+    return { ok: true };
+});
+
 fastify.get('/demands', async (request: any, reply) => {
     try {
         await ensureBusinessTables();
         const q = String(request.query?.q || '').trim();
         const status = String(request.query?.status || '').trim();
+        const priority = String(request.query?.priority || '').trim();
+        const view = String(request.query?.view || 'list').trim().toLowerCase();
         const values: any[] = [];
         const conditions: string[] = [];
         const push = (value: any) => {
@@ -950,16 +1332,63 @@ fastify.get('/demands', async (request: any, reply) => {
         if (status && status !== 'all') {
             conditions.push(`d.status = ${push(status)}`);
         }
+        if (priority && priority !== 'all') {
+            conditions.push(`d.priority = ${push(priority)}`);
+        }
         const whereClause = conditions.length ? `where ${conditions.join(' and ')}` : '';
         const rows = await prisma.$queryRawUnsafe<any[]>(
-            `select d.id, d.client_id, c.name as client_name, d.title, d.description, d.status, d.priority, d.due_date, d.owner_name, d.patent_number, d.created_at, d.updated_at
+            `select d.id, d.client_id, c.name as client_name, d.contact_id, cc.name as contact_name, cc.email as contact_email,
+                    d.monitoring_origin, d.monitoring_type, d.occurrence_id, d.item_related, d.ai_summary, d.sla_due_at, d.metadata,
+                    d.title, d.description, d.status, d.priority, d.due_date, d.owner_name, d.patent_number, d.created_at, d.updated_at
              from crm_demands d
              left join "Client" c on c.id = d.client_id
+             left join client_contacts cc on cc.id = d.contact_id
              ${whereClause}
              order by d.updated_at desc`,
             ...values
         );
-        return { rows };
+        const demandIds = rows.map((row: any) => row.id);
+        const commentsByDemand = demandIds.length > 0
+            ? await prisma.$queryRawUnsafe<any[]>(
+                `select demand_id, count(*)::int as total from crm_demand_comments where demand_id = any($1::text[]) group by demand_id`,
+                demandIds
+            ).catch(() => [])
+            : [];
+        const emailByDemand = demandIds.length > 0
+            ? await prisma.$queryRawUnsafe<any[]>(
+                `select demand_id, count(*)::int as total from email_delivery_logs where demand_id = any($1::text[]) group by demand_id`,
+                demandIds
+            ).catch(() => [])
+            : [];
+        const commentMap = new Map<string, number>();
+        for (const row of commentsByDemand) commentMap.set(String(row.demand_id), Number(row.total || 0));
+        const emailMap = new Map<string, number>();
+        for (const row of emailByDemand) emailMap.set(String(row.demand_id), Number(row.total || 0));
+        if (view === 'kanban') {
+            const columns = ['nova', 'triagem', 'andamento', 'cliente', 'concluida'];
+            const board: Record<string, any[]> = {};
+            for (const col of columns) board[col] = [];
+            for (const row of rows) {
+                const enriched = {
+                    ...row,
+                    metadata: parseJsonObject(row.metadata, {}),
+                    comments_count: commentMap.get(row.id) || 0,
+                    emails_count: emailMap.get(row.id) || 0
+                };
+                const bucket = columns.includes(String(row.status)) ? String(row.status) : 'nova';
+                board[bucket].push(enriched);
+            }
+            return { view: 'kanban', board, rows: [] };
+        }
+        return {
+            view: 'list',
+            rows: rows.map((row: any) => ({
+                ...row,
+                metadata: parseJsonObject(row.metadata, {}),
+                comments_count: commentMap.get(row.id) || 0,
+                emails_count: emailMap.get(row.id) || 0
+            }))
+        };
     } catch (error) {
         fastify.log.error(error);
         return reply.status(500).send({ error: 'Erro ao buscar demandas' });
@@ -974,22 +1403,51 @@ fastify.post('/demands', async (request: any, reply) => {
         const clientId = String(request.body?.clientId || '').trim();
         const priority = String(request.body?.priority || 'media').trim().toLowerCase();
         const dueDate = request.body?.dueDate ? new Date(request.body?.dueDate) : null;
+        const slaDueAt = request.body?.slaDueAt ? new Date(request.body?.slaDueAt) : null;
         const ownerName = String(request.body?.ownerName || '').trim();
         const patentNumber = String(request.body?.patentNumber || '').trim();
+        const monitoringOrigin = cleanTextValue(request.body?.monitoringOrigin);
+        const monitoringType = cleanTextValue(request.body?.monitoringType);
+        const occurrenceId = cleanTextValue(request.body?.occurrenceId);
+        const itemRelated = cleanTextValue(request.body?.itemRelated);
+        const aiSummary = cleanTextValue(request.body?.aiSummary);
+        const contactId = cleanTextValue(request.body?.contactId);
+        const metadata = request.body?.metadata || {};
         if (!title) return reply.status(400).send({ error: 'Título é obrigatório' });
         const id = randomUUID();
         await prisma.$executeRawUnsafe(
-            `insert into crm_demands (id, client_id, title, description, status, priority, due_date, owner_name, patent_number, created_at, updated_at)
-             values ($1, $2, $3, nullif($4,''), 'nova', $5, $6, nullif($7,''), nullif($8,''), now(), now())`,
+            `insert into crm_demands (
+                id, client_id, contact_id, monitoring_origin, monitoring_type, occurrence_id, item_related, ai_summary,
+                title, description, status, priority, due_date, sla_due_at, owner_name, patent_number, metadata, created_at, updated_at
+             )
+             values (
+                $1, $2, nullif($3,''), nullif($4,''), nullif($5,''), nullif($6,''), nullif($7,''), nullif($8,''),
+                $9, nullif($10,''), 'nova', $11, $12, $13, nullif($14,''), nullif($15,''), $16::jsonb, now(), now()
+             )`,
             id,
             clientId || null,
+            contactId,
+            monitoringOrigin,
+            monitoringType,
+            occurrenceId,
+            itemRelated,
+            aiSummary,
             title,
-            description,
+            description || null,
             ['baixa', 'media', 'alta', 'critica'].includes(priority) ? priority : 'media',
             dueDate && !Number.isNaN(dueDate.getTime()) ? dueDate.toISOString() : null,
+            slaDueAt && !Number.isNaN(slaDueAt.getTime()) ? slaDueAt.toISOString() : null,
             ownerName,
-            patentNumber
+            patentNumber,
+            JSON.stringify(metadata || {})
         );
+        await prisma.$executeRawUnsafe(
+            `insert into crm_demand_history (id, demand_id, action, old_value, new_value, created_by, created_at)
+             values ($1,$2,'created',null,$3,null,now())`,
+            randomUUID(),
+            id,
+            'nova'
+        ).catch(() => undefined);
         return reply.status(201).send({ id });
     } catch (error) {
         fastify.log.error(error);
@@ -1011,17 +1469,127 @@ fastify.patch('/demands/:id', async (request: any, reply) => {
         if (request.body?.priority) updates.push(`priority = ${push(String(request.body.priority))}`);
         if (typeof request.body?.ownerName === 'string') updates.push(`owner_name = nullif(${push(request.body.ownerName)}, '')`);
         if (typeof request.body?.description === 'string') updates.push(`description = nullif(${push(request.body.description)}, '')`);
+        if (typeof request.body?.title === 'string') updates.push(`title = nullif(${push(request.body.title)}, '')`);
+        if (typeof request.body?.contactId === 'string') updates.push(`contact_id = nullif(${push(request.body.contactId)}, '')`);
+        if (typeof request.body?.dueDate === 'string') updates.push(`due_date = ${push(request.body.dueDate)}`);
+        if (typeof request.body?.slaDueAt === 'string') updates.push(`sla_due_at = ${push(request.body.slaDueAt)}`);
+        if (typeof request.body?.metadata !== 'undefined') updates.push(`metadata = ${push(JSON.stringify(request.body.metadata || {}))}::jsonb`);
         if (!updates.length) return reply.status(400).send({ error: 'Nenhum campo para atualizar' });
+        const before = await prisma.$queryRawUnsafe<any[]>(`select status, priority from crm_demands where id=$1 limit 1`, id).catch(() => []);
         updates.push(`updated_at = now()`);
         const updated = await prisma.$queryRawUnsafe<any[]>(
             `update crm_demands set ${updates.join(', ')} where id = ${push(id)} returning id, status, priority, owner_name, updated_at`
         );
         if (!updated?.[0]) return reply.status(404).send({ error: 'Demanda não encontrada' });
+        if (before?.[0]?.status !== updated[0].status) {
+            await prisma.$executeRawUnsafe(
+                `insert into crm_demand_history (id, demand_id, action, old_value, new_value, created_by, created_at)
+                 values ($1,$2,'status_change',$3,$4,null,now())`,
+                randomUUID(),
+                id,
+                String(before[0]?.status || ''),
+                String(updated[0]?.status || '')
+            ).catch(() => undefined);
+        }
         return updated[0];
     } catch (error) {
         fastify.log.error(error);
         return reply.status(500).send({ error: 'Erro ao atualizar demanda' });
     }
+});
+
+fastify.get('/demands/:id', async (request: any, reply: any) => {
+    await ensureBusinessTables();
+    const { id } = request.params as { id: string };
+    const demandRows = await prisma.$queryRawUnsafe<any[]>(
+        `select d.*, c.name as client_name, cc.name as contact_name, cc.email as contact_email
+         from crm_demands d
+         left join "Client" c on c.id=d.client_id
+         left join client_contacts cc on cc.id=d.contact_id
+         where d.id=$1
+         limit 1`,
+        id
+    ).catch(() => []);
+    if (!demandRows?.[0]) return reply.status(404).send({ error: 'Demanda não encontrada' });
+    const [comments, history, attachments, emails] = await Promise.all([
+        prisma.$queryRawUnsafe<any[]>(`select * from crm_demand_comments where demand_id=$1 order by created_at desc`, id).catch(() => []),
+        prisma.$queryRawUnsafe<any[]>(`select * from crm_demand_history where demand_id=$1 order by created_at desc`, id).catch(() => []),
+        prisma.$queryRawUnsafe<any[]>(`select * from crm_demand_attachments where demand_id=$1 order by created_at desc`, id).catch(() => []),
+        prisma.$queryRawUnsafe<any[]>(`select * from email_delivery_logs where demand_id=$1 order by created_at desc`, id).catch(() => [])
+    ]);
+    return {
+        demand: {
+            ...demandRows[0],
+            metadata: parseJsonObject(demandRows[0].metadata, {})
+        },
+        comments,
+        history,
+        attachments,
+        emails
+    };
+});
+
+fastify.post('/demands/:id/comments', async (request: any, reply: any) => {
+    await ensureBusinessTables();
+    const { id } = request.params as { id: string };
+    const body = cleanTextValue(request.body?.body);
+    const createdBy = cleanTextValue(request.body?.createdBy);
+    if (!body) return reply.status(400).send({ error: 'Comentário vazio' });
+    const commentId = randomUUID();
+    await prisma.$executeRawUnsafe(
+        `insert into crm_demand_comments (id, demand_id, body, created_by, created_at)
+         values ($1,$2,$3,nullif($4,''),now())`,
+        commentId,
+        id,
+        body,
+        createdBy
+    );
+    return reply.status(201).send({ id: commentId });
+});
+
+fastify.post('/demands/bulk-convert', async (request: any, reply: any) => {
+    await ensureBusinessTables();
+    const occurrenceIds = Array.isArray(request.body?.occurrenceIds) ? request.body.occurrenceIds.map((item: any) => cleanTextValue(item)).filter(Boolean) : [];
+    if (occurrenceIds.length === 0) return reply.status(400).send({ error: 'occurrenceIds é obrigatório' });
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+        `select o.*, p.name as monitoring_name
+         from monitoring_occurrences o
+         left join monitoring_profiles p on p.id=o.profile_id
+         where o.id = any($1::text[])`,
+        occurrenceIds
+    ).catch(() => []);
+    const createdIds: string[] = [];
+    for (const occurrence of rows) {
+        const demandId = randomUUID();
+        await prisma.$executeRawUnsafe(
+            `insert into crm_demands (
+                id, client_id, monitoring_origin, monitoring_type, occurrence_id, item_related, ai_summary,
+                title, description, status, priority, owner_name, patent_number, metadata, created_at, updated_at
+             ) values (
+                $1,$2,'monitoring',$3,$4,$5,$6,
+                $7,$8,'nova',$9,$10,$11,$12::jsonb,now(),now()
+             )`,
+            demandId,
+            occurrence.client_id || null,
+            occurrence.monitoring_type || null,
+            occurrence.id,
+            occurrence.event_type || null,
+            cleanTextValue(parseJsonObject(occurrence.ia_payload, {})?.reasoning_summary || occurrence.summary),
+            `[Monitoramento] ${occurrence.monitoring_name || occurrence.event_type || 'Ocorrência'}`,
+            cleanTextValue(occurrence.summary),
+            occurrence.priority === 'critical' ? 'critica' : occurrence.priority === 'high' ? 'alta' : occurrence.priority === 'low' ? 'baixa' : 'media',
+            cleanTextValue(occurrence.assigned_to),
+            cleanTextValue(occurrence.patent_number),
+            JSON.stringify({ fromOccurrence: occurrence.id, score: occurrence.final_score })
+        );
+        await prisma.$executeRawUnsafe(
+            `update monitoring_occurrences set crm_demand_id=$2, status='converted_to_demand', reviewed_at=now(), updated_at=now() where id=$1`,
+            occurrence.id,
+            demandId
+        ).catch(() => undefined);
+        createdIds.push(demandId);
+    }
+    return { created: createdIds.length, ids: createdIds };
 });
 
 // ─── Health Check ──────────────────────────────────────────────
@@ -3433,7 +4001,7 @@ fastify.post('/background-workers/rpi/enqueue-range', async (request: any, reply
     if (!start || !end || end < start) {
         return reply.code(400).send({ error: 'Intervalo inválido (from/to)' });
     }
-    const rows = [];
+    const rows: Array<{ rpi_number: number; status: 'pending'; source_url: string }> = [];
     for (let rpi = start; rpi <= end; rpi++) {
         rows.push({
             rpi_number: rpi,
@@ -3707,6 +4275,41 @@ fastify.post('/background-workers/google-patents/enqueue-from-errors', async (re
     }
 });
 
+fastify.post('/background-workers/google-patents/enqueue-incomplete', async (request: any, reply) => {
+    try {
+        const limitRaw = Number(request.body?.limit);
+        const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(5000, Math.floor(limitRaw))) : 500;
+        const result = await enqueueIncompletePatentReprocessing(limit);
+        return result;
+    } catch (error: any) {
+        return reply.code(500).send({ error: error?.message || 'Falha ao enfileirar patentes incompletas para Google Patents' });
+    }
+});
+
+fastify.post('/background-workers/google-patents/reprocess-short-docs', async (request: any, reply) => {
+    try {
+        const limitRaw = Number(request.body?.limit);
+        const maxPagesRaw = Number(request.body?.maxPages);
+        const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(5000, Math.floor(limitRaw))) : 500;
+        const maxPages = Number.isFinite(maxPagesRaw) ? Math.max(1, Math.min(3, Math.floor(maxPagesRaw))) : 1;
+        const result = await enqueueShortDocumentReprocessing(limit, maxPages);
+        return result;
+    } catch (error: any) {
+        return reply.code(500).send({ error: error?.message || 'Falha ao reprocessar documentos curtos' });
+    }
+});
+
+fastify.post('/background-workers/google-patents/enqueue-all-processed', async (request: any, reply) => {
+    try {
+        const batchSizeRaw = Number(request.body?.batchSize);
+        const batchSize = Number.isFinite(batchSizeRaw) ? Math.max(100, Math.min(5000, Math.floor(batchSizeRaw))) : 1000;
+        const result = await enqueueAllProcessedPatentsDocumentAudit(batchSize);
+        return result;
+    } catch (error: any) {
+        return reply.code(500).send({ error: error?.message || 'Falha ao enfileirar todas as patentes processadas' });
+    }
+});
+
 fastify.post('/background-workers/bigquery/retry/:id', async (request: any, reply) => {
     const { id } = request.params as { id: string };
     try {
@@ -3808,6 +4411,164 @@ fastify.post('/background-workers/ops/retry-errors', async (request: any, reply)
         return reply.code(500).send({ error: 'Falha ao reprocessar erros da fila OPS' });
     }
 });
+
+type MonitoringType = 'process' | 'collision' | 'market' | 'assets';
+
+function normalizeMonitoringType(value: any): MonitoringType {
+    const raw = String(value || '').trim().toLowerCase();
+    if (raw === 'process' || raw === 'collision' || raw === 'market' || raw === 'assets') return raw;
+    return 'process';
+}
+
+function toJsonString(value: any, fallback: any) {
+    if (value === undefined || value === null) return JSON.stringify(fallback);
+    if (typeof value === 'string') {
+        try {
+            JSON.parse(value);
+            return value;
+        } catch {
+            return JSON.stringify(fallback);
+        }
+    }
+    return JSON.stringify(value);
+}
+
+function clampScore(value: any, fallback: number) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(0, Math.min(100, Math.round(parsed)));
+}
+
+function scoreToPriority(score: number): 'critical' | 'high' | 'medium' | 'low' {
+    if (score >= 86) return 'critical';
+    if (score >= 70) return 'high';
+    if (score >= 50) return 'medium';
+    return 'low';
+}
+
+function cleanTextValue(value: any): string {
+    return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeCompareValue(value: any): string {
+    return cleanTextValue(value)
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+}
+
+function normalizePatentValue(value: any): string {
+    return String(value || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+}
+
+function safeArrayString(value: any): string[] {
+    if (!Array.isArray(value)) return [];
+    return value
+        .map((item) => cleanTextValue(item))
+        .filter(Boolean)
+        .slice(0, 40);
+}
+
+function parseJsonObject(value: any, fallback: Record<string, any> = {}): Record<string, any> {
+    if (!value) return fallback;
+    if (typeof value === 'object') return value;
+    try {
+        const parsed = JSON.parse(String(value));
+        if (parsed && typeof parsed === 'object') return parsed;
+        return fallback;
+    } catch {
+        return fallback;
+    }
+}
+
+function parseJsonArray(value: any): any[] {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+    try {
+        const parsed = JSON.parse(String(value));
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function computeRuleScore(profile: any, publication: any) {
+    const rules = parseJsonObject(profile?.rules, {});
+    const normalizedPatent = normalizePatentValue(publication?.patent_number);
+    const normalizedTitle = normalizeCompareValue(publication?.ops_title || publication?.despacho_desc || '');
+    const normalizedComplement = normalizeCompareValue(publication?.complement || '');
+    const normalizedText = `${normalizedTitle} ${normalizedComplement}`;
+    const normalizedApplicant = normalizeCompareValue(publication?.ops_applicant || '');
+    const normalizedInventor = normalizeCompareValue(publication?.ops_inventor || '');
+    const normalizedIpc = normalizeCompareValue(publication?.ops_ipc || '');
+    const normalizedAttorney = normalizeCompareValue(publication?.ops_error || '');
+    let score = 0;
+    let matched = false;
+
+    const patentCandidates = safeArrayString([
+        ...(safeArrayString(rules?.processNumbers || [])),
+        ...(safeArrayString(rules?.publicationNumbers || [])),
+        ...(safeArrayString(rules?.patentNumbers || []))
+    ]).map(normalizePatentValue);
+    if (patentCandidates.length > 0) {
+        const numberMatch = patentCandidates.some((item) => item && item === normalizedPatent);
+        if (numberMatch) {
+            score += 58;
+            matched = true;
+        } else if (profile?.type === 'process' || profile?.type === 'assets') {
+            return { matched: false, score: 0 };
+        }
+    }
+
+    const keywords = safeArrayString(rules?.keywords || []).map(normalizeCompareValue).filter((token) => token.length >= 3);
+    const keywordHits = keywords.filter((token) => normalizedText.includes(token)).length;
+    if (keywordHits > 0) {
+        score += Math.min(28, keywordHits * 8);
+        matched = true;
+    }
+
+    const holders = safeArrayString(rules?.holders || []).map(normalizeCompareValue).filter(Boolean);
+    if (holders.some((holder) => normalizedApplicant.includes(holder))) {
+        score += 18;
+        matched = true;
+    }
+
+    const inventors = safeArrayString(rules?.inventors || []).map(normalizeCompareValue).filter(Boolean);
+    if (inventors.some((inventor) => normalizedInventor.includes(inventor))) {
+        score += 12;
+        matched = true;
+    }
+
+    const attorneys = safeArrayString(rules?.attorneys || []).map(normalizeCompareValue).filter(Boolean);
+    if (attorneys.some((attorney) => normalizedAttorney.includes(attorney))) {
+        score += 10;
+        matched = true;
+    }
+
+    const ipcCodes = safeArrayString(rules?.ipcCodes || []).map(normalizeCompareValue).filter(Boolean);
+    if (ipcCodes.some((code) => normalizedIpc.includes(code))) {
+        score += 16;
+        matched = true;
+    }
+
+    if (!matched) return { matched: false, score: 0 };
+    return { matched: true, score: Math.max(0, Math.min(100, score)) };
+}
+
+function buildMonitoringOccurrenceSummary(type: MonitoringType, publication: any) {
+    const code = cleanTextValue(publication?.despacho_code || '');
+    const title = cleanTextValue(publication?.ops_title || publication?.despacho_desc || publication?.patent_number || '');
+    if (type === 'process') {
+        return `Evento processual ${code || '-'} detectado para ${publication?.patent_number || '-'}.`;
+    }
+    if (type === 'collision') {
+        return `Nova publicação potencialmente colidente com ativo monitorado (${publication?.patent_number || '-'}).`;
+    }
+    if (type === 'market') {
+        return `Movimentação de mercado detectada para critérios monitorados (${publication?.patent_number || '-'}).`;
+    }
+    return `Ativo monitorado com nova movimentação na RPI (${publication?.patent_number || '-'})`;
+}
 
 fastify.get('/monitoring/dashboard-summary', async () => {
     await ensureMonitoringTables();
@@ -4165,7 +4926,7 @@ fastify.get('/monitoring/market/watchlists', async () => {
     return { rows };
 });
 
-fastify.post('/monitoring/market/watchlists', async (request: any, reply) => {
+fastify.post('/monitoring/market/watchlists', async (request: any, reply: any) => {
     await ensureBusinessTables();
     const name = String(request.body?.name || '').trim();
     const query = String(request.body?.query || '').trim();
@@ -4184,7 +4945,7 @@ fastify.post('/monitoring/market/watchlists', async (request: any, reply) => {
     return { id, name, query, scope, active: true };
 });
 
-fastify.patch('/monitoring/market/watchlists/:id', async (request: any, reply) => {
+fastify.patch('/monitoring/market/watchlists/:id', async (request: any, reply: any) => {
     await ensureBusinessTables();
     const { id } = request.params as { id: string };
     const active = request.body?.active === undefined ? true : Boolean(request.body?.active);
@@ -4200,12 +4961,773 @@ fastify.patch('/monitoring/market/watchlists/:id', async (request: any, reply) =
     return updated[0];
 });
 
+fastify.get('/monitoring/center/dashboard', async () => {
+    await ensureBusinessTables();
+    const [profilesByType, occurrencesSummary, triageSummary, topClients, topAttorneys, eventsByRpi, pendingFeedbackRows, withErrorsRows] = await Promise.all([
+        prisma.$queryRawUnsafe<any[]>(
+            `select type, count(*)::int as total
+             from monitoring_profiles
+             where status='active'
+             group by type`
+        ).catch(() => []),
+        prisma.$queryRawUnsafe<any[]>(
+            `select
+                count(*)::int as total,
+                sum(case when priority='critical' then 1 else 0 end)::int as critical,
+                sum(case when status='pending_triage' then 1 else 0 end)::int as pending_triage,
+                sum(case when status='converted_to_demand' then 1 else 0 end)::int as converted_to_demand,
+                sum(case when client_feedback_status='sent' then 1 else 0 end)::int as sent_to_client,
+                sum(case when status='discarded' then 1 else 0 end)::int as discarded
+             from monitoring_occurrences`
+        ).catch(() => [{ total: 0, critical: 0, pending_triage: 0, converted_to_demand: 0, sent_to_client: 0, discarded: 0 }]),
+        prisma.$queryRawUnsafe<any[]>(
+            `select status, count(*)::int as total
+             from monitoring_occurrences
+             group by status`
+        ).catch(() => []),
+        prisma.$queryRawUnsafe<any[]>(
+            `select coalesce(c.name, 'Sem cliente') as label, count(*)::int as total
+             from monitoring_occurrences o
+             left join "Client" c on c.id=o.client_id
+             group by coalesce(c.name, 'Sem cliente')
+             order by total desc
+             limit 8`
+        ).catch(() => []),
+        prisma.$queryRawUnsafe<any[]>(
+            `select coalesce(attorney_name, 'Sem procurador') as label, count(*)::int as total
+             from monitoring_profiles
+             where status='active'
+             group by coalesce(attorney_name, 'Sem procurador')
+             order by total desc
+             limit 8`
+        ).catch(() => []),
+        prisma.$queryRawUnsafe<any[]>(
+            `select coalesce(rpi_number, 'sem_rpi') as label, count(*)::int as total
+             from monitoring_occurrences
+             group by coalesce(rpi_number, 'sem_rpi')
+             order by label desc
+             limit 12`
+        ).catch(() => []),
+        prisma.$queryRawUnsafe<any[]>(
+            `select count(*)::int as total
+             from monitoring_occurrences
+             where client_feedback_status in ('pending_send','sent','requested_revision')`
+        ).catch(() => [{ total: 0 }]),
+        prisma.$queryRawUnsafe<any[]>(
+            `select count(*)::int as total
+             from monitoring_occurrences
+             where ia_status='error'`
+        ).catch(() => [{ total: 0 }])
+    ]);
+
+    const typeMap = new Map<string, number>();
+    for (const row of profilesByType) typeMap.set(String(row.type), Number(row.total || 0));
+    return {
+        profiles: {
+            totalActive: Array.from(typeMap.values()).reduce((acc, cur) => acc + cur, 0),
+            process: typeMap.get('process') || 0,
+            collision: typeMap.get('collision') || 0,
+            market: typeMap.get('market') || 0,
+            assets: typeMap.get('assets') || 0
+        },
+        occurrences: {
+            total: Number(occurrencesSummary?.[0]?.total || 0),
+            critical: Number(occurrencesSummary?.[0]?.critical || 0),
+            pendingTriage: Number(occurrencesSummary?.[0]?.pending_triage || 0),
+            convertedToDemand: Number(occurrencesSummary?.[0]?.converted_to_demand || 0),
+            sentToClient: Number(occurrencesSummary?.[0]?.sent_to_client || 0),
+            discarded: Number(occurrencesSummary?.[0]?.discarded || 0),
+            waitingClientFeedback: Number(pendingFeedbackRows?.[0]?.total || 0),
+            processingErrors: Number(withErrorsRows?.[0]?.total || 0)
+        },
+        triageByStatus: triageSummary,
+        topClients,
+        topAttorneys,
+        eventsByRpi
+    };
+});
+
+fastify.get('/monitoring/center/profiles', async (request: any) => {
+    await ensureBusinessTables();
+    const type = cleanTextValue(request.query?.type || '').toLowerCase();
+    const status = cleanTextValue(request.query?.status || '').toLowerCase();
+    const q = cleanTextValue(request.query?.q || '');
+    const values: any[] = [];
+    const conditions: string[] = [];
+    const push = (value: any) => {
+        values.push(value);
+        return `$${values.length}`;
+    };
+    if (type) conditions.push(`p.type = ${push(type)}`);
+    if (status) conditions.push(`p.status = ${push(status)}`);
+    if (q) {
+        const token = `%${q}%`;
+        conditions.push(`(p.name ilike ${push(token)} or coalesce(p.asset_patent_number,'') ilike ${push(token)} or coalesce(p.attorney_name,'') ilike ${push(token)} or coalesce(c.name,'') ilike ${push(token)})`);
+    }
+    const whereClause = conditions.length ? `where ${conditions.join(' and ')}` : '';
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+        `select p.*, c.name as client_name
+         from monitoring_profiles p
+         left join "Client" c on c.id=p.client_id
+         ${whereClause}
+         order by p.updated_at desc
+         limit 400`,
+        ...values
+    ).catch(() => []);
+    return {
+        rows: rows.map((row: any) => ({
+            ...row,
+            channels: parseJsonArray(row.channels),
+            tags: parseJsonArray(row.tags),
+            rules: parseJsonObject(row.rules, {})
+        }))
+    };
+});
+
+fastify.post('/monitoring/center/profiles', async (request: any, reply: any) => {
+    await ensureBusinessTables();
+    const type = normalizeMonitoringType(request.body?.type);
+    const name = cleanTextValue(request.body?.name);
+    const clientId = cleanTextValue(request.body?.clientId) || null;
+    if (!name) return reply.code(400).send({ error: 'name é obrigatório' });
+    const id = randomUUID();
+    const sensitivity = cleanTextValue(request.body?.sensitivity || 'equilibrado') || 'equilibrado';
+    const scoreMinAlert = clampScore(request.body?.scoreMinAlert, 55);
+    const scoreMinQueue = clampScore(request.body?.scoreMinQueue, 70);
+    await prisma.$executeRawUnsafe(
+        `insert into monitoring_profiles (
+            id, type, name, client_id, asset_patent_number, asset_title, owner_name, attorney_name,
+            sensitivity, score_min_alert, score_min_queue, auto_generate_demand, send_client_after_validation,
+            feedback_required, channels, rules, tags, notes, status, created_at, updated_at
+        ) values (
+            $1,$2,$3,$4,nullif($5,''),nullif($6,''),nullif($7,''),nullif($8,''),
+            $9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,nullif($18,''),'active',now(),now()
+        )`,
+        id,
+        type,
+        name,
+        clientId,
+        cleanTextValue(request.body?.assetPatentNumber),
+        cleanTextValue(request.body?.assetTitle),
+        cleanTextValue(request.body?.ownerName),
+        cleanTextValue(request.body?.attorneyName),
+        sensitivity,
+        scoreMinAlert,
+        scoreMinQueue,
+        Boolean(request.body?.autoGenerateDemand),
+        Boolean(request.body?.sendClientAfterValidation),
+        Boolean(request.body?.feedbackRequired),
+        toJsonString(request.body?.channels, []),
+        toJsonString(request.body?.rules, {}),
+        toJsonString(request.body?.tags, []),
+        cleanTextValue(request.body?.notes)
+    );
+    return reply.code(201).send({ id });
+});
+
+fastify.patch('/monitoring/center/profiles/:id', async (request: any, reply: any) => {
+    await ensureBusinessTables();
+    const { id } = request.params as { id: string };
+    const name = cleanTextValue(request.body?.name);
+    if (!name) return reply.code(400).send({ error: 'name é obrigatório' });
+    const updated = await prisma.$queryRawUnsafe<any[]>(
+        `update monitoring_profiles
+         set
+            name=$2,
+            client_id=$3,
+            asset_patent_number=nullif($4,''),
+            asset_title=nullif($5,''),
+            owner_name=nullif($6,''),
+            attorney_name=nullif($7,''),
+            sensitivity=$8,
+            score_min_alert=$9,
+            score_min_queue=$10,
+            auto_generate_demand=$11,
+            send_client_after_validation=$12,
+            feedback_required=$13,
+            channels=$14::jsonb,
+            rules=$15::jsonb,
+            tags=$16::jsonb,
+            notes=nullif($17,''),
+            updated_at=now()
+         where id=$1
+         returning id`,
+        id,
+        name,
+        cleanTextValue(request.body?.clientId) || null,
+        cleanTextValue(request.body?.assetPatentNumber),
+        cleanTextValue(request.body?.assetTitle),
+        cleanTextValue(request.body?.ownerName),
+        cleanTextValue(request.body?.attorneyName),
+        cleanTextValue(request.body?.sensitivity || 'equilibrado') || 'equilibrado',
+        clampScore(request.body?.scoreMinAlert, 55),
+        clampScore(request.body?.scoreMinQueue, 70),
+        Boolean(request.body?.autoGenerateDemand),
+        Boolean(request.body?.sendClientAfterValidation),
+        Boolean(request.body?.feedbackRequired),
+        toJsonString(request.body?.channels, []),
+        toJsonString(request.body?.rules, {}),
+        toJsonString(request.body?.tags, []),
+        cleanTextValue(request.body?.notes)
+    ).catch(() => []);
+    if (!updated?.[0]) return reply.code(404).send({ error: 'Monitoramento não encontrado' });
+    return { id };
+});
+
+fastify.post('/monitoring/center/profiles/:id/toggle', async (request: any, reply: any) => {
+    await ensureBusinessTables();
+    const { id } = request.params as { id: string };
+    const active = request.body?.active === undefined ? true : Boolean(request.body?.active);
+    const status = active ? 'active' : 'paused';
+    const updated = await prisma.$queryRawUnsafe<any[]>(
+        `update monitoring_profiles set status=$2, updated_at=now() where id=$1 returning id, status`,
+        id,
+        status
+    ).catch(() => []);
+    if (!updated?.[0]) return reply.code(404).send({ error: 'Monitoramento não encontrado' });
+    return updated[0];
+});
+
+fastify.post('/monitoring/center/rpi/process', async (request: any, reply: any) => {
+    await ensureBusinessTables();
+    const rpiNumber = cleanTextValue(request.body?.rpiNumber);
+    if (!rpiNumber) return reply.code(400).send({ error: 'rpiNumber é obrigatório' });
+    const profiles = await prisma.$queryRawUnsafe<any[]>(
+        `select * from monitoring_profiles where status='active' order by updated_at desc limit 1000`
+    ).catch(() => []);
+    if (profiles.length === 0) return { runId: null, rpiNumber, totalPublications: 0, createdOccurrences: 0 };
+
+    const publications = await prisma.$queryRawUnsafe<any[]>(
+        `select id, patent_number, rpi, date, despacho_code, despacho_desc, complement, ops_title, ops_applicant, ops_inventor, ops_ipc
+         from inpi_publication
+         where rpi=$1
+         order by created_at desc
+         limit 6000`,
+        rpiNumber
+    ).catch(() => []);
+    const runId = randomUUID();
+    let createdOccurrences = 0;
+
+    for (const publication of publications) {
+        for (const profile of profiles) {
+            const match = computeRuleScore(profile, publication);
+            if (!match.matched) continue;
+            const minAlert = Number(profile.score_min_alert || 55);
+            if (match.score < minAlert) continue;
+            const semanticScore = Math.max(0, Math.min(100, Math.round(match.score * 0.9)));
+            const legalScore = profile.type === 'process' ? Math.max(0, Math.min(100, match.score + 10)) : Math.max(0, Math.min(100, Math.round(match.score * 0.8)));
+            const finalScore = Math.max(0, Math.min(100, Math.round((match.score * 0.45) + (semanticScore * 0.35) + (legalScore * 0.20))));
+            const priority = scoreToPriority(finalScore);
+            const eventType = profile.type === 'process'
+                ? `process_dispatch_${cleanTextValue(publication?.despacho_code || '').replace(/\s+/g, '') || 'general'}`
+                : profile.type === 'collision'
+                    ? 'collision_candidate'
+                    : profile.type === 'market'
+                        ? 'market_signal'
+                        : 'asset_update';
+            const detail = {
+                publication,
+                profileName: profile.name,
+                matchingRules: parseJsonObject(profile.rules, {}),
+                layers: {
+                    bibliographicAvailable: Boolean(cleanTextValue(publication?.ops_title) || cleanTextValue(publication?.complement)),
+                    claimsAvailable: false
+                },
+                scoreBreakdown: {
+                    rule: match.score,
+                    semantic: semanticScore,
+                    legal: legalScore,
+                    final: finalScore
+                }
+            };
+            const occurrenceId = randomUUID();
+            await prisma.$executeRawUnsafe(
+                `insert into monitoring_occurrences (
+                    id, profile_id, monitoring_type, client_id, patent_number, rpi_number, publication_id, event_type,
+                    origin_source, title, summary, detail, rule_score, semantic_score, legal_score, final_score,
+                    priority, status, ia_status, client_feedback_status, created_at, updated_at
+                ) values (
+                    $1,$2,$3,$4,$5,$6,$7,$8,
+                    'rpi',$9,$10,$11::jsonb,$12,$13,$14,$15,
+                    $16,'pending_triage','not_requested','pending_send',now(),now()
+                )
+                on conflict do nothing`,
+                occurrenceId,
+                profile.id,
+                profile.type,
+                profile.client_id || null,
+                publication.patent_number || null,
+                publication.rpi || null,
+                publication.id || null,
+                eventType,
+                cleanTextValue(publication?.ops_title || publication?.despacho_desc || publication?.patent_number || ''),
+                buildMonitoringOccurrenceSummary(profile.type, publication),
+                JSON.stringify(detail),
+                match.score,
+                semanticScore,
+                legalScore,
+                finalScore,
+                priority
+            );
+            createdOccurrences += 1;
+        }
+    }
+
+    await prisma.$executeRawUnsafe(
+        `insert into monitoring_rpi_runs (id, rpi_number, run_mode, total_publications, matched_occurrences, status, created_at)
+         values ($1, $2, 'manual', $3, $4, 'completed', now())`,
+        runId,
+        rpiNumber,
+        publications.length,
+        createdOccurrences
+    );
+    return { runId, rpiNumber, totalPublications: publications.length, createdOccurrences };
+});
+
+fastify.post('/monitoring/center/rpi/process-latest', async () => {
+    await ensureBusinessTables();
+    const latest = await prisma.$queryRawUnsafe<any[]>(
+        `select rpi from inpi_publication where rpi is not null order by created_at desc limit 1`
+    ).catch(() => []);
+    const rpiNumber = cleanTextValue(latest?.[0]?.rpi);
+    if (!rpiNumber) {
+        return { runId: null, rpiNumber: null, totalPublications: 0, createdOccurrences: 0 };
+    }
+    const profiles = await prisma.$queryRawUnsafe<any[]>(
+        `select * from monitoring_profiles where status='active' order by updated_at desc limit 1000`
+    ).catch(() => []);
+    if (profiles.length === 0) return { runId: null, rpiNumber, totalPublications: 0, createdOccurrences: 0 };
+
+    const publications = await prisma.$queryRawUnsafe<any[]>(
+        `select id, patent_number, rpi, date, despacho_code, despacho_desc, complement, ops_title, ops_applicant, ops_inventor, ops_ipc
+         from inpi_publication
+         where rpi=$1
+         order by created_at desc
+         limit 6000`,
+        rpiNumber
+    ).catch(() => []);
+    const runId = randomUUID();
+    let createdOccurrences = 0;
+    for (const publication of publications) {
+        for (const profile of profiles) {
+            const match = computeRuleScore(profile, publication);
+            if (!match.matched) continue;
+            const minAlert = Number(profile.score_min_alert || 55);
+            if (match.score < minAlert) continue;
+            const semanticScore = Math.max(0, Math.min(100, Math.round(match.score * 0.9)));
+            const legalScore = profile.type === 'process' ? Math.max(0, Math.min(100, match.score + 10)) : Math.max(0, Math.min(100, Math.round(match.score * 0.8)));
+            const finalScore = Math.max(0, Math.min(100, Math.round((match.score * 0.45) + (semanticScore * 0.35) + (legalScore * 0.20))));
+            const priority = scoreToPriority(finalScore);
+            const eventType = profile.type === 'process'
+                ? `process_dispatch_${cleanTextValue(publication?.despacho_code || '').replace(/\s+/g, '') || 'general'}`
+                : profile.type === 'collision'
+                    ? 'collision_candidate'
+                    : profile.type === 'market'
+                        ? 'market_signal'
+                        : 'asset_update';
+            const detail = {
+                publication,
+                profileName: profile.name,
+                matchingRules: parseJsonObject(profile.rules, {}),
+                layers: {
+                    bibliographicAvailable: Boolean(cleanTextValue(publication?.ops_title) || cleanTextValue(publication?.complement)),
+                    claimsAvailable: false
+                },
+                scoreBreakdown: {
+                    rule: match.score,
+                    semantic: semanticScore,
+                    legal: legalScore,
+                    final: finalScore
+                }
+            };
+            await prisma.$executeRawUnsafe(
+                `insert into monitoring_occurrences (
+                    id, profile_id, monitoring_type, client_id, patent_number, rpi_number, publication_id, event_type,
+                    origin_source, title, summary, detail, rule_score, semantic_score, legal_score, final_score,
+                    priority, status, ia_status, client_feedback_status, created_at, updated_at
+                ) values (
+                    $1,$2,$3,$4,$5,$6,$7,$8,
+                    'rpi',$9,$10,$11::jsonb,$12,$13,$14,$15,
+                    $16,'pending_triage','not_requested','pending_send',now(),now()
+                )
+                on conflict do nothing`,
+                randomUUID(),
+                profile.id,
+                profile.type,
+                profile.client_id || null,
+                publication.patent_number || null,
+                publication.rpi || null,
+                publication.id || null,
+                eventType,
+                cleanTextValue(publication?.ops_title || publication?.despacho_desc || publication?.patent_number || ''),
+                buildMonitoringOccurrenceSummary(profile.type, publication),
+                JSON.stringify(detail),
+                match.score,
+                semanticScore,
+                legalScore,
+                finalScore,
+                priority
+            );
+            createdOccurrences += 1;
+        }
+    }
+    await prisma.$executeRawUnsafe(
+        `insert into monitoring_rpi_runs (id, rpi_number, run_mode, total_publications, matched_occurrences, status, created_at)
+         values ($1, $2, 'latest', $3, $4, 'completed', now())`,
+        runId,
+        rpiNumber,
+        publications.length,
+        createdOccurrences
+    );
+    return { runId, rpiNumber, totalPublications: publications.length, createdOccurrences };
+});
+
+fastify.get('/monitoring/center/occurrences', async (request: any) => {
+    await ensureBusinessTables();
+    const query = request.query || {};
+    const page = Math.max(1, parseInt(String(query.page || '1'), 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(String(query.pageSize || '30'), 10) || 30));
+    const offset = (page - 1) * pageSize;
+    const values: any[] = [];
+    const conditions: string[] = [];
+    const push = (value: any) => {
+        values.push(value);
+        return `$${values.length}`;
+    };
+    if (query.type) conditions.push(`o.monitoring_type = ${push(cleanTextValue(query.type).toLowerCase())}`);
+    if (query.status) conditions.push(`o.status = ${push(cleanTextValue(query.status).toLowerCase())}`);
+    if (query.priority) conditions.push(`o.priority = ${push(cleanTextValue(query.priority).toLowerCase())}`);
+    if (query.clientId) conditions.push(`o.client_id = ${push(cleanTextValue(query.clientId))}`);
+    if (query.owner) conditions.push(`coalesce(p.owner_name,'') ilike ${push(`%${cleanTextValue(query.owner)}%`)}`);
+    if (query.withIa === 'true') conditions.push(`o.ia_status in ('completed','partial')`);
+    if (query.waitingClientFeedback === 'true') conditions.push(`o.client_feedback_status in ('sent','requested_revision')`);
+    if (query.q) {
+        const token = `%${cleanTextValue(query.q)}%`;
+        conditions.push(`(coalesce(o.title,'') ilike ${push(token)} or coalesce(o.summary,'') ilike ${push(token)} or coalesce(o.patent_number,'') ilike ${push(token)} or coalesce(c.name,'') ilike ${push(token)} or coalesce(p.name,'') ilike ${push(token)})`);
+    }
+    const whereClause = conditions.length ? `where ${conditions.join(' and ')}` : '';
+    const totalRows = await prisma.$queryRawUnsafe<any[]>(
+        `select count(*)::int as total
+         from monitoring_occurrences o
+         left join monitoring_profiles p on p.id=o.profile_id
+         left join "Client" c on c.id=o.client_id
+         ${whereClause}`,
+        ...values
+    ).catch(() => [{ total: 0 }]);
+    const total = Number(totalRows?.[0]?.total || 0);
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+        `select
+            o.*,
+            p.name as monitoring_name,
+            p.owner_name as monitoring_owner,
+            p.attorney_name as monitoring_attorney,
+            p.sensitivity as monitoring_sensitivity,
+            p.asset_patent_number as reference_patent_number,
+            c.name as client_name
+         from monitoring_occurrences o
+         left join monitoring_profiles p on p.id=o.profile_id
+         left join "Client" c on c.id=o.client_id
+         ${whereClause}
+         order by o.created_at desc
+         limit ${push(pageSize)} offset ${push(offset)}`,
+        ...values
+    ).catch(() => []);
+    return {
+        rows: rows.map((row: any) => ({
+            ...row,
+            detail: parseJsonObject(row.detail, {}),
+            ia_payload: parseJsonObject(row.ia_payload, {})
+        })),
+        total,
+        page,
+        pageSize,
+        totalPages: Math.max(1, Math.ceil(total / pageSize))
+    };
+});
+
+fastify.post('/monitoring/center/occurrences/:id/analyze-ai', async (request: any, reply: any) => {
+    await ensureBusinessTables();
+    const { id } = request.params as { id: string };
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+        `select o.*, p.name as monitoring_name, p.type as monitoring_type, p.rules, p.asset_title, p.asset_patent_number
+         from monitoring_occurrences o
+         join monitoring_profiles p on p.id=o.profile_id
+         where o.id=$1
+         limit 1`,
+        id
+    ).catch(() => []);
+    const occurrence = rows?.[0];
+    if (!occurrence) return reply.code(404).send({ error: 'Ocorrência não encontrada' });
+    if (!GROQ_API_KEY) return reply.code(503).send({ error: 'Groq Cloud não configurado' });
+
+    const detail = parseJsonObject(occurrence.detail, {});
+    const profileType = normalizeMonitoringType(occurrence.monitoring_type);
+    const promptPayload = {
+        monitoringType: profileType,
+        monitoringName: occurrence.monitoring_name,
+        referencePatent: occurrence.asset_patent_number || occurrence.patent_number,
+        referenceTitle: occurrence.asset_title || '',
+        candidateTitle: occurrence.title || '',
+        candidateSummary: occurrence.summary || '',
+        eventType: occurrence.event_type,
+        eventDetail: detail
+    };
+    let prompt = '';
+    if (profileType === 'collision') {
+        prompt = `Analise a colidência de patentes com base no JSON abaixo e retorne JSON válido com: relevance_score_0_100, novelty_overlap_score_0_100, claims_overlap_score_0_100, confidence_level, reasoning_summary, key_matching_terms, key_differentiators, recommended_action.\nJSON:\n${JSON.stringify(promptPayload)}`;
+    } else if (profileType === 'process') {
+        prompt = `Analise o evento processual e retorne JSON válido com: event_summary, urgency_score, recommended_internal_action, recommended_client_action, plain_language_explanation.\nJSON:\n${JSON.stringify(promptPayload)}`;
+    } else if (profileType === 'market') {
+        prompt = `Analise o sinal de mercado e retorne JSON válido com: market_signal_type, importance_score, cluster_summary, emerging_entities, why_it_matters, recommended_followup.\nJSON:\n${JSON.stringify(promptPayload)}`;
+    } else {
+        prompt = `Analise atualização de ativo e retorne JSON válido com: relevance_score_0_100, confidence_level, reasoning_summary, recommended_action.\nJSON:\n${JSON.stringify(promptPayload)}`;
+    }
+    try {
+        const raw = await generateWithGemini(prompt, true);
+        const parsed = parseModelJsonResponse(raw);
+        const relevance = clampScore(
+            parsed?.relevance_score_0_100
+            ?? parsed?.importance_score
+            ?? parsed?.urgency_score
+            ?? occurrence.final_score,
+            Number(occurrence.final_score || 0)
+        );
+        const semantic = clampScore(
+            parsed?.novelty_overlap_score_0_100
+            ?? parsed?.importance_score
+            ?? occurrence.semantic_score,
+            Number(occurrence.semantic_score || 0)
+        );
+        const legal = clampScore(
+            parsed?.claims_overlap_score_0_100
+            ?? parsed?.urgency_score
+            ?? occurrence.legal_score,
+            Number(occurrence.legal_score || 0)
+        );
+        const finalScore = clampScore(Math.round((Number(occurrence.rule_score || 0) * 0.40) + (semantic * 0.35) + (legal * 0.25)), Number(occurrence.final_score || 0));
+        const priority = scoreToPriority(finalScore);
+        await prisma.$executeRawUnsafe(
+            `update monitoring_occurrences
+             set
+                semantic_score=$2,
+                legal_score=$3,
+                final_score=$4,
+                priority=$5,
+                ia_status='completed',
+                ia_payload=$6::jsonb,
+                updated_at=now()
+             where id=$1`,
+            id,
+            semantic,
+            legal,
+            finalScore,
+            priority,
+            JSON.stringify(parsed || {})
+        );
+        return { id, ia: parsed, finalScore, priority };
+    } catch (error: any) {
+        await prisma.$executeRawUnsafe(
+            `update monitoring_occurrences set ia_status='error', ia_payload=$2::jsonb, updated_at=now() where id=$1`,
+            id,
+            JSON.stringify({ error: error?.message || 'Falha na análise IA' })
+        ).catch(() => undefined);
+        return reply.code(500).send({ error: error?.message || 'Falha ao executar análise IA' });
+    }
+});
+
+fastify.post('/monitoring/center/occurrences/:id/action', async (request: any, reply: any) => {
+    await ensureBusinessTables();
+    const { id } = request.params as { id: string };
+    const action = cleanTextValue(request.body?.action).toLowerCase();
+    const note = cleanTextValue(request.body?.note);
+    const assignee = cleanTextValue(request.body?.assignee);
+    const feedback = cleanTextValue(request.body?.feedback);
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+        `select o.*, p.name as monitoring_name, c.name as client_name
+         from monitoring_occurrences o
+         left join monitoring_profiles p on p.id=o.profile_id
+         left join "Client" c on c.id=o.client_id
+         where o.id=$1
+         limit 1`,
+        id
+    ).catch(() => []);
+    const occurrence = rows?.[0];
+    if (!occurrence) return reply.code(404).send({ error: 'Ocorrência não encontrada' });
+
+    if (action === 'create_demand') {
+        await ensureBusinessTables();
+        const demandId = randomUUID();
+        const priorityMap: Record<string, string> = { critical: 'critica', high: 'alta', medium: 'media', low: 'baixa' };
+        const recipient = await resolveClientRecipient(occurrence.client_id || null, occurrence.event_type, cleanTextValue(request.body?.contactId));
+        await prisma.$executeRawUnsafe(
+            `insert into crm_demands (
+                id, client_id, contact_id, monitoring_origin, monitoring_type, occurrence_id, item_related, ai_summary,
+                title, description, status, priority, due_date, owner_name, patent_number, metadata, created_at, updated_at
+             ) values (
+                $1,$2,$3,'monitoring',$4,$5,$6,$7,
+                $8,$9,'nova',$10,$11,$12,$13,$14::jsonb,now(),now()
+             )`,
+            demandId,
+            occurrence.client_id || null,
+            recipient?.id || null,
+            occurrence.monitoring_type || null,
+            occurrence.id,
+            occurrence.event_type || null,
+            cleanTextValue(parseJsonObject(occurrence.ia_payload, {})?.reasoning_summary || occurrence.summary),
+            `[Monitoramento] ${occurrence.monitoring_name || occurrence.event_type}`,
+            `${occurrence.summary || ''}\n\nOcorrência: ${occurrence.id}\nOrigem: ${occurrence.monitoring_type}\nPrioridade sugerida: ${occurrence.priority}\n${note || ''}`.trim(),
+            priorityMap[String(occurrence.priority || 'medium')] || 'media',
+            null,
+            assignee || occurrence.assigned_to || null,
+            occurrence.patent_number || null,
+            JSON.stringify({ finalScore: occurrence.final_score, ia: parseJsonObject(occurrence.ia_payload, {}) })
+        );
+        await prisma.$executeRawUnsafe(
+            `insert into crm_demand_history (id, demand_id, action, old_value, new_value, created_by, created_at)
+             values ($1,$2,'created',null,'nova',null,now())`,
+            randomUUID(),
+            demandId
+        ).catch(() => undefined);
+        await prisma.$executeRawUnsafe(
+            `update monitoring_occurrences
+             set crm_demand_id=$2, status='converted_to_demand', reviewed_at=now(), updated_at=now()
+             where id=$1`,
+            id,
+            demandId
+        );
+        return { id, status: 'converted_to_demand', crmDemandId: demandId };
+    }
+
+    if (action === 'send_client') {
+        const recipient = await resolveClientRecipient(occurrence.client_id || null, occurrence.event_type, cleanTextValue(request.body?.contactId));
+        if (!recipient?.email) return reply.code(400).send({ error: 'Nenhum contato válido para envio' });
+        const systemRows = await prisma.$queryRawUnsafe<any[]>(
+            `select key, value from system_settings where key in ('templates')`
+        ).catch(() => []);
+        const templates = parseJsonObject(systemRows.find((item: any) => item.key === 'templates')?.value, {});
+        const templateKey = occurrence.monitoring_type === 'process' ? 'process' : occurrence.monitoring_type === 'collision' ? 'collision' : 'market';
+        const fallbackBody = `Cliente: ${occurrence.client_name || '-'}\nMonitoramento: ${occurrence.monitoring_name || '-'}\nOcorrência: ${occurrence.event_type}\nResumo: ${occurrence.summary || '-'}\nPrioridade: ${occurrence.priority}\n`;
+        const renderedBody = cleanTextValue(templates?.[templateKey]) || fallbackBody;
+        const subject = `[Patent Scope] ${occurrence.monitoring_type} • ${occurrence.priority?.toUpperCase() || 'INFO'} • ${occurrence.event_type}`;
+        await prisma.$executeRawUnsafe(
+            `insert into email_delivery_logs (
+                id, client_id, demand_id, occurrence_id, recipient_email, recipient_name, template_key, subject, body, status, error, created_at
+             ) values (
+                $1,$2,null,$3,$4,$5,$6,$7,$8,'queued',null,now()
+             )`,
+            randomUUID(),
+            occurrence.client_id || null,
+            occurrence.id,
+            recipient.email,
+            recipient.name || null,
+            templateKey,
+            subject,
+            renderedBody
+        ).catch(() => undefined);
+        await prisma.$executeRawUnsafe(
+            `update monitoring_occurrences
+             set client_feedback_status='sent', sent_to_client_at=now(), status='awaiting_client_feedback', updated_at=now()
+             where id=$1`,
+            id
+        );
+        return { id, status: 'awaiting_client_feedback', recipient: { id: recipient.id, email: recipient.email, name: recipient.name } };
+    }
+
+    if (action === 'feedback') {
+        const normalized = ['interesting', 'not_interesting', 'requested_revision', 'closed'].includes(feedback) ? feedback : 'requested_revision';
+        await prisma.$executeRawUnsafe(
+            `update monitoring_occurrences
+             set client_feedback_status=$2, client_feedback_note=nullif($3,''), status=case when $2='closed' then 'closed' else status end, updated_at=now()
+             where id=$1`,
+            id,
+            normalized,
+            note
+        );
+        const feedbackId = randomUUID();
+        await prisma.$executeRawUnsafe(
+            `insert into monitoring_occurrence_feedback (id, occurrence_id, source, feedback, note, created_by, created_at)
+             values ($1,$2,'client',$3,nullif($4,''),nullif($5,''),now())`,
+            feedbackId,
+            id,
+            normalized,
+            note,
+            assignee
+        );
+        return { id, clientFeedbackStatus: normalized };
+    }
+
+    const statusMap: Record<string, string> = {
+        mark_relevant: 'relevant',
+        mark_irrelevant: 'discarded',
+        defer: 'snoozed',
+        review: 'in_review',
+        close: 'closed'
+    };
+    const nextStatus = statusMap[action];
+    if (!nextStatus) return reply.code(400).send({ error: 'Ação inválida' });
+
+    await prisma.$executeRawUnsafe(
+        `update monitoring_occurrences
+         set status=$2, assigned_to=case when nullif($3,'') is null then assigned_to else $3 end, reviewed_at=now(), updated_at=now()
+         where id=$1`,
+        id,
+        nextStatus,
+        assignee
+    );
+    if (note || assignee) {
+        const feedbackId = randomUUID();
+        await prisma.$executeRawUnsafe(
+            `insert into monitoring_occurrence_feedback (id, occurrence_id, source, feedback, note, created_by, created_at)
+             values ($1,$2,'internal',$3,nullif($4,''),nullif($5,''),now())`,
+            feedbackId,
+            id,
+            nextStatus,
+            note,
+            assignee
+        ).catch(() => undefined);
+    }
+    return { id, status: nextStatus };
+});
+
+fastify.get('/monitoring/center/occurrences/:id/email-preview', async (request: any, reply: any) => {
+    await ensureBusinessTables();
+    const { id } = request.params as { id: string };
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+        `select o.*, p.name as monitoring_name, c.name as client_name
+         from monitoring_occurrences o
+         left join monitoring_profiles p on p.id=o.profile_id
+         left join "Client" c on c.id=o.client_id
+         where o.id=$1
+         limit 1`,
+        id
+    ).catch(() => []);
+    const occurrence = rows?.[0];
+    if (!occurrence) return reply.code(404).send({ error: 'Ocorrência não encontrada' });
+    const recipient = await resolveClientRecipient(occurrence.client_id || null, occurrence.event_type);
+    if (!recipient?.email) return reply.code(400).send({ error: 'Nenhum contato encontrado para o cliente' });
+    const templatesRows = await prisma.$queryRawUnsafe<any[]>(
+        `select value from system_settings where key='templates' limit 1`
+    ).catch(() => []);
+    const templates = parseJsonObject(templatesRows?.[0]?.value, {});
+    const templateKey = occurrence.monitoring_type === 'process' ? 'process' : occurrence.monitoring_type === 'collision' ? 'collision' : 'market';
+    const fallbackBody = `Cliente: ${occurrence.client_name || '-'}\nMonitoramento: ${occurrence.monitoring_name || '-'}\nOcorrência: ${occurrence.event_type}\nResumo: ${occurrence.summary || '-'}\nPrioridade: ${occurrence.priority}\n`;
+    const body = cleanTextValue(templates?.[templateKey]) || fallbackBody;
+    const subject = `[Patent Scope] ${occurrence.monitoring_type} • ${occurrence.priority?.toUpperCase() || 'INFO'} • ${occurrence.event_type}`;
+    return {
+        occurrenceId: id,
+        recipient: { id: recipient.id, name: recipient.name, email: recipient.email, roleArea: recipient.role_area },
+        templateKey,
+        subject,
+        body
+    };
+});
+
 fastify.get('/settings/system', async () => {
     await ensureBusinessTables();
     const rows = await prisma.$queryRawUnsafe<any[]>(
         `select key, value, updated_at from system_settings where key in ('smtp','templates','workflows','integrations')`
     ).catch(() => []);
-    const byKey = new Map(rows.map((row) => [row.key, row.value]));
+    const byKey = new Map<string, any>(rows.map((row: any) => [row.key, row.value] as [string, any]));
     return {
         smtp: byKey.get('smtp') || {
             host: '',
@@ -4258,27 +5780,72 @@ fastify.put('/settings/system', async (request: any, reply) => {
     return reply.code(204).send();
 });
 
+fastify.get('/emails/logs', async (request: any) => {
+    await ensureBusinessTables();
+    const page = Math.max(1, parseInt(String(request.query?.page || '1'), 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(String(request.query?.pageSize || '30'), 10) || 30));
+    const offset = (page - 1) * pageSize;
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+        `select e.*, c.name as client_name
+         from email_delivery_logs e
+         left join "Client" c on c.id=e.client_id
+         order by e.created_at desc
+         limit $1 offset $2`,
+        pageSize,
+        offset
+    ).catch(() => []);
+    const totalRows = await prisma.$queryRawUnsafe<any[]>(
+        `select count(*)::int as total from email_delivery_logs`
+    ).catch(() => [{ total: 0 }]);
+    return {
+        rows,
+        total: Number(totalRows?.[0]?.total || 0),
+        page,
+        pageSize
+    };
+});
+
 fastify.get('/monitoring/alerts', async (request: any) => {
     await ensureMonitoringTables();
-    const { page = 1, pageSize = 30, unreadOnly } = request.query as any;
+    const { page = 1, pageSize = 30, unreadOnly, severity, despachoCode, fromDate, toDate } = request.query as any;
     const currentPage = Math.max(1, parseInt(String(page || '1'), 10) || 1);
     const size = Math.min(100, Math.max(1, parseInt(String(pageSize || '30'), 10) || 30));
     const offset = (currentPage - 1) * size;
     const onlyUnread = String(unreadOnly || '').toLowerCase() === 'true';
+    const severityValue = String(severity || '').trim().toLowerCase();
+    const despachoValue = String(despachoCode || '').trim();
+    const fromValue = String(fromDate || '').trim();
+    const toValue = String(toDate || '').trim();
     const totalRows = await prisma.$queryRawUnsafe<any[]>(
         `select count(*)::int as total
          from monitoring_alerts
-         where ($1::boolean is false) or is_read=false`,
-        onlyUnread
+         where (($1::boolean is false) or is_read=false)
+           and ($2::text = '' or lower(severity)=lower($2))
+           and ($3::text = '' or coalesce(despacho_code, '') = $3)
+           and ($4::text = '' or rpi_date >= $4::date)
+           and ($5::text = '' or rpi_date <= $5::date)`,
+        onlyUnread,
+        severityValue,
+        despachoValue,
+        fromValue,
+        toValue
     ).catch(() => [{ total: 0 }]);
     const total = Number(totalRows?.[0]?.total || 0);
     const rows = await prisma.$queryRawUnsafe<any[]>(
         `select id, monitored_patent_id, patent_number, rpi_number, rpi_date, despacho_code, title, complement, severity, deadline, is_read, created_at, updated_at
          from monitoring_alerts
-         where ($1::boolean is false) or is_read=false
+         where (($1::boolean is false) or is_read=false)
+           and ($2::text = '' or lower(severity)=lower($2))
+           and ($3::text = '' or coalesce(despacho_code, '') = $3)
+           and ($4::text = '' or rpi_date >= $4::date)
+           and ($5::text = '' or rpi_date <= $5::date)
          order by rpi_date desc, created_at desc
-         limit $2 offset $3`,
+         limit $6 offset $7`,
         onlyUnread,
+        severityValue,
+        despachoValue,
+        fromValue,
+        toValue,
         size,
         offset
     ).catch(() => []);
@@ -4294,6 +5861,19 @@ fastify.post('/monitoring/alerts/:id/read', async (request: any, reply) => {
     ).catch(() => []);
     if (!updated?.[0]) return reply.code(404).send({ error: 'Alerta não encontrado' });
     return updated[0];
+});
+
+fastify.post('/monitoring/alerts/read-bulk', async (request: any, reply) => {
+    await ensureMonitoringTables();
+    const ids = Array.isArray(request.body?.ids) ? request.body.ids.map((item: any) => String(item || '').trim()).filter(Boolean) : [];
+    if (ids.length === 0) return reply.code(400).send({ error: 'Informe ids para atualização em lote.' });
+    const updated = await prisma.$executeRawUnsafe(
+        `update monitoring_alerts
+         set is_read=true, updated_at=now()
+         where id = any($1::uuid[])`,
+        ids
+    ).catch(() => 0);
+    return { updated: Number(updated || 0) };
 });
 
 fastify.post('/monitoring/collision/explain', async (request: any, reply) => {

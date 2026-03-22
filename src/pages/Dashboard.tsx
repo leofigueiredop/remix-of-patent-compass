@@ -4,9 +4,8 @@ import { Search, Plus, FileText, Calendar, ChevronRight, ShieldCheck, Loader2, W
 import { Button } from "@/components/ui/button";
 import AppLayout from "@/components/AppLayout";
 import { aiService } from "@/services/ai";
-import axios from "axios";
-
-const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000").replace(/\/+$/, "");
+import { api } from "@/services/auth";
+import { useResearch } from "@/contexts/ResearchContext";
 
 interface Research {
   id: string;
@@ -29,28 +28,57 @@ const statusClasses: Record<string, string> = {
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const { getJourneyMetrics } = useResearch();
   const [researches] = useState<Research[]>([]);
   const [aiOnline, setAiOnline] = useState<boolean | null>(null);
   const [monitoredCount, setMonitoredCount] = useState<number | null>(null);
-  const [collisionsCount, setCollisionsCount] = useState<number>(12); // Exemplo fixo por enquanto
+  const [collisionsCount, setCollisionsCount] = useState<number | null>(null);
+  const [urgentCollisionsCount, setUrgentCollisionsCount] = useState<number>(0);
+  const [demandCount, setDemandCount] = useState<number | null>(null);
+  const [journeyCompletion, setJourneyCompletion] = useState<number>(0);
 
   useEffect(() => {
     aiService.checkHealth().then(setAiOnline);
-    
-    // Buscar contagem real de patentes monitoradas
-    axios.get(`${API_URL}/monitoring/patents?page=1&pageSize=1`)
-      .then(res => {
-        if (res.data && typeof res.data.total === 'number') {
-          setMonitoredCount(res.data.total);
-        } else if (res.data && res.data.rows) {
-            // Fallback se a API não retornar total direto
-            setMonitoredCount(res.data.total || 0);
-        }
-      })
-      .catch(err => console.error("Erro ao buscar total de monitoradas:", err));
-  }, []);
 
-  const totalPesquisas = researches.length;
+    Promise.all([
+      api.get(`/system-health`),
+      api.get(`/monitoring/center/dashboard`),
+      api.get(`/demands`, { params: { page: 1, pageSize: 1 } })
+    ])
+      .then(([healthRes, centerRes, demandsRes]) => {
+        setMonitoredCount(Number(healthRes.data?.metrics?.monitoredPatents ?? 0));
+        const occurrences = centerRes.data?.occurrences || {};
+        const critical = Number(occurrences.critical ?? 0);
+        const pending = Number(occurrences.pendingTriage ?? 0);
+        setCollisionsCount(critical + pending);
+        setUrgentCollisionsCount(critical);
+        setDemandCount(Number(demandsRes.data?.total ?? 0));
+      })
+      .catch((error) => {
+        console.error("Erro ao carregar métricas do dashboard:", error);
+      });
+
+    const metrics = getJourneyMetrics();
+    const stepKeys = [
+      "step_0_new_research",
+      "step_1_transcription",
+      "step_2_structured_briefing",
+      "step_3_keywords",
+      "step_4_results",
+      "step_5_analysis",
+      "step_6_report",
+    ];
+    const completionValues = stepKeys.map((key) => {
+      const item = metrics[key];
+      if (!item || item.views === 0) return 0;
+      return Math.min(1, item.completes / item.views);
+    });
+    const avg = completionValues.length > 0
+      ? completionValues.reduce((sum, value) => sum + value, 0) / completionValues.length
+      : 0;
+    setJourneyCompletion(Math.round(avg * 100));
+  }, [getJourneyMetrics]);
+
   const emAnalise = researches.filter(r => r.status === "analyzed").length;
   const finalizadas = researches.filter(r => r.status === "finalized").length;
 
@@ -59,19 +87,19 @@ export default function Dashboard() {
       <div className="flex flex-col gap-8">
         
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Dashboard Central</h1>
             <p className="text-muted-foreground text-sm mt-1">
               Visão geral da operação, pesquisas e monitoramentos.
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            <Button variant="outline" onClick={() => navigate("/search")} className="gap-2">
+          <div className="flex w-full gap-2 sm:w-auto sm:items-center sm:gap-3">
+            <Button variant="outline" onClick={() => navigate("/search")} className="flex-1 gap-2 sm:flex-none">
               <Search className="w-4 h-4" />
               Busca Rápida
             </Button>
-            <Button onClick={() => navigate("/research/new")} className="gap-2 bg-emerald-600 hover:bg-emerald-700">
+            <Button onClick={() => navigate("/research/new")} className="flex-1 gap-2 bg-emerald-600 hover:bg-emerald-700 sm:flex-none">
               <Plus className="w-4 h-4" />
               Nova Pesquisa
             </Button>
@@ -106,29 +134,33 @@ export default function Dashboard() {
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-sm font-medium text-slate-500">Alertas de Colisão</p>
-                <h3 className="text-2xl font-bold text-slate-900 mt-1">{collisionsCount}</h3>
+                <h3 className="text-2xl font-bold text-slate-900 mt-1">
+                  {collisionsCount === null ? <Loader2 className="w-5 h-5 animate-spin text-slate-300 mt-1" /> : collisionsCount}
+                </h3>
               </div>
               <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600">
                 <AlertCircle className="w-5 h-5" />
               </div>
             </div>
             <div className="mt-4 flex items-center text-xs text-amber-600 font-medium">
-              3 requerem análise urgente
+              {urgentCollisionsCount} críticos requerem análise urgente
             </div>
           </div>
 
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
             <div className="flex items-start justify-between">
               <div>
-                <p className="text-sm font-medium text-slate-500">Pesquisas Ativas</p>
-                <h3 className="text-2xl font-bold text-slate-900 mt-1">{totalPesquisas || 0}</h3>
+                <p className="text-sm font-medium text-slate-500">Demandas no CRM</p>
+                <h3 className="text-2xl font-bold text-slate-900 mt-1">
+                  {demandCount === null ? <Loader2 className="w-5 h-5 animate-spin text-slate-300 mt-1" /> : demandCount}
+                </h3>
               </div>
               <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
                 <FileText className="w-5 h-5" />
               </div>
             </div>
             <div className="mt-4 flex items-center text-xs text-slate-500 font-medium">
-              {emAnalise} aguardando revisão
+              {finalizadas} concluídas • {emAnalise} em análise
             </div>
           </div>
 
@@ -236,6 +268,20 @@ export default function Dashboard() {
               </div>
             </div>
 
+            <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+              <h2 className="text-sm font-bold text-slate-800 mb-3">Jornada de Pesquisa</h2>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-slate-500">Conclusão média do funil</span>
+                <span className="text-sm font-semibold text-slate-900">{journeyCompletion}%</span>
+              </div>
+              <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                <div className="h-full bg-emerald-500 transition-all duration-500" style={{ width: `${journeyCompletion}%` }} />
+              </div>
+              <Button variant="outline" className="w-full mt-4 text-xs" onClick={() => navigate("/research/new")}>
+                Iniciar nova pesquisa
+              </Button>
+            </div>
+
             {/* Recent Alerts (Placeholder for real data) */}
             <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
               <div className="flex items-center justify-between mb-4">
@@ -266,4 +312,3 @@ export default function Dashboard() {
     </AppLayout>
   );
 }
-

@@ -93,6 +93,11 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-family: 'Inter', system-ui, sans-serif;
+    background-image:
+      radial-gradient(circle at 15% 5%, hsl(190 85% 92%) 0%, transparent 40%),
+      radial-gradient(circle at 85% 15%, hsl(160 78% 90%) 0%, transparent 38%),
+      linear-gradient(180deg, hsl(196 64% 98%), hsl(193 42% 96%));
+    background-attachment: fixed;
   }
 
   code,
@@ -150,7 +155,7 @@
   }
 
   .patent-card {
-    @apply bg-card rounded-lg border p-4 hover:shadow-md transition-shadow cursor-pointer;
+    @apply bg-card rounded-xl border border-slate-200/80 p-4 shadow-sm hover:shadow-lg transition-all cursor-pointer;
   }
 
   .wizard-step {
@@ -167,5 +172,9 @@
 
   .wizard-step-pending {
     @apply text-muted-foreground;
+  }
+
+  .page-shell {
+    @apply rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm backdrop-blur-sm;
   }
 }

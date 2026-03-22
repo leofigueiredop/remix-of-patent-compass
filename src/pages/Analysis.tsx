@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import LoadingTransition from "@/components/LoadingTransition";
 import AppLayout from "@/components/AppLayout";
 import WizardSteps from "@/components/WizardSteps";
+import { useResearch } from "@/contexts/ResearchContext";
 
 const steps = ["Briefing", "Transcrição", "Briefing Técnico", "Palavras-chave", "Resultados", "Análise", "Relatório"];
 
@@ -30,8 +31,13 @@ interface AnalyzedPatent {
 export default function Analysis() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { trackJourneyStep } = useResearch();
   const [loading, setLoading] = useState(false);
   const [patents, setPatents] = useState<AnalyzedPatent[]>([]);
+
+  useEffect(() => {
+    trackJourneyStep("step_5_analysis", "view");
+  }, [trackJourneyStep]);
 
   useEffect(() => {
     const incomingResults = location.state?.results as any[];
@@ -77,6 +83,7 @@ export default function Analysis() {
   const handleGenerateReport = () => {
     setLoading(true);
     const selectedPatents = patents.filter(p => p.selected);
+    trackJourneyStep("step_5_analysis", "complete");
     setTimeout(() => {
       navigate("/research/report", { state: { patents: selectedPatents } });
     }, 2000);

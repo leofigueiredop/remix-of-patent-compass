@@ -86,6 +86,8 @@ interface ResearchContextType extends ResearchState {
     setCqlQuery: (query: string) => void;
     setSearchResults: (results: { espacenet: PatentResult[]; inpi: PatentResult[] }) => void;
     setAnalyzedPatents: (patents: AnalyzedPatent[]) => void;
+    trackJourneyStep: (stepKey: string, eventType: 'view' | 'complete') => void;
+    getJourneyMetrics: () => Record<string, { views: number; completes: number; lastEventAt: string }>;
     resetResearch: () => void;
 }
 
@@ -106,6 +108,7 @@ const ResearchContext = createContext<ResearchContextType | undefined>(undefined
 
 export function ResearchProvider({ children }: { children: ReactNode }) {
     const [state, setState] = useState<ResearchState>(initialState);
+    const journeyStorageKey = 'research_journey_metrics_v1';
 
     const setRawInput = useCallback((rawInput: string) => setState(s => ({ ...s, rawInput })), []);
     const setInputMode = useCallback((inputMode: 'audio' | 'text' | 'files') => setState(s => ({ ...s, inputMode })), []);
@@ -117,6 +120,27 @@ export function ResearchProvider({ children }: { children: ReactNode }) {
         setState(s => ({ ...s, searchResults })), []);
     const setAnalyzedPatents = useCallback((analyzedPatents: AnalyzedPatent[]) =>
         setState(s => ({ ...s, analyzedPatents })), []);
+    const getJourneyMetrics = useCallback(() => {
+        try {
+            const raw = localStorage.getItem(journeyStorageKey);
+            if (!raw) return {};
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') return parsed;
+            return {};
+        } catch {
+            return {};
+        }
+    }, []);
+    const trackJourneyStep = useCallback((stepKey: string, eventType: 'view' | 'complete') => {
+        if (!stepKey) return;
+        const current = getJourneyMetrics();
+        const item = current[stepKey] || { views: 0, completes: 0, lastEventAt: new Date().toISOString() };
+        if (eventType === 'view') item.views += 1;
+        if (eventType === 'complete') item.completes += 1;
+        item.lastEventAt = new Date().toISOString();
+        current[stepKey] = item;
+        localStorage.setItem(journeyStorageKey, JSON.stringify(current));
+    }, [getJourneyMetrics]);
     const resetResearch = useCallback(() => setState(initialState), []);
 
     return (
@@ -124,7 +148,7 @@ export function ResearchProvider({ children }: { children: ReactNode }) {
             ...state,
             setRawInput, setInputMode, setTranscription, setBriefing,
             setStrategy, setCqlQuery, setSearchResults, setAnalyzedPatents,
-            resetResearch
+            trackJourneyStep, getJourneyMetrics, resetResearch
         }}>
             {children}
         </ResearchContext.Provider>

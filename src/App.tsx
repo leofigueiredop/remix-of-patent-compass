@@ -2,38 +2,51 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ResearchProvider } from "@/contexts/ResearchContext";
-import Login from "./pages/Login";
-import Dashboard from "./pages/Dashboard";
-import NewResearch from "./pages/NewResearch";
-import Transcription from "./pages/Transcription";
-import StructuredBriefing from "./pages/StructuredBriefing";
-import Keywords from "./pages/Keywords";
-import SearchResults from "./pages/SearchResults";
-import Analysis from "./pages/Analysis";
-import Report from "./pages/Report";
-import Proposal from "./pages/Proposal";
-import MonitoringDashboard from "./pages/MonitoringDashboard";
-import MonitoringPatents from "./pages/MonitoringPatents";
-import ResearchHistory from "./pages/ResearchHistory";
-import ResearchSettings from "./pages/ResearchSettings";
-import KnowledgeBase from "./pages/KnowledgeBase";
-import MonitoringSettings from "./pages/MonitoringSettings";
-import Clients from "./pages/Clients";
-import ProcessMonitoring from "./pages/ProcessMonitoring";
-import Demands from "./pages/Demands";
-import Alerts from "./pages/Alerts";
-import MarketMonitoring from "./pages/MarketMonitoring";
-import MyAssets from "./pages/MyAssets";
-import QuickSearch from "./pages/QuickSearch";
-import PatentBase from "./pages/PatentBase";
-import BackgroundWorkers from "./pages/BackgroundWorkers";
-import SystemHealth from "./pages/SystemHealth";
-import Settings from "./pages/Settings";
-import NotFound from "./pages/NotFound";
+
+const Login = lazy(() => import("./pages/Login"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const NewResearch = lazy(() => import("./pages/NewResearch"));
+const Transcription = lazy(() => import("./pages/Transcription"));
+const StructuredBriefing = lazy(() => import("./pages/StructuredBriefing"));
+const Keywords = lazy(() => import("./pages/Keywords"));
+const SearchResults = lazy(() => import("./pages/SearchResults"));
+const Analysis = lazy(() => import("./pages/Analysis"));
+const Report = lazy(() => import("./pages/Report"));
+const Proposal = lazy(() => import("./pages/Proposal"));
+const MonitoringCenter = lazy(() => import("./pages/MonitoringCenter"));
+const MonitoringPatents = lazy(() => import("./pages/MonitoringPatents"));
+const ResearchHistory = lazy(() => import("./pages/ResearchHistory"));
+const ResearchSettings = lazy(() => import("./pages/ResearchSettings"));
+const KnowledgeBase = lazy(() => import("./pages/KnowledgeBase"));
+const MonitoringSettings = lazy(() => import("./pages/MonitoringSettings"));
+const Clients = lazy(() => import("./pages/Clients"));
+const ProcessMonitoring = lazy(() => import("./pages/ProcessMonitoring"));
+const Demands = lazy(() => import("./pages/Demands"));
+const Alerts = lazy(() => import("./pages/Alerts"));
+const MarketMonitoring = lazy(() => import("./pages/MarketMonitoring"));
+const MyAssets = lazy(() => import("./pages/MyAssets"));
+const QuickSearch = lazy(() => import("./pages/QuickSearch"));
+const PatentBase = lazy(() => import("./pages/PatentBase"));
+const BackgroundWorkers = lazy(() => import("./pages/BackgroundWorkers"));
+const SystemHealth = lazy(() => import("./pages/SystemHealth"));
+const Settings = lazy(() => import("./pages/Settings"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
+
+const RouteLoader = () => (
+  <div className="min-h-screen flex items-center justify-center px-6">
+    <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-sm">
+      <div className="h-2 w-24 rounded-full bg-emerald-100 mb-4" />
+      <div className="h-4 w-56 rounded bg-slate-200 mb-3 animate-pulse" />
+      <div className="h-3 w-full rounded bg-slate-100 mb-2 animate-pulse" />
+      <div className="h-3 w-4/5 rounded bg-slate-100 animate-pulse" />
+    </div>
+  </div>
+);
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -42,6 +55,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <ResearchProvider>
+          <Suspense fallback={<RouteLoader />}>
           <Routes>
             <Route path="/" element={<Login />} />
             
@@ -61,7 +75,8 @@ const App = () => (
             <Route path="/research/settings" element={<ResearchSettings />} />
             
             {/* Monitoramentos */}
-            <Route path="/monitoring/dashboard" element={<Navigate to="/dashboard" />} />
+            <Route path="/monitoring" element={<MonitoringCenter />} />
+            <Route path="/monitoring/dashboard" element={<MonitoringCenter />} />
             <Route path="/monitoring/collision" element={<MonitoringPatents />} />
             <Route path="/monitoring/process" element={<ProcessMonitoring />} />
             <Route path="/monitoring/market" element={<MarketMonitoring />} />
@@ -94,6 +109,7 @@ const App = () => (
             <Route path="/proposta" element={<Proposal />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </Suspense>
         </ResearchProvider>
       </BrowserRouter>
     </TooltipProvider>

@@ -22,6 +22,18 @@ export default defineConfig(({ mode }) => ({
     }
   },
   plugins: [react()].filter(Boolean),
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react_vendor: ["react", "react-dom", "react-router-dom"],
+          ui_vendor: ["@radix-ui/react-dialog", "@radix-ui/react-dropdown-menu", "@radix-ui/react-tabs", "@radix-ui/react-select"],
+          charts_vendor: ["recharts"],
+          data_vendor: ["axios", "@tanstack/react-query"],
+        },
+      },
+    },
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import axios from "axios";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { useNavigate } from "react-router-dom";
 
 const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000").replace(/\/+$/, "");
 
@@ -20,6 +21,7 @@ type AssetRow = {
 };
 
 export default function MyAssets() {
+    const navigate = useNavigate();
     const [query, setQuery] = useState("");
     const [activeFilter, setActiveFilter] = useState<"all" | "active" | "paused">("all");
     const [assets, setAssets] = useState<AssetRow[]>([]);
@@ -133,6 +135,13 @@ export default function MyAssets() {
                                         <p className="text-[11px] text-slate-400">{asset.applicant || "-"}</p>
                                     </div>
                                     <span className="text-xs text-slate-400">{new Date(asset.updated_at).toLocaleString("pt-BR")}</span>
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => navigate(`/monitoring/dashboard?new=1&patent=${encodeURIComponent(asset.patent_number || "")}&title=${encodeURIComponent(asset.title || "")}`)}
+                                    >
+                                        Derivar monitoramento
+                                    </Button>
                                 </div>
                             ))}
                         </div>

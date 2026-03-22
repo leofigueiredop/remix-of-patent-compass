@@ -126,7 +126,7 @@ export default function MonitoringPatents() {
     useEffect(() => {
         void load(1);
         void loadOverview();
-    }, [source, active, loadOverview]);
+    }, [load, loadOverview]);
 
     const searchNow = async () => {
         await load(1);

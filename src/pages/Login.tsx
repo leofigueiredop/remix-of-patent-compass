@@ -46,9 +46,9 @@ export default function Login() {
             AURA
           </h1>
           <p className="text-primary-foreground/70 text-lg leading-relaxed">
-            Sistema de apoio à pesquisa e análise prévia de patentes.
-            Colete briefings, extraia palavras-chave, pesquise em bases
-            e analise similaridade técnica.
+            Plataforma operacional para inteligência de propriedade intelectual.
+            Estruture briefings, monitore ativos, acione CRM e execute diligência
+            em um fluxo único.
           </p>
           <div className="mt-10 flex items-center justify-center gap-6 text-primary-foreground/50 text-sm">
             <span>INPI</span>
@@ -69,13 +69,18 @@ export default function Login() {
             </div>
             <h1 className="text-xl font-bold">AURA</h1>
           </div>
-          <div className="rounded-2xl border border-cyan-100 bg-white/85 p-7 shadow-lg backdrop-blur-sm">
+          <div className="rounded-2xl border border-cyan-100 bg-white/88 p-7 shadow-lg backdrop-blur-sm">
             <h2 className="text-2xl font-bold mb-1">
               {isRegister ? "Criar Conta" : "Bem-vindo de volta"}
             </h2>
             <p className="text-muted-foreground mb-8">
               {isRegister ? "Preencha seus dados para começar" : "Acesse sua conta para continuar"}
             </p>
+            <div className="mb-4 flex flex-wrap gap-2">
+              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700">PI OS</span>
+              <span className="rounded-full border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-[11px] font-medium text-cyan-700">Monitoramento</span>
+              <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-medium text-violet-700">CRM integrado</span>
+            </div>
 
             {error && (
               <div className="mb-4 p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">

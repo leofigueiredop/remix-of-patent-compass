@@ -6,7 +6,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { createSign, randomUUID } from 'crypto';
-import { CreateBucketCommand, HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { CreateBucketCommand, DeleteObjectCommand, GetObjectCommand, HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { prisma } from '../db';
 
 const prismaAny = prisma as any;
@@ -45,6 +45,10 @@ const BIGQUERY_MAX_BYTES_BILLED = Math.max(10_000_000, parseInt(process.env.BIGQ
 const BIGQUERY_CACHE_TTL_HOURS = Math.max(1, parseInt(process.env.BIGQUERY_CACHE_TTL_HOURS || '720', 10));
 const GOOGLE_PATENTS_MIN_INTERVAL_MS = Math.max(350, parseInt(process.env.GOOGLE_PATENTS_MIN_INTERVAL_MS || '1200', 10));
 const GOOGLE_PATENTS_JITTER_MS = Math.max(50, parseInt(process.env.GOOGLE_PATENTS_JITTER_MS || '450', 10));
+const GOOGLE_PATENTS_RETRY_MAX = Math.max(1, parseInt(process.env.GOOGLE_PATENTS_RETRY_MAX || '3', 10));
+const GOOGLE_PATENTS_BREAKER_THRESHOLD = Math.max(2, parseInt(process.env.GOOGLE_PATENTS_BREAKER_THRESHOLD || '8', 10));
+const GOOGLE_PATENTS_BREAKER_COOLDOWN_MS = Math.max(30_000, parseInt(process.env.GOOGLE_PATENTS_BREAKER_COOLDOWN_MS || '120000', 10));
+const MIN_FULL_DOCUMENT_PAGES = Math.max(2, parseInt(process.env.MIN_FULL_DOCUMENT_PAGES || '2', 10));
 const S3_ENDPOINT = process.env.S3_ENDPOINT || '';
 const S3_REGION = process.env.S3_REGION || 'garage';
 const S3_ACCESS_KEY = process.env.S3_ACCESS_KEY || '';
@@ -70,8 +74,19 @@ let lastOpsRequestAt = 0;
 let opsThrottleFailureCount = 0;
 let opsCircuitOpenUntil = 0;
 let lastGooglePatentsRequestAt = 0;
+let googlePatentsFailureCount = 0;
+let googlePatentsCircuitOpenUntil = 0;
 let bigQueryAccessToken: string | null = null;
 let bigQueryAccessTokenExpiration = 0;
+const googlePatentsMetrics = {
+    requests: 0,
+    success: 0,
+    failures: 0,
+    retries: 0,
+    circuitOpens: 0,
+    shortPdfRejected: 0,
+    invalidBucketDeleted: 0
+};
 
 function normalizeText(value?: string): string {
     return (value || '').replace(/\s+/g, ' ').trim();
@@ -198,6 +213,13 @@ async function waitGooglePatentsThrottle() {
     if (jitter > 0) await sleep(jitter);
 }
 
+async function waitGooglePatentsCircuitIfOpen() {
+    const now = Date.now();
+    if (googlePatentsCircuitOpenUntil > now) {
+        await sleep(googlePatentsCircuitOpenUntil - now);
+    }
+}
+
 async function waitOpsCircuitIfOpen() {
     const now = Date.now();
     if (opsCircuitOpenUntil > now) {
@@ -224,6 +246,82 @@ function registerOpsThrottleFailure(status?: number) {
 
 function registerOpsSuccess() {
     opsThrottleFailureCount = 0;
+}
+
+function registerGooglePatentsFailure(status?: number) {
+    googlePatentsMetrics.failures += 1;
+    if (status !== 429 && status !== 408 && status !== 502 && status !== 503 && status !== 504) return;
+    googlePatentsFailureCount += 1;
+    if (googlePatentsFailureCount >= GOOGLE_PATENTS_BREAKER_THRESHOLD) {
+        googlePatentsCircuitOpenUntil = Date.now() + GOOGLE_PATENTS_BREAKER_COOLDOWN_MS;
+        googlePatentsFailureCount = 0;
+        googlePatentsMetrics.circuitOpens += 1;
+        console.warn(JSON.stringify({
+            ts: new Date().toISOString(),
+            worker: 'google_patents',
+            code: 'GOOGLE_PATENTS_CIRCUIT_OPEN',
+            cooldownMs: GOOGLE_PATENTS_BREAKER_COOLDOWN_MS,
+            until: new Date(googlePatentsCircuitOpenUntil).toISOString(),
+            status
+        }));
+    }
+}
+
+function registerGooglePatentsSuccess() {
+    googlePatentsFailureCount = 0;
+    googlePatentsMetrics.success += 1;
+}
+
+function isRetryableGooglePatentsStatus(status?: number): boolean {
+    return status === 408 || status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+async function googlePatentsGetWithRetry(url: string, config: any): Promise<any> {
+    let attempt = 0;
+    while (attempt < GOOGLE_PATENTS_RETRY_MAX) {
+        attempt += 1;
+        await waitGooglePatentsCircuitIfOpen();
+        await waitGooglePatentsThrottle();
+        googlePatentsMetrics.requests += 1;
+        try {
+            const response = await axios.get(url, config);
+            lastGooglePatentsRequestAt = Date.now();
+            const status = Number(response?.status || 0);
+            if (isRetryableGooglePatentsStatus(status) && attempt < GOOGLE_PATENTS_RETRY_MAX) {
+                registerGooglePatentsFailure(status);
+                googlePatentsMetrics.retries += 1;
+                await sleep(GOOGLE_PATENTS_MIN_INTERVAL_MS * (attempt + 1));
+                continue;
+            }
+            if (status >= 400) registerGooglePatentsFailure(status);
+            else registerGooglePatentsSuccess();
+            return response;
+        } catch (error: unknown) {
+            lastGooglePatentsRequestAt = Date.now();
+            const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+            registerGooglePatentsFailure(status);
+            if (attempt >= GOOGLE_PATENTS_RETRY_MAX) throw error;
+            googlePatentsMetrics.retries += 1;
+            await sleep(GOOGLE_PATENTS_MIN_INTERVAL_MS * (attempt + 1));
+        }
+    }
+    throw new Error('Falha Google Patents após retries');
+}
+
+async function googlePatentsPageGoto(page: any, targetUrl: string): Promise<boolean> {
+    await waitGooglePatentsCircuitIfOpen();
+    await waitGooglePatentsThrottle();
+    googlePatentsMetrics.requests += 1;
+    try {
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        lastGooglePatentsRequestAt = Date.now();
+        registerGooglePatentsSuccess();
+        return true;
+    } catch (error: unknown) {
+        lastGooglePatentsRequestAt = Date.now();
+        registerGooglePatentsFailure(undefined);
+        return false;
+    }
 }
 
 async function opsGetWithThrottle<T = any>(url: string, config: any): Promise<T> {
@@ -798,6 +896,107 @@ async function objectExistsInS3(key: string): Promise<boolean> {
     }
 }
 
+async function readObjectBufferFromS3(key: string): Promise<Buffer | null> {
+    const s3 = getS3Client();
+    await ensureS3Bucket();
+    try {
+        const response = await s3.send(new GetObjectCommand({
+            Bucket: S3_BUCKET,
+            Key: key
+        }));
+        const body: any = response.Body as any;
+        if (!body) return null;
+        if (Buffer.isBuffer(body)) return body;
+        if (typeof body.transformToByteArray === 'function') {
+            const bytes = await body.transformToByteArray();
+            return Buffer.from(bytes);
+        }
+        const chunks: Buffer[] = [];
+        for await (const chunk of body as AsyncIterable<Buffer | Uint8Array | string>) {
+            if (typeof chunk === 'string') {
+                chunks.push(Buffer.from(chunk));
+            } else {
+                chunks.push(Buffer.from(chunk));
+            }
+        }
+        return Buffer.concat(chunks);
+    } catch {
+        return null;
+    }
+}
+
+async function ensureDerivedStorageAssets(publicationNumber: string, fullPdf: Buffer) {
+    const safeBase = publicationNumber.replace(/[^\w.-]/g, '_');
+    const baseKey = `patent-docs/${safeBase}`;
+    const firstKey = `${baseKey}/first_page.pdf`;
+    const drawingsKey = `${baseKey}/drawings.pdf`;
+    const [hasFirst, hasDrawings] = await Promise.all([
+        objectExistsInS3(firstKey),
+        objectExistsInS3(drawingsKey)
+    ]);
+    if (!hasFirst) await uploadPdfToS3(firstKey, fullPdf);
+    if (!hasDrawings) await uploadPdfToS3(drawingsKey, fullPdf);
+}
+
+async function ensureDerivedStorageAssetsFromExistingKey(publicationNumber: string, fullStorageKey: string) {
+    if (!fullStorageKey) return;
+    const fullPdf = await readObjectBufferFromS3(fullStorageKey);
+    if (!fullPdf || fullPdf.length < 1024) return;
+    await ensureDerivedStorageAssets(publicationNumber, fullPdf);
+}
+
+async function deleteStorageKeys(keys: string[]) {
+    const unique = Array.from(new Set(keys.map((item) => normalizeText(item)).filter(Boolean)));
+    if (unique.length === 0) return;
+    const s3 = getS3Client();
+    await ensureS3Bucket();
+    for (const key of unique) {
+        await s3.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: key })).catch(() => undefined);
+    }
+}
+
+async function cleanupInvalidDocumentAssets(existingStorageKey: string, publicationNumber?: string) {
+    const normalizedStorageKey = normalizeText(existingStorageKey);
+    if (!normalizedStorageKey) return;
+    const keys = new Set<string>([normalizedStorageKey]);
+    const prefixMatch = normalizedStorageKey.match(/^(.*)\/full_document\.pdf$/i);
+    if (prefixMatch?.[1]) {
+        keys.add(`${prefixMatch[1]}/drawings.pdf`);
+        keys.add(`${prefixMatch[1]}/first_page.pdf`);
+    }
+    const safeBase = normalizeText(publicationNumber || '').replace(/[^\w.-]/g, '_');
+    if (safeBase) {
+        keys.add(`patent-docs/${safeBase}/full_document.pdf`);
+        keys.add(`patent-docs/${safeBase}/drawings.pdf`);
+        keys.add(`patent-docs/${safeBase}/first_page.pdf`);
+    }
+    await deleteStorageKeys(Array.from(keys));
+    googlePatentsMetrics.invalidBucketDeleted += 1;
+}
+
+function estimatePdfPageCount(content: Buffer): number {
+    if (!content || content.length < 5) return 0;
+    const header = content.subarray(0, 5).toString('latin1');
+    if (!header.startsWith('%PDF')) return 0;
+    const raw = content.toString('latin1');
+    const pageMatches = raw.match(/\/Type\s*\/Page\b/g)?.length || 0;
+    const pagesMatches = raw.match(/\/Type\s*\/Pages\b/g)?.length || 0;
+    const estimated = Math.max(0, pageMatches - pagesMatches);
+    if (estimated > 0) return estimated;
+    return 1;
+}
+
+function isLikelyCompletePatentPdf(content: Buffer): { ok: boolean; pages: number; reason: string } {
+    const pages = estimatePdfPageCount(content);
+    if (!content || content.length < 1024) {
+        return { ok: false, pages, reason: 'invalid_or_too_small' };
+    }
+    if (pages < MIN_FULL_DOCUMENT_PAGES) {
+        return { ok: false, pages, reason: `insufficient_pages_${pages}` };
+    }
+    return { ok: true, pages, reason: 'ok' };
+}
+
 async function rpiZipExists(rpiNumber: number): Promise<boolean> {
     const url = `${RPI_BASE_URL}/P${rpiNumber}.zip`;
     let headStatus: number | undefined;
@@ -872,7 +1071,7 @@ export async function enqueueLastFiveYearsRpi() {
     const latest = await detectLatestRpiNumber();
     if (!latest) throw new Error('Não foi possível detectar a RPI mais recente');
     const from = Math.max(1, latest - RPI_LOOKBACK_ISSUES + 1);
-    const rows = [];
+    const rows: Array<{ rpi_number: number; status: 'pending'; source_url: string }> = [];
     for (let rpi = from; rpi <= latest; rpi++) {
         rows.push({
             rpi_number: rpi,
@@ -1070,9 +1269,9 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
     const dataPublicacao = revista.attr('dataPublicacao') || revista.attr('data-publicacao') || '';
     const despachoNodes = revista.find('despacho').toArray();
     const bqCache = new Map<string, BigQueryBibliographicData | null>();
-    const monitoredAttorneyRows = await prisma.$queryRawUnsafe<any[]>(
+    const monitoredAttorneyRows = await prisma.$queryRawUnsafe(
         `select name from monitoring_attorneys where active=true`
-    ).catch(() => []);
+    ).catch(() => []) as any[];
     const monitoredAttorneys = (monitoredAttorneyRows || [])
         .map((row: any) => normalizeText(row?.name).toLowerCase())
         .filter(Boolean);
@@ -1115,15 +1314,15 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
         const inferredPatentId = codPedidoFromNumero || patentNumber || null;
         if (monitoredAttorneys.length > 0) {
             const mergedAttorneyText = `${dispatchTitle || ''} ${complement || ''}`.toLowerCase();
-            const matchedAttorney = monitoredAttorneys.find((name) => mergedAttorneyText.includes(name));
+            const matchedAttorney = monitoredAttorneys.find((name: string) => mergedAttorneyText.includes(name));
             if (matchedAttorney) {
                 const monitoringNumber = patentNumber || numeroPublicacao || codPedidoFromNumero || numeroRaw;
                 const monitoringId = normalizeMonitoringPatentKey(monitoringNumber);
                 if (monitoringId) {
-                    const currentRows = await prisma.$queryRawUnsafe<any[]>(
+                    const currentRows = await prisma.$queryRawUnsafe(
                         `select id, blocked_by_user from monitored_inpi_patents where patent_number=$1 limit 1`,
                         monitoringId
-                    ).catch(() => []);
+                    ).catch(() => []) as any[];
                     const existing = currentRows?.[0];
                     if (existing?.id) {
                         if (!existing.blocked_by_user) {
@@ -1333,13 +1532,13 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
             }).catch(() => undefined);
         }
 
-        const monitoringRows = await prisma.$queryRawUnsafe<any[]>(
+        const monitoringRows = await prisma.$queryRawUnsafe(
             `select id, active
              from monitored_inpi_patents
              where patent_number=$1
              limit 1`,
             normalizeMonitoringPatentKey(patentNumber)
-        ).catch(() => []);
+        ).catch(() => []) as any[];
         const monitored = monitoringRows?.[0];
         if (monitored?.id && monitored?.active) {
             const severity = classifyMonitoringSeverity(dispatchCode, dispatchTitle, complement);
@@ -1711,9 +1910,14 @@ function extractGooglePatentAbstract($: ReturnType<typeof cheerio.load>): string
     const candidates = [
         $('meta[name="DC.description"]').attr('content'),
         $('meta[name="description"]').attr('content'),
+        $('meta[property="og:description"]').attr('content'),
+        $('[itemprop="abstract"]').first().text(),
         $('section[itemprop="abstract"] div.abstract').first().text(),
+        $('div[data-proto*="abstract"]').first().text(),
+        $('div.abstract').text(),
         $('div.abstract').first().text(),
-        $('abstract').first().text()
+        $('abstract').first().text(),
+        $('patent-text[prefix="abstract"]').first().text()
     ];
     for (const candidate of candidates) {
         const value = normalizeText(candidate || '');
@@ -1769,6 +1973,9 @@ type GooglePatentBrowserSnapshot = {
     inventor?: string;
     ipc?: string;
     publicationDate?: string;
+    figureCandidates: string[];
+    drawingsPdfCandidates: string[];
+    firstPagePdfCandidates: string[];
 };
 
 async function openGooglePatentViaBrowser(patentNumber: string): Promise<GooglePatentBrowserSnapshot | null> {
@@ -1793,20 +2000,17 @@ async function openGooglePatentViaBrowser(patentNumber: string): Promise<GoogleP
         };
 
         for (const candidate of candidates) {
-            await waitGooglePatentsThrottle();
-            lastGooglePatentsRequestAt = Date.now();
-            
             // Try direct URL first - much faster and more reliable than searching
             const directUrl = `https://patents.google.com/patent/${candidate}/pt`;
-            await page.goto(directUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+            const directLoaded = await googlePatentsPageGoto(page, directUrl);
+            if (!directLoaded) continue;
             let extracted = await tryExtractFromCurrentPage();
             
             // If direct URL fails, fallback to search
             if (!extracted) {
-                await waitGooglePatentsThrottle();
-                lastGooglePatentsRequestAt = Date.now();
-                await page.goto('https://patents.google.com/', { waitUntil: 'domcontentloaded', timeout: 45000 });
-                await page.evaluate((value) => {
+                const searchLoaded = await googlePatentsPageGoto(page, 'https://patents.google.com/');
+                if (!searchLoaded) continue;
+                await page.evaluate((value: string) => {
                     const input = document.querySelector<HTMLInputElement>('input[type="search"], input[aria-label*="Search"], input[name="q"]');
                     if (!input) return;
                     input.focus();
@@ -1858,22 +2062,42 @@ async function openGooglePatentViaBrowser(patentNumber: string): Promise<GoogleP
             const ptUrl = current.includes('/en')
                 ? current.replace('/en', '/pt')
                 : `${current.replace(/\/$/, '')}/pt`;
-            await waitGooglePatentsThrottle();
-            lastGooglePatentsRequestAt = Date.now();
-            await page.goto(ptUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
-            await sleep(900 + Math.floor(Math.random() * 500));
-            const html = await page.content();
-            if (html && !/security verification|just a moment/i.test(html) && !/error 404/i.test(html.toLowerCase())) {
-                portugueseUrl = page.url();
-                portugueseHtml = html;
+            const ptLoaded = await googlePatentsPageGoto(page, ptUrl);
+            if (ptLoaded) {
+                await sleep(900 + Math.floor(Math.random() * 500));
+                const html = await page.content();
+                if (html && !/security verification|just a moment/i.test(html) && !/error 404/i.test(html.toLowerCase())) {
+                    portugueseUrl = page.url();
+                    portugueseHtml = html;
+                }
             }
         }
 
-        const browserCandidates = await page.evaluate(() => {
+        const browserCandidates: {
+            out: string[];
+            figureCandidates: string[];
+            drawingsPdfCandidates: string[];
+            firstPagePdfCandidates: string[];
+        } = await page.evaluate(() => {
             const out: string[] = [];
+            const figureCandidates: string[] = [];
+            const drawingsPdfCandidates: string[] = [];
+            const firstPagePdfCandidates: string[] = [];
             const add = (value?: string | null) => {
                 if (!value) return;
                 out.push(value);
+            };
+            const addFigure = (value?: string | null) => {
+                if (!value) return;
+                figureCandidates.push(value);
+            };
+            const addDrawings = (value?: string | null) => {
+                if (!value) return;
+                drawingsPdfCandidates.push(value);
+            };
+            const addFirstPage = (value?: string | null) => {
+                if (!value) return;
+                firstPagePdfCandidates.push(value);
             };
             add(document.querySelector('meta[name="citation_pdf_url"]')?.getAttribute('content'));
             const nodes = Array.from(document.querySelectorAll<HTMLElement>('a[href], button[data-href], button[href]'));
@@ -1883,11 +2107,42 @@ async function openGooglePatentViaBrowser(patentNumber: string): Promise<GoogleP
                 const href = node.getAttribute('href') || node.getAttribute('data-href') || '';
                 if (text.includes('download pdf') || aria.includes('download pdf')) add(href);
                 if (/pdf|download|patentimages/i.test(href)) add(href);
+                if (/drawing|drawings|figure|figures|first page|first-page/i.test(`${text} ${aria} ${href}`)) {
+                    addFigure(href);
+                    if (/drawing|drawings|figure|figures/i.test(`${text} ${aria} ${href}`)) addDrawings(href);
+                    if (/first page|first-page/i.test(`${text} ${aria} ${href}`)) addFirstPage(href);
+                }
             }
-            return out;
+            const figureNodes = Array.from(document.querySelectorAll<HTMLImageElement>('img[src], source[srcset], img[data-src], img[data-lazy-src]'));
+            for (const node of figureNodes) {
+                const src = node.getAttribute('src')
+                    || node.getAttribute('data-src')
+                    || node.getAttribute('data-lazy-src')
+                    || '';
+                const srcset = node.getAttribute('srcset') || '';
+                if (/figure|drawing|patentimages|googleusercontent/i.test(`${src} ${srcset}`)) {
+                    addFigure(src);
+                    if (srcset) {
+                        const parts = srcset.split(',').map((item) => item.trim().split(' ')[0]).filter(Boolean);
+                        parts.forEach((part) => addFigure(part));
+                    }
+                }
+            }
+            return { out, figureCandidates, drawingsPdfCandidates, firstPagePdfCandidates };
         });
         const browserBiblio = await page.evaluate(() => {
             const clean = (value?: string | null) => (value || '').replace(/\s+/g, ' ').trim();
+            const collectBySelectors = (selectors: string[]): string => {
+                const values: string[] = [];
+                for (const selector of selectors) {
+                    const nodes = Array.from(document.querySelectorAll(selector));
+                    for (const node of nodes) {
+                        const value = clean(node.textContent || (node as HTMLElement).getAttribute?.('content') || '');
+                        if (value) values.push(value);
+                    }
+                }
+                return clean(Array.from(new Set(values)).join('; '));
+            };
             const title = clean(
                 document.querySelector('meta[name="DC.title"]')?.getAttribute('content')
                 || document.querySelector('h1')?.textContent
@@ -1895,23 +2150,30 @@ async function openGooglePatentViaBrowser(patentNumber: string): Promise<GoogleP
             );
             const abstract = clean(
                 document.querySelector('meta[name="DC.description"]')?.getAttribute('content')
+                || document.querySelector('meta[property="og:description"]')?.getAttribute('content')
+                || document.querySelector('[itemprop="abstract"]')?.textContent
                 || document.querySelector('section[itemprop="abstract"] div.abstract')?.textContent
+                || document.querySelector('patent-text[prefix="abstract"]')?.textContent
                 || document.querySelector('div.abstract')?.textContent
                 || document.querySelector('abstract')?.textContent
             );
-            const applicant = clean(
-                document.querySelector('meta[scheme="assignee"]')?.getAttribute('content')
-                || document.querySelector('dd[itemprop="assigneeOriginal"] span[itemprop="name"]')?.textContent
-            );
-            const inventor = clean(
-                document.querySelector('meta[scheme="inventor"]')?.getAttribute('content')
-                || document.querySelector('dd[itemprop="inventor"] span[itemprop="name"]')?.textContent
-            );
+            const applicant = collectBySelectors([
+                'meta[scheme="assignee"]',
+                'dd[itemprop="assigneeOriginal"] span[itemprop="name"]',
+                'dd[itemprop="assigneeCurrent"] span[itemprop="name"]',
+                '[itemprop="assigneeOriginal"] [itemprop="name"]',
+                '[itemprop="assigneeCurrent"] [itemprop="name"]'
+            ]) || clean(document.querySelector('meta[scheme="assignee"]')?.getAttribute('content'));
+            const inventor = collectBySelectors([
+                'meta[scheme="inventor"]',
+                'dd[itemprop="inventor"] span[itemprop="name"]',
+                '[itemprop="inventor"] [itemprop="name"]'
+            ]) || clean(document.querySelector('meta[scheme="inventor"]')?.getAttribute('content'));
             const publicationDate = clean(
                 document.querySelector('meta[scheme="publication-date"]')?.getAttribute('content')
                 || document.querySelector('time[itemprop="publicationDate"]')?.getAttribute('datetime')
             );
-            const ipcList = Array.from(document.querySelectorAll('span[itemprop="Code"], td[itemprop="Code"]'))
+            const ipcList = Array.from(document.querySelectorAll('span[itemprop="Code"], td[itemprop="Code"], [itemprop="ipc"], [itemprop="classificationCpc"]'))
                 .map((el) => clean(el.textContent))
                 .filter(Boolean)
                 .slice(0, 20);
@@ -1920,6 +2182,9 @@ async function openGooglePatentViaBrowser(patentNumber: string): Promise<GoogleP
         });
         const base = portugueseUrl || detailUrl;
         const pdfCandidates = new Set<string>();
+        const figureCandidates = new Set<string>();
+        const drawingsPdfCandidates = new Set<string>();
+        const firstPagePdfCandidates = new Set<string>();
         const addAbsolute = (raw?: string) => {
             const href = normalizeText(raw || '');
             if (!href) return;
@@ -1930,9 +2195,30 @@ async function openGooglePatentViaBrowser(patentNumber: string): Promise<GoogleP
                 return;
             }
         };
-        browserCandidates.forEach((item) => addAbsolute(item));
+        const addAbsoluteToSet = (target: Set<string>, raw?: string) => {
+            const href = normalizeText(raw || '');
+            if (!href) return;
+            try {
+                const absolute = new URL(href, base).toString();
+                target.add(absolute);
+            } catch {
+                return;
+            }
+        };
+        browserCandidates.out.forEach((item) => addAbsolute(item));
+        browserCandidates.figureCandidates.forEach((item) => addAbsoluteToSet(figureCandidates, item));
+        browserCandidates.drawingsPdfCandidates.forEach((item) => addAbsoluteToSet(drawingsPdfCandidates, item));
+        browserCandidates.firstPagePdfCandidates.forEach((item) => addAbsoluteToSet(firstPagePdfCandidates, item));
         addAbsolute(`${detailUrl}${detailUrl.includes('?') ? '&' : '?'}download=pdf`);
         if (portugueseUrl) addAbsolute(`${portugueseUrl}${portugueseUrl.includes('?') ? '&' : '?'}download=pdf`);
+        addAbsoluteToSet(drawingsPdfCandidates, `${detailUrl}${detailUrl.includes('?') ? '&' : '?'}download=drawings`);
+        addAbsoluteToSet(drawingsPdfCandidates, `${detailUrl}${detailUrl.includes('?') ? '&' : '?'}download=figures`);
+        addAbsoluteToSet(firstPagePdfCandidates, `${detailUrl}${detailUrl.includes('?') ? '&' : '?'}download=firstpage`);
+        if (portugueseUrl) {
+            addAbsoluteToSet(drawingsPdfCandidates, `${portugueseUrl}${portugueseUrl.includes('?') ? '&' : '?'}download=drawings`);
+            addAbsoluteToSet(drawingsPdfCandidates, `${portugueseUrl}${portugueseUrl.includes('?') ? '&' : '?'}download=figures`);
+            addAbsoluteToSet(firstPagePdfCandidates, `${portugueseUrl}${portugueseUrl.includes('?') ? '&' : '?'}download=firstpage`);
+        }
 
         return {
             detailUrl,
@@ -1945,7 +2231,10 @@ async function openGooglePatentViaBrowser(patentNumber: string): Promise<GoogleP
             applicant: browserBiblio.applicant || undefined,
             inventor: browserBiblio.inventor || undefined,
             ipc: browserBiblio.ipc || undefined,
-            publicationDate: browserBiblio.publicationDate || undefined
+            publicationDate: browserBiblio.publicationDate || undefined,
+            figureCandidates: Array.from(figureCandidates),
+            drawingsPdfCandidates: Array.from(drawingsPdfCandidates),
+            firstPagePdfCandidates: Array.from(firstPagePdfCandidates)
         };
     } finally {
         await page.close().catch(() => undefined);
@@ -1970,19 +2259,45 @@ async function fetchGooglePatentsBibliographicData(patentNumber: string): Promis
     const extraction$ = cheerio.load(extractionHtml);
     const fallback$ = cheerio.load(snapshot.detailHtml);
     const title = normalizeText(snapshot.title || extraction$('meta[name="DC.title"]').attr('content') || extraction$('h1').first().text() || extraction$('title').text());
+    const collectPeople = ($root: ReturnType<typeof cheerio.load>, selectors: string[]): string => {
+        const values = new Set<string>();
+        selectors.forEach((selector) => {
+            $root(selector).each((_, el) => {
+                const text = normalizeText($root(el).text() || $root(el).attr('content') || '');
+                if (text) values.add(text);
+            });
+        });
+        return Array.from(values).join('; ');
+    };
     const applicant = normalizeText(
         snapshot.applicant
-        || extraction$('meta[scheme="assignee"]').attr('content')
-        || extraction$('dd[itemprop="assigneeOriginal"] span[itemprop="name"]').first().text()
-        || fallback$('meta[scheme="assignee"]').attr('content')
-        || fallback$('dd[itemprop="assigneeOriginal"] span[itemprop="name"]').first().text()
+        || collectPeople(extraction$, [
+            'meta[scheme="assignee"]',
+            'dd[itemprop="assigneeOriginal"] span[itemprop="name"]',
+            'dd[itemprop="assigneeCurrent"] span[itemprop="name"]',
+            '[itemprop="assigneeOriginal"] [itemprop="name"]',
+            '[itemprop="assigneeCurrent"] [itemprop="name"]'
+        ])
+        || collectPeople(fallback$, [
+            'meta[scheme="assignee"]',
+            'dd[itemprop="assigneeOriginal"] span[itemprop="name"]',
+            'dd[itemprop="assigneeCurrent"] span[itemprop="name"]',
+            '[itemprop="assigneeOriginal"] [itemprop="name"]',
+            '[itemprop="assigneeCurrent"] [itemprop="name"]'
+        ])
     );
     const inventor = normalizeText(
         snapshot.inventor
-        || extraction$('meta[scheme="inventor"]').attr('content')
-        || extraction$('dd[itemprop="inventor"] span[itemprop="name"]').first().text()
-        || fallback$('meta[scheme="inventor"]').attr('content')
-        || fallback$('dd[itemprop="inventor"] span[itemprop="name"]').first().text()
+        || collectPeople(extraction$, [
+            'meta[scheme="inventor"]',
+            'dd[itemprop="inventor"] span[itemprop="name"]',
+            '[itemprop="inventor"] [itemprop="name"]'
+        ])
+        || collectPeople(fallback$, [
+            'meta[scheme="inventor"]',
+            'dd[itemprop="inventor"] span[itemprop="name"]',
+            '[itemprop="inventor"] [itemprop="name"]'
+        ])
     );
     const publicationDate = normalizeText(
         snapshot.publicationDate
@@ -1992,13 +2307,13 @@ async function fetchGooglePatentsBibliographicData(patentNumber: string): Promis
         || fallback$('time[itemprop="publicationDate"]').attr('datetime')
         || ''
     );
-    const ipc = extraction$('span[itemprop="Code"], td[itemprop="Code"]')
+    const ipc = extraction$('span[itemprop="Code"], td[itemprop="Code"], [itemprop="ipc"], [itemprop="classificationCpc"]')
         .toArray()
         .map((el) => normalizeText(extraction$(el).text()))
         .filter(Boolean)
         .slice(0, 20)
         .join(', ');
-    const fallbackIpc = fallback$('span[itemprop="Code"], td[itemprop="Code"]')
+    const fallbackIpc = fallback$('span[itemprop="Code"], td[itemprop="Code"], [itemprop="ipc"], [itemprop="classificationCpc"]')
         .toArray()
         .map((el) => normalizeText(fallback$(el).text()))
         .filter(Boolean)
@@ -2023,9 +2338,7 @@ async function fetchGooglePatentsBibliographicData(patentNumber: string): Promis
 }
 
 async function tryDownloadPdfFromGoogleUrl(url: string): Promise<Buffer | null> {
-    await waitGooglePatentsThrottle();
-    lastGooglePatentsRequestAt = Date.now();
-    const response = await axios.get(url, {
+    const response = await googlePatentsGetWithRetry(url, {
         responseType: 'arraybuffer',
         timeout: 60000,
         validateStatus: () => true,
@@ -2053,9 +2366,7 @@ async function tryDownloadPdfFromGoogleUrl(url: string): Promise<Buffer | null> 
     addNested($('meta[name="citation_pdf_url"]').attr('content'));
     $('a[href], button[data-href]').each((_, el) => addNested($(el).attr('href') || $(el).attr('data-href')));
     for (const nested of Array.from(nestedLinks)) {
-        await waitGooglePatentsThrottle();
-        lastGooglePatentsRequestAt = Date.now();
-        const nestedResponse = await axios.get(nested, {
+        const nestedResponse = await googlePatentsGetWithRetry(nested, {
             responseType: 'arraybuffer',
             timeout: 60000,
             validateStatus: () => true,
@@ -2073,7 +2384,12 @@ async function tryDownloadPdfFromGoogleUrl(url: string): Promise<Buffer | null> 
     return null;
 }
 
-async function downloadGooglePatentsFullDocument(patentNumber: string): Promise<Buffer | null> {
+type GooglePatentDocumentBundle = {
+    pdf: Buffer;
+    snapshot: GooglePatentBrowserSnapshot;
+};
+
+async function downloadGooglePatentsDocumentBundle(patentNumber: string): Promise<GooglePatentDocumentBundle | null> {
     if (!GOOGLE_PATENTS_FALLBACK_ENABLED) return null;
     const snapshot = await openGooglePatentViaBrowser(patentNumber);
     if (!snapshot) return null;
@@ -2105,9 +2421,14 @@ async function downloadGooglePatentsFullDocument(patentNumber: string): Promise<
     }
     for (const link of Array.from(candidateLinks)) {
         const pdf = await tryDownloadPdfFromGoogleUrl(link);
-        if (pdf) return pdf;
+        if (pdf) return { pdf, snapshot };
     }
     return null;
+}
+
+async function downloadGooglePatentsFullDocument(patentNumber: string): Promise<Buffer | null> {
+    const bundle = await downloadGooglePatentsDocumentBundle(patentNumber);
+    return bundle?.pdf || null;
 }
 
 async function fetchEspacenetUiBibliographicData(patentNumber: string): Promise<OpsBibliographicData | null> {
@@ -2377,7 +2698,7 @@ async function processNextOpsBibliographicJob() {
 }
 
 async function processNextBigQueryBibliographicJob() {
-    if (bqRunning || bqPaused || !BIGQUERY_ENABLED) return;
+    if (bqRunning || bqPaused || !GOOGLE_PATENTS_FALLBACK_ENABLED) return;
     bqRunning = true;
     try {
         let job = await prismaAny.bigQueryBibliographicJob.findFirst({
@@ -2540,24 +2861,40 @@ async function processNextDocumentJob() {
                 publicationNumber
             ]);
             if (existingStorageKey) {
-                await prisma.documentDownloadJob.update({
-                    where: { id: job.id },
-                    data: {
+                const existingPdf = await readObjectBufferFromS3(existingStorageKey);
+                const existingQuality = existingPdf ? isLikelyCompletePatentPdf(existingPdf) : { ok: false, pages: 0, reason: 'storage_read_failed' };
+                if (existingQuality.ok) {
+                    await ensureDerivedStorageAssets(publicationNumber, existingPdf as Buffer).catch(() => undefined);
+                    await prisma.documentDownloadJob.update({
+                        where: { id: job.id },
+                        data: {
+                            status: 'completed',
+                            storage_key: existingStorageKey,
+                            finished_at: new Date(),
+                            publication_number: publicationNumber
+                        }
+                    });
+                    documentJobLog({
+                        jobId: job.id,
+                        patentId: job.patent_id,
+                        publicationNumber,
                         status: 'completed',
-                        storage_key: existingStorageKey,
-                        finished_at: new Date(),
-                        publication_number: publicationNumber
-                    }
-                });
+                        code: 'DOC_BUCKET_RECOVERED',
+                        storageKey: existingStorageKey
+                    });
+                    return;
+                }
                 documentJobLog({
                     jobId: job.id,
                     patentId: job.patent_id,
                     publicationNumber,
-                    status: 'completed',
-                    code: 'DOC_BUCKET_RECOVERED',
-                    storageKey: existingStorageKey
+                    status: 'failed',
+                    code: 'DOC_BUCKET_FILE_TOO_SHORT',
+                    storageKey: existingStorageKey,
+                    pages: existingQuality.pages,
+                    reason: existingQuality.reason
                 });
-                return;
+                await cleanupInvalidDocumentAssets(existingStorageKey, publicationNumber).catch(() => undefined);
             }
 
             const googleSearchCandidates = Array.from(new Set([
@@ -2571,12 +2908,28 @@ async function processNextDocumentJob() {
             const tryGooglePatentsFallback = async (reasonCode: string): Promise<boolean> => {
                 for (const candidate of googleSearchCandidates) {
                     try {
-                        const pdf = await downloadGooglePatentsFullDocument(candidate);
-                        if (!pdf || pdf.length < 1024) continue;
+                        const bundle = await downloadGooglePatentsDocumentBundle(candidate);
+                        if (!bundle?.pdf || bundle.pdf.length < 1024) continue;
+                        const quality = isLikelyCompletePatentPdf(bundle.pdf);
+                        if (!quality.ok) {
+                            googlePatentsMetrics.shortPdfRejected += 1;
+                            documentJobLog({
+                                jobId: job.id,
+                                patentId: job.patent_id,
+                                publicationNumber,
+                                status: 'failed',
+                                code: `${reasonCode}_GOOGLE_PATENTS_SHORT_PDF`,
+                                candidate,
+                                pages: quality.pages,
+                                reason: quality.reason
+                            });
+                            continue;
+                        }
                         const safeBase = publicationNumber.replace(/[^\w.-]/g, '_');
                         const baseKey = `patent-docs/${safeBase}`;
                         const fullKey = `${baseKey}/full_document.pdf`;
-                        await uploadPdfToS3(fullKey, pdf);
+                        await uploadPdfToS3(fullKey, bundle.pdf);
+                        await ensureDerivedStorageAssets(publicationNumber, bundle.pdf);
                         await prisma.documentDownloadJob.update({
                             where: { id: job.id },
                             data: {
@@ -2730,10 +3083,14 @@ export function getBackgroundWorkerState() {
         bqRunning,
         opsCircuitOpen: opsCircuitOpenUntil > Date.now(),
         opsCircuitOpenUntil: opsCircuitOpenUntil > Date.now() ? new Date(opsCircuitOpenUntil).toISOString() : null,
+        googlePatentsCircuitOpen: googlePatentsCircuitOpenUntil > Date.now(),
+        googlePatentsCircuitOpenUntil: googlePatentsCircuitOpenUntil > Date.now() ? new Date(googlePatentsCircuitOpenUntil).toISOString() : null,
+        googlePatentsMetrics: { ...googlePatentsMetrics },
         bigQueryEnabled: BIGQUERY_ENABLED,
         bigQueryProject: BIGQUERY_BILLING_PROJECT || null,
         bigQueryFirstEnabled: BIGQUERY_FIRST_ENABLED,
-        inpiEnabled: INPI_SCRAPE_FALLBACK_ENABLED
+        inpiEnabled: INPI_SCRAPE_FALLBACK_ENABLED,
+        googlePatentsEnabled: GOOGLE_PATENTS_FALLBACK_ENABLED
     };
 }
 
@@ -2936,6 +3293,160 @@ export async function enqueueBigQueryReprocessing(patentNumbers?: string[], sour
     return { enqueued: result.count };
 }
 
+export async function enqueueIncompletePatentReprocessing(limit = 500) {
+    const take = Math.max(1, Math.min(5000, Number(limit) || 500));
+    const incompletePatents = await prisma.inpiPatent.findMany({
+        where: {
+            OR: [
+                { resumo_detalhado: null },
+                { resumo_detalhado: '' },
+                { applicant: null },
+                { applicant: '' },
+                { ipc_codes: null },
+                { ipc_codes: '' },
+                {
+                    document_jobs: {
+                        none: {
+                            status: 'completed',
+                            storage_key: { not: null }
+                        }
+                    }
+                }
+            ]
+        },
+        select: {
+            cod_pedido: true,
+            numero_publicacao: true
+        },
+        orderBy: { updated_at: 'asc' },
+        take
+    });
+    const patentNumbers = new Set<string>();
+    let docJobsQueued = 0;
+    for (const patent of incompletePatents) {
+        const codPedido = normalizeText(patent.cod_pedido);
+        const publicationNumber = normalizeText(patent.numero_publicacao || codPedido);
+        if (!codPedido) continue;
+        patentNumbers.add(publicationNumber || codPedido);
+        await prisma.documentDownloadJob.upsert({
+            where: { patent_id: codPedido },
+            update: {
+                publication_number: publicationNumber || undefined,
+                status: 'pending',
+                attempts: 0,
+                error: null,
+                started_at: null,
+                finished_at: null
+            },
+            create: {
+                patent_id: codPedido,
+                publication_number: publicationNumber || codPedido,
+                status: 'pending'
+            }
+        }).catch(() => undefined);
+        docJobsQueued += 1;
+    }
+    const biblioResult = await enqueueBigQueryReprocessing(Array.from(patentNumbers), 'google_patents_incomplete_reprocess');
+    processNextDocumentJob().catch(() => undefined);
+    return {
+        selected: incompletePatents.length,
+        bibliographicEnqueued: biblioResult.enqueued,
+        documentJobsQueued: docJobsQueued
+    };
+}
+
+export async function enqueueShortDocumentReprocessing(limit = 500, maxPages = 1) {
+    const take = Math.max(1, Math.min(5000, Number(limit) || 500));
+    const pagesThreshold = Math.max(1, Math.min(3, Number(maxPages) || 1));
+    const rows = await prisma.documentDownloadJob.findMany({
+        where: {
+            status: 'completed',
+            storage_key: { not: null }
+        },
+        select: {
+            id: true,
+            patent_id: true,
+            publication_number: true,
+            storage_key: true,
+            updated_at: true
+        },
+        orderBy: { updated_at: 'asc' },
+        take
+    });
+    let scanned = 0;
+    let requeued = 0;
+    for (const row of rows) {
+        scanned += 1;
+        const storageKey = normalizeText(row.storage_key || '');
+        if (!storageKey) continue;
+        const pdf = await readObjectBufferFromS3(storageKey);
+        if (!pdf) continue;
+        const pages = estimatePdfPageCount(pdf);
+        if (pages > pagesThreshold) continue;
+        await cleanupInvalidDocumentAssets(storageKey, row.publication_number || row.patent_id).catch(() => undefined);
+        await prisma.documentDownloadJob.update({
+            where: { id: row.id },
+            data: {
+                status: 'pending',
+                attempts: 0,
+                storage_key: null,
+                error: truncateError(`DOC_REPROCESS_SHORT_PDF pages=${pages} previous_key=${storageKey}`),
+                started_at: null,
+                finished_at: null
+            }
+        }).catch(() => undefined);
+        requeued += 1;
+    }
+    processNextDocumentJob().catch(() => undefined);
+    return { scanned, requeued, limit: take, maxPages: pagesThreshold };
+}
+
+export async function enqueueAllProcessedPatentsDocumentAudit(batchSize = 1000) {
+    const take = Math.max(100, Math.min(5000, Number(batchSize) || 1000));
+    let cursor: string | null = null;
+    let scanned = 0;
+    let queued = 0;
+    for (;;) {
+        const rows = await prisma.inpiPatent.findMany({
+            ...(cursor ? { cursor: { cod_pedido: cursor }, skip: 1 } : {}),
+            orderBy: { cod_pedido: 'asc' },
+            take,
+            select: {
+                cod_pedido: true,
+                numero_publicacao: true
+            }
+        }) as Array<{ cod_pedido: string; numero_publicacao: string | null }>;
+        if (rows.length === 0) break;
+        for (const patent of rows) {
+            const codPedido = normalizeText(patent.cod_pedido);
+            if (!codPedido) continue;
+            const publicationNumber = normalizeText(patent.numero_publicacao || codPedido);
+            await prisma.documentDownloadJob.upsert({
+                where: { patent_id: codPedido },
+                update: {
+                    publication_number: publicationNumber || undefined,
+                    status: 'pending',
+                    attempts: 0,
+                    error: null,
+                    started_at: null,
+                    finished_at: null
+                },
+                create: {
+                    patent_id: codPedido,
+                    publication_number: publicationNumber || codPedido,
+                    status: 'pending'
+                }
+            }).catch(() => undefined);
+            queued += 1;
+            scanned += 1;
+        }
+        cursor = rows[rows.length - 1]?.cod_pedido || null;
+        if (!cursor) break;
+    }
+    processNextDocumentJob().catch(() => undefined);
+    return { scanned, queued, batchSize: take };
+}
+
 export async function retryBigQueryJob(jobId: string) {
     const updated = await prismaAny.bigQueryBibliographicJob.update({
         where: { id: jobId },
@@ -3130,10 +3641,11 @@ export async function enqueueInpiReprocessing(patentNumbers?: string[], priority
             where: { cod_pedido: { startsWith: 'BR' } },
             select: { cod_pedido: true }
         });
-        patentNumbers = existingPatents.map(p => p.cod_pedido);
+        patentNumbers = existingPatents.map((p: any) => p.cod_pedido);
     }
-    
-    const jobs = patentNumbers.map(patentNumber => ({
+
+    const values = (patentNumbers || []).filter(Boolean);
+    const jobs = values.map((patentNumber) => ({
         patent_number: patentNumber,
         priority,
         status: 'pending' as const,

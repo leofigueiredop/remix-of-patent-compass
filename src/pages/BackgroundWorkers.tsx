@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import axios from "axios";
 import AppLayout from "@/components/AppLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,8 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RefreshCw, Clock, CheckCircle2, AlertCircle, FileDown, Files, PauseCircle, PlayCircle, Settings } from "lucide-react";
-
-const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000").replace(/\/+$/, "");
+import { api } from "@/services/auth";
 
 type RpiJob = {
   id: string;
@@ -123,6 +121,18 @@ type WorkerState = {
   bigQueryEnabled?: boolean;
   bigQueryProject?: string | null;
   bigQueryFirstEnabled?: boolean;
+  googlePatentsEnabled?: boolean;
+  googlePatentsCircuitOpen?: boolean;
+  googlePatentsCircuitOpenUntil?: string | null;
+  googlePatentsMetrics?: {
+    requests?: number;
+    success?: number;
+    failures?: number;
+    retries?: number;
+    circuitOpens?: number;
+    shortPdfRejected?: number;
+    invalidBucketDeleted?: number;
+  };
 };
 
 type InpiJob = {
@@ -391,8 +401,8 @@ export default function BackgroundWorkers() {
     setLoading(true);
     try {
       const [queues, workerState] = await Promise.all([
-        axios.get(`${API_URL}/background-workers/queues?limit=120`),
-        axios.get(`${API_URL}/background-workers/state`)
+        api.get(`/background-workers/queues?limit=120`),
+        api.get(`/background-workers/state`)
       ]);
       setData(queues.data);
       setState(workerState.data);
@@ -404,7 +414,7 @@ export default function BackgroundWorkers() {
   const bootstrapRpi = async () => {
     setLoading(true);
     try {
-      await axios.post(`${API_URL}/background-workers/rpi/bootstrap`);
+      await api.post(`/background-workers/rpi/bootstrap`);
       await fetchQueues();
     } finally {
       setLoading(false);
@@ -414,7 +424,7 @@ export default function BackgroundWorkers() {
   const controlWorkers = async (queue: "rpi" | "docs" | "ops" | "inpi" | "bigquery" | "all", action: "pause" | "resume") => {
     setLoading(true);
     try {
-      await axios.post(`${API_URL}/background-workers/control`, { queue, action });
+      await api.post(`/background-workers/control`, { queue, action });
       await fetchQueues();
     } finally {
       setLoading(false);
@@ -422,22 +432,22 @@ export default function BackgroundWorkers() {
   };
 
   const retryRpiJob = async (id: string) => {
-    await axios.post(`${API_URL}/background-workers/rpi/retry/${id}`);
+    await api.post(`/background-workers/rpi/retry/${id}`);
     await fetchQueues();
   };
 
   const retryDocsJob = async (id: string) => {
-    await axios.post(`${API_URL}/background-workers/docs/retry/${id}`);
+    await api.post(`/background-workers/docs/retry/${id}`);
     await fetchQueues();
   };
 
   const retryOpsJob = async (id: string) => {
-    await axios.post(`${API_URL}/background-workers/ops/retry/${id}`, { preferBigQuery: false });
+    await api.post(`/background-workers/ops/retry/${id}`, { preferBigQuery: false });
     await fetchQueues();
   };
 
   const retryInpiJob = async (id: string) => {
-    await axios.post(`${API_URL}/background-workers/inpi/retry/${id}`);
+    await api.post(`/background-workers/inpi/retry/${id}`);
     await fetchQueues();
   };
 
@@ -445,7 +455,7 @@ export default function BackgroundWorkers() {
     setLoading(true);
     try {
       const ids = data.rpi.errors.map((row) => row.id);
-      const response = await axios.post(`${API_URL}/background-workers/rpi/retry-errors`, { ids, preferBigQuery });
+      const response = await api.post(`/background-workers/rpi/retry-errors`, { ids, preferBigQuery });
       setActionMessage(`RPI reprocessadas: ${response.data?.updated ?? 0}`);
       await fetchQueues();
     } finally {
@@ -457,7 +467,7 @@ export default function BackgroundWorkers() {
     setLoading(true);
     try {
       const ids = data.docs.errors.map((row) => row.id);
-      const response = await axios.post(`${API_URL}/background-workers/docs/retry-errors`, { ids });
+      const response = await api.post(`/background-workers/docs/retry-errors`, { ids });
       setActionMessage(`Docs reprocessados: ${response.data?.updated ?? 0}`);
       await fetchQueues();
     } finally {
@@ -469,7 +479,7 @@ export default function BackgroundWorkers() {
     setLoading(true);
     try {
       const ids = data.ops.errors.map((row) => row.id);
-      const response = await axios.post(`${API_URL}/background-workers/ops/retry-errors`, { ids, preferBigQuery });
+      const response = await api.post(`/background-workers/ops/retry-errors`, { ids, preferBigQuery });
       setActionMessage(`OPS reprocessados: ${response.data?.updated ?? 0}`);
       await fetchQueues();
     } finally {
@@ -481,7 +491,7 @@ export default function BackgroundWorkers() {
     setLoading(true);
     try {
       const ids = data.inpi.errors.map((row) => row.id);
-      const response = await axios.post(`${API_URL}/background-workers/inpi/retry-errors`, { ids });
+      const response = await api.post(`/background-workers/inpi/retry-errors`, { ids });
       setActionMessage(`INPI reprocessados: ${response.data?.updated ?? 0}`);
       await fetchQueues();
     } finally {
@@ -494,7 +504,7 @@ export default function BackgroundWorkers() {
     const to = Number.parseInt(enqueueTo, 10);
     setLoading(true);
     try {
-      const response = await axios.post(`${API_URL}/background-workers/rpi/enqueue-range`, { from, to });
+      const response = await api.post(`/background-workers/rpi/enqueue-range`, { from, to });
       setActionMessage(`RPIs enfileiradas: ${response.data.created}/${response.data.requested} (${response.data.from} até ${response.data.to})`);
       await fetchQueues();
     } catch (error: any) {
@@ -509,7 +519,7 @@ export default function BackgroundWorkers() {
     const rpiTo = filterTo ? Number.parseInt(filterTo, 10) : undefined;
     setLoading(true);
     try {
-      const response = await axios.post(`${API_URL}/background-workers/requeue-by-filter`, {
+      const response = await api.post(`/background-workers/requeue-by-filter`, {
         rpiFrom,
         rpiTo,
         dispatchCodes: filterCodes,
@@ -528,7 +538,7 @@ export default function BackgroundWorkers() {
     if (!window.confirm("Limpar listas de erros e processando das filas RPI/Docs/OPS?")) return;
     setLoading(true);
     try {
-      const response = await axios.post(`${API_URL}/background-workers/clear-active-errors`);
+      const response = await api.post(`/background-workers/clear-active-errors`);
       setActionMessage(`Listas limpas: RPI=${response.data.rpiDeleted}, Docs=${response.data.docsDeleted}, OPS=${response.data.opsDeleted}`);
       await fetchQueues();
     } catch (error: any) {
@@ -542,12 +552,45 @@ export default function BackgroundWorkers() {
     if (!window.confirm("Reprocessar tudo (5 anos) e limpar erros/processando atuais?")) return;
     setLoading(true);
     try {
-      const response = await axios.post(`${API_URL}/background-workers/reprocess-all`);
+      const response = await api.post(`/background-workers/reprocess-all`);
       const enqueued = response.data.enqueued || {};
       setActionMessage(`Reprocessamento iniciado: RPI ${enqueued.from}→${enqueued.to} (${enqueued.count} enfileiradas)`);
       await fetchQueues();
     } catch (error: any) {
       setActionMessage(error?.response?.data?.error || "Falha ao iniciar reprocessamento total");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const reprocessShortDocs = async () => {
+    if (!window.confirm("Reprocessar documentos concluídos com PDF curto (1 página)?")) return;
+    setLoading(true);
+    try {
+      const response = await api.post(`/background-workers/google-patents/reprocess-short-docs`, {
+        limit: 1000,
+        maxPages: 1
+      });
+      setActionMessage(`PDFs curtos verificados: ${response.data?.scanned ?? 0}, reprocessados: ${response.data?.requeued ?? 0}`);
+      await fetchQueues();
+    } catch (error: any) {
+      setActionMessage(error?.response?.data?.error || "Falha ao reprocessar PDFs curtos");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const enqueueAllProcessedDocs = async () => {
+    if (!window.confirm("Enfileirar todas as patentes já processadas para auditoria completa de documento?")) return;
+    setLoading(true);
+    try {
+      const response = await api.post(`/background-workers/google-patents/enqueue-all-processed`, {
+        batchSize: 2000
+      });
+      setActionMessage(`Patentes varridas: ${response.data?.scanned ?? 0}, jobs atualizados: ${response.data?.queued ?? 0}`);
+      await fetchQueues();
+    } catch (error: any) {
+      setActionMessage(error?.response?.data?.error || "Falha ao enfileirar patentes processadas");
     } finally {
       setLoading(false);
     }
@@ -574,32 +617,47 @@ export default function BackgroundWorkers() {
               Controle das filas de ingestão (RPI, INPI, Docs, OPS) e processamento em lote.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2 animate-in fade-in zoom-in-95 duration-500">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap animate-in fade-in zoom-in-95 duration-500">
             <Button
               variant="outline"
               onClick={() => controlWorkers("all", state.rpiPaused && state.docsPaused && state.opsPaused && state.inpiPaused && state.bqPaused ? "resume" : "pause")}
               disabled={loading}
-              className="gap-2 h-9 text-xs bg-white"
+              className="gap-2 h-10 text-sm bg-white w-full sm:w-auto"
             >
               {state.rpiPaused && state.docsPaused && state.opsPaused && state.inpiPaused && state.bqPaused ? <PlayCircle className="w-3.5 h-3.5 text-emerald-600" /> : <PauseCircle className="w-3.5 h-3.5 text-amber-600" />}
               {state.rpiPaused && state.docsPaused && state.opsPaused && state.inpiPaused && state.bqPaused ? "Retomar Workers" : "Pausar Workers"}
             </Button>
-            <Button variant="outline" onClick={bootstrapRpi} disabled={loading} className="gap-2 h-9 text-xs bg-white">
+            <Button variant="outline" onClick={bootstrapRpi} disabled={loading} className="gap-2 h-10 text-sm bg-white w-full sm:w-auto">
               <Files className="w-3.5 h-3.5" />
               Enfileirar 5 anos de RPI
             </Button>
-            <Button variant="outline" onClick={clearProcessingAndErrors} disabled={loading} className="gap-2 h-9 text-xs bg-white text-red-600 hover:text-red-700 hover:bg-red-50">
+            <Button variant="outline" onClick={clearProcessingAndErrors} disabled={loading} className="gap-2 h-10 text-sm bg-white text-red-600 hover:text-red-700 hover:bg-red-50 w-full sm:w-auto">
               Limpar Erros/Processando
             </Button>
-            <Button variant="default" onClick={reprocessAllFiveYears} disabled={loading} className="gap-2 h-9 text-xs bg-slate-900 text-white hover:bg-slate-800">
+            <Button variant="default" onClick={reprocessAllFiveYears} disabled={loading} className="gap-2 h-10 text-sm bg-slate-900 text-white hover:bg-slate-800 w-full sm:w-auto">
               Reprocessar Tudo (5 anos)
             </Button>
-            <Button variant="outline" onClick={fetchQueues} disabled={loading} className="gap-2 h-9 text-xs bg-white">
+            <Button variant="outline" onClick={enqueueAllProcessedDocs} disabled={loading} className="gap-2 h-10 text-sm bg-white w-full sm:w-auto">
+              Auditar todas as patentes processadas
+            </Button>
+            <Button variant="outline" onClick={fetchQueues} disabled={loading} className="gap-2 h-10 text-sm bg-white w-full sm:w-auto">
               <RefreshCw className={`w-3.5 h-3.5 text-slate-500 ${loading ? "animate-spin" : ""}`} />
               Atualizar
             </Button>
-            <Badge variant={state.bigQueryEnabled ? "default" : "secondary"} className="h-9 rounded-md px-3 border border-slate-200 bg-white text-slate-700 shadow-sm font-medium">
+            <Badge variant={state.bigQueryEnabled ? "default" : "secondary"} className="h-10 rounded-md px-3 border border-slate-200 bg-white text-slate-700 shadow-sm font-medium w-full justify-center sm:w-auto">
               BQ {state.bigQueryEnabled ? `ON ${state.bigQueryProject || ""} ${state.bigQueryFirstEnabled ? "(PRIORIDADE)" : ""}` : "OFF"}
+            </Badge>
+            <Badge variant={state.googlePatentsEnabled ? "default" : "secondary"} className="h-10 rounded-md px-3 border border-slate-200 bg-white text-slate-700 shadow-sm font-medium w-full justify-center sm:w-auto">
+              Google Patents {state.googlePatentsEnabled ? "ON" : "OFF"}
+            </Badge>
+            <Badge variant={state.googlePatentsCircuitOpen ? "destructive" : "secondary"} className="h-10 rounded-md px-3 border border-slate-200 bg-white text-slate-700 shadow-sm font-medium w-full justify-center sm:w-auto">
+              Circuito GP {state.googlePatentsCircuitOpen ? "ABERTO" : "OK"}
+            </Badge>
+            <Badge variant="secondary" className="h-10 rounded-md px-3 border border-slate-200 bg-white text-slate-700 shadow-sm font-medium w-full justify-center sm:w-auto">
+              GP req {state.googlePatentsMetrics?.requests ?? 0} • retry {state.googlePatentsMetrics?.retries ?? 0}
+            </Badge>
+            <Badge variant="secondary" className="h-10 rounded-md px-3 border border-slate-200 bg-white text-slate-700 shadow-sm font-medium w-full justify-center sm:w-auto">
+              PDF curto {state.googlePatentsMetrics?.shortPdfRejected ?? 0} • limpeza {state.googlePatentsMetrics?.invalidBucketDeleted ?? 0}
             </Badge>
           </div>
         </div>
@@ -661,7 +719,7 @@ export default function BackgroundWorkers() {
               )}
             </CardContent>
           </Card>
-          <TabsList>
+          <TabsList className="w-full justify-start overflow-x-auto whitespace-nowrap">
             <TabsTrigger value="rpi" className="gap-2">
               <Files className="w-4 h-4" />
               Fila RPI
@@ -708,7 +766,7 @@ export default function BackgroundWorkers() {
               </CardHeader>
               <CardContent>
                 <Tabs value={rpiTab} onValueChange={setRpiTab}>
-                  <TabsList>
+                  <TabsList className="w-full justify-start overflow-x-auto whitespace-nowrap">
                     <TabsTrigger value="processing">Processando</TabsTrigger>
                     <TabsTrigger value="success">Sucesso</TabsTrigger>
                     <TabsTrigger value="errors">Erros</TabsTrigger>
@@ -756,7 +814,7 @@ export default function BackgroundWorkers() {
               </CardHeader>
               <CardContent>
                 <Tabs value={docsTab} onValueChange={setDocsTab}>
-                  <TabsList>
+                  <TabsList className="w-full justify-start overflow-x-auto whitespace-nowrap">
                     <TabsTrigger value="processing">Processando</TabsTrigger>
                     <TabsTrigger value="success">Sucesso</TabsTrigger>
                     <TabsTrigger value="errors">Erros</TabsTrigger>
@@ -765,6 +823,9 @@ export default function BackgroundWorkers() {
                   <TabsContent value="success"><DocsTable rows={data.docs.success} /></TabsContent>
                   <TabsContent value="errors" className="space-y-3">
                     <div className="flex justify-end gap-2">
+                      <Button variant="outline" size="sm" disabled={loading} onClick={reprocessShortDocs}>
+                        Reprocessar docs 1 página
+                      </Button>
                       <Button variant="outline" size="sm" disabled={loading || data.docs.errors.length === 0} onClick={() => retryAllDocsErrors()}>
                         Reprocessar todos os erros
                       </Button>
@@ -804,7 +865,7 @@ export default function BackgroundWorkers() {
               </CardHeader>
               <CardContent>
                 <Tabs value={opsTab} onValueChange={setOpsTab}>
-                  <TabsList>
+                  <TabsList className="w-full justify-start overflow-x-auto whitespace-nowrap">
                     <TabsTrigger value="processing">Processando</TabsTrigger>
                     <TabsTrigger value="success">Sucesso</TabsTrigger>
                     <TabsTrigger value="errors">Erros</TabsTrigger>
@@ -851,7 +912,7 @@ export default function BackgroundWorkers() {
               </CardHeader>
               <CardContent>
                 <Tabs value={inpiTab} onValueChange={setInpiTab}>
-                  <TabsList>
+                  <TabsList className="w-full justify-start overflow-x-auto whitespace-nowrap">
                     <TabsTrigger value="processing">Processando</TabsTrigger>
                     <TabsTrigger value="success">Sucesso</TabsTrigger>
                     <TabsTrigger value="errors">Erros</TabsTrigger>

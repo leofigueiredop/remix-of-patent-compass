@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Search, Loader2, ExternalLink, Hash, User, UserCheck, FileText, X, ChevronDown, ChevronUp, Building2, Lightbulb, ChevronLeft, ChevronRight, Expand, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -501,7 +502,7 @@ export default function QuickSearch() {
         <AppLayout>
             <div className="flex flex-col gap-6 w-full mx-auto">
                 {/* Header */}
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div>
                         <h1 className="text-2xl font-bold flex items-center gap-3 text-slate-900">
                             <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center">
@@ -510,13 +511,18 @@ export default function QuickSearch() {
                             Busca Rápida
                         </h1>
                         <p className="text-muted-foreground text-sm mt-1">
-                            Pesquise na base local de patentes importadas por RPI e complemente com Espacenet
+                            Motor híbrido para varrer base local e Espacenet com contexto técnico unificado
                         </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        <Badge variant="secondary" className="bg-emerald-50 text-emerald-700 border-emerald-200">Tempo real</Badge>
+                        <Badge variant="secondary" className="bg-cyan-50 text-cyan-700 border-cyan-200">Base local + EPO</Badge>
+                        <Badge variant="secondary" className="bg-slate-100 text-slate-700 border-slate-200">Pronto para diligência</Badge>
                     </div>
                 </div>
 
                 {/* Search Form */}
-                <form onSubmit={handleSearch} className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm space-y-4">
+                <form onSubmit={handleSearch} className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-sm space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="text-sm font-medium mb-1.5 flex items-center gap-2">

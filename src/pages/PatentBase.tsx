@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import AppLayout from "@/components/AppLayout";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -51,7 +51,7 @@ export default function PatentBase() {
     const [patentModalOpen, setPatentModalOpen] = useState(false);
     const [selectedPatent, setSelectedPatent] = useState<PatentDocumentData | null>(null);
 
-    const fetchData = async () => {
+    const fetchData = useCallback(async () => {
         setLoading(true);
         try {
             const params = new URLSearchParams({ page: String(page) });
@@ -64,11 +64,11 @@ export default function PatentBase() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [page, query]);
 
     useEffect(() => {
-        fetchData();
-    }, [page, query]);
+        void fetchData();
+    }, [fetchData]);
 
     const openPatentModal = (patent: InpiPatent) => {
         const fallbackUrl = `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${encodeURIComponent(patent.cod_pedido)}`;

@@ -32,15 +32,20 @@ export default function MonitoringSettings() {
         monitoredAttorneyNames: [],
         monitoredPatents: []
     });
+    const [emailLogs, setEmailLogs] = useState<any[]>([]);
 
     const refresh = async () => {
         setLoading(true);
         try {
-            const { data } = await axios.get(`${API_URL}/monitoring/config`);
+            const [{ data }, logsRes] = await Promise.all([
+                axios.get(`${API_URL}/monitoring/config`),
+                axios.get(`${API_URL}/emails/logs`, { params: { page: 1, pageSize: 20 } }).catch(() => ({ data: { rows: [] } }))
+            ]);
             setConfig({
                 monitoredAttorneyNames: data?.monitoredAttorneyNames || [],
                 monitoredPatents: data?.monitoredPatents || []
             });
+            setEmailLogs(Array.isArray(logsRes?.data?.rows) ? logsRes.data.rows : []);
         } finally {
             setLoading(false);
         }
@@ -176,6 +181,26 @@ export default function MonitoringSettings() {
                             <div className="space-y-2 pt-2">
                                 <Label>Email para Notificação</Label>
                                 <Input placeholder="ex: patentes@suaempresa.com" defaultValue="admin@patentcompass.com" />
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="text-lg">Logs de Envio</CardTitle>
+                            <CardDescription>Histórico de mensagens enviadas aos contatos dos clientes.</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="space-y-2 max-h-64 overflow-y-auto">
+                                {emailLogs.length === 0 ? (
+                                    <div className="text-xs text-muted-foreground">Nenhum envio registrado.</div>
+                                ) : emailLogs.map((log) => (
+                                    <div key={log.id} className="rounded border px-3 py-2 text-xs">
+                                        <div className="font-medium">{log.subject}</div>
+                                        <div className="text-muted-foreground">{log.recipient_email} • {log.client_name || "Sem cliente"} • {log.status}</div>
+                                        <div className="text-muted-foreground">{new Date(log.created_at).toLocaleString("pt-BR")}</div>
+                                    </div>
+                                ))}
                             </div>
                         </CardContent>
                     </Card>

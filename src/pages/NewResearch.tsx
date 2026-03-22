@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Mic, FileText, Upload } from "lucide-react";
 import LoadingTransition from "@/components/LoadingTransition";
@@ -13,10 +13,10 @@ const steps = ["Briefing", "Transcrição", "Briefing Técnico", "Palavras-chave
 
 export default function NewResearch() {
   const navigate = useNavigate();
-  const { setRawInput, setTranscription, setInputMode: setCtxInputMode } = useResearch();
+  const { setRawInput, setTranscription, setInputMode: setCtxInputMode, trackJourneyStep } = useResearch();
   const [inputMode, setInputMode] = useState<"audio" | "text" | "files">("text");
   const [text, setText] = useState("");
-  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,23 +28,51 @@ export default function NewResearch() {
     }
   };
 
+  useEffect(() => {
+    trackJourneyStep("step_0_new_research", "view");
+  }, [trackJourneyStep]);
+
+  const buildFilesTranscription = async (files: File[]): Promise<string> => {
+    const chunks: string[] = [];
+    for (const file of files) {
+      const header = `Arquivo: ${file.name} (${file.type || "tipo não identificado"}) - ${(file.size / 1024).toFixed(1)}KB`;
+      if (file.type.startsWith("text/") || file.type === "application/json") {
+        const content = await file.text().catch(() => "");
+        const cleaned = content.replace(/\s+/g, " ").trim();
+        chunks.push(`${header}\nTrecho: ${cleaned.slice(0, 2000) || "sem conteúdo textual legível"}`);
+      } else {
+        chunks.push(`${header}\nConteúdo não textual. Use metadados e contexto visual na análise.`);
+      }
+    }
+    return chunks.join("\n\n");
+  };
+
   const handleSubmit = async () => {
     setError(null);
     setLoading(true);
     setCtxInputMode(inputMode);
 
     try {
-      if (inputMode === "audio" && audioFile) {
-        const result = await aiService.transcribeAudio(audioFile);
+      if (inputMode === "audio" && selectedFiles[0]) {
+        const result = await aiService.transcribeAudio(selectedFiles[0]);
         setRawInput(result.text);
         setTranscription(result.text);
+        trackJourneyStep("step_0_new_research", "complete");
         navigate("/research/transcription");
       } else if (inputMode === "text" && text.trim()) {
         setRawInput(text);
         setTranscription(text);
+        trackJourneyStep("step_0_new_research", "complete");
+        navigate("/research/transcription");
+      } else if (inputMode === "files" && selectedFiles.length > 0) {
+        const filesText = await buildFilesTranscription(selectedFiles);
+        const preface = "Briefing a partir de arquivos anexados:\n\n";
+        setRawInput(`${preface}${filesText}`);
+        setTranscription(`${preface}${filesText}`);
+        trackJourneyStep("step_0_new_research", "complete");
         navigate("/research/transcription");
       } else {
-        setError("Insira um texto ou selecione um arquivo de áudio.");
+        setError("Insira um texto ou selecione arquivo(s) para continuar.");
         setLoading(false);
       }
     } catch (err: any) {
@@ -54,8 +82,8 @@ export default function NewResearch() {
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) setAudioFile(file);
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) setSelectedFiles(files);
   };
 
   return (
@@ -144,7 +172,7 @@ export default function NewResearch() {
           <div className="border-2 border-dashed border-border rounded-lg p-12 text-center">
             <Upload className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
             <p className="text-sm font-medium mb-1">
-              {audioFile ? audioFile.name : "Arraste os arquivos aqui"}
+              {selectedFiles.length > 0 ? `${selectedFiles.length} arquivo(s) selecionado(s)` : "Arraste os arquivos aqui"}
             </p>
             <p className="text-xs text-muted-foreground mb-4">
               {inputMode === "audio"
@@ -158,7 +186,8 @@ export default function NewResearch() {
               <input
                 type="file"
                 className="hidden"
-                accept={inputMode === "audio" ? "audio/*" : "image/*,video/*,.pdf"}
+                accept={inputMode === "audio" ? "audio/*" : "image/*,video/*,.pdf,text/*,application/json"}
+                multiple={inputMode !== "audio"}
                 onChange={handleFileSelect}
               />
             </label>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Maximize2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,7 @@ const fields = [
 
 export default function StructuredBriefing() {
   const navigate = useNavigate();
-  const { briefing, setBriefing, setStrategy } = useResearch();
+  const { briefing, setBriefing, setStrategy, trackJourneyStep } = useResearch();
   const [localBriefing, setLocalBriefing] = useState(briefing || {
     problemaTecnico: "",
     solucaoProposta: "",
@@ -31,6 +31,10 @@ export default function StructuredBriefing() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedField, setExpandedField] = useState<string | null>(null);
+
+  useEffect(() => {
+    trackJourneyStep("step_2_structured_briefing", "view");
+  }, [trackJourneyStep]);
 
   const updateField = (key: string, value: string) => {
     setLocalBriefing((prev) => ({ ...prev, [key]: value }));
@@ -44,6 +48,7 @@ export default function StructuredBriefing() {
     try {
       const result = await aiService.generateStrategy(localBriefing);
       setStrategy(result);
+      trackJourneyStep("step_2_structured_briefing", "complete");
       navigate("/research/keywords");
     } catch (err: any) {
       setError(err.message || "Erro ao gerar estratégia de busca.");

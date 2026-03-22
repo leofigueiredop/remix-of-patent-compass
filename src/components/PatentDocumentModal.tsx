@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { Loader2, Download, ExternalLink, FileX } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogClose } from "@/components/ui/dialog";
@@ -130,7 +130,7 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
     const normalized = value.startsWith("/") ? value : `/${value}`;
     return `${API_URL}${normalized}`;
   };
-  const isStorageAssetUrl = (value?: string | null) => Boolean(value && value.includes("/patent/storage/"));
+  const isStorageAssetUrl = useCallback((value?: string | null) => Boolean(value && value.includes("/patent/storage/")), []);
 
   const storageData = detailedData?.storage || patent?.storage;
   const fullDocumentPath = resolveAssetUrl(storageData?.fullDocumentPath || "");
@@ -268,10 +268,12 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
       if (!targetUrl) return;
       setLoadingPdf(true);
       setPdfError("");
-      if (pdfUrl) {
-        URL.revokeObjectURL(pdfUrl);
-      }
-      setPdfUrl(null);
+      setPdfUrl((current) => {
+        if (current && !isStorageAssetUrl(current)) {
+          URL.revokeObjectURL(current);
+        }
+        return null;
+      });
 
       try {
         if (isStorageAssetUrl(targetUrl)) {

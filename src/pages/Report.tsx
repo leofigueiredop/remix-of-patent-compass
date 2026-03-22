@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Download, Printer, FileText, ShieldCheck, MapPin, Bold, Italic, List, Share2, ChevronDown, ExternalLink, Image as ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -35,12 +35,16 @@ export default function Report() {
   const navigate = useNavigate();
   const location = useLocation();
   const reportRef = useRef<HTMLDivElement>(null);
-  const { briefing, cqlQuery, strategy } = useResearch();
+  const { briefing, cqlQuery, strategy, trackJourneyStep } = useResearch();
   const patents: ReportPatent[] = location.state?.patents || [];
 
   const [isExporting, setIsExporting] = useState(false);
   const [patentModalOpen, setPatentModalOpen] = useState(false);
   const [selectedPatent, setSelectedPatent] = useState<PatentDocumentData | null>(null);
+
+  useEffect(() => {
+    trackJourneyStep("step_6_report", "view");
+  }, [trackJourneyStep]);
 
   // Derive invention title from briefing
   const inventionTitle = briefing?.solucaoProposta
@@ -48,6 +52,7 @@ export default function Report() {
     : "INVENÇÃO EM ANÁLISE";
 
   const handlePrint = () => {
+    trackJourneyStep("step_6_report", "complete");
     window.print();
   };
 
@@ -59,6 +64,7 @@ export default function Report() {
     if (!reportRef.current) return;
 
     setIsExporting(true);
+    trackJourneyStep("step_6_report", "complete");
     toast.info("Preparando documento Word...");
 
     const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' " +

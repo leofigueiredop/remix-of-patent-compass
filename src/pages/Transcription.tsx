@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,11 +12,15 @@ const steps = ["Briefing", "Transcrição", "Briefing Técnico", "Palavras-chave
 
 export default function Transcription() {
   const navigate = useNavigate();
-  const { transcription, setTranscription, setBriefing } = useResearch();
+  const { transcription, setTranscription, setBriefing, trackJourneyStep } = useResearch();
   const [text, setText] = useState(transcription);
   const [loading, setLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    trackJourneyStep("step_1_transcription", "view");
+  }, [trackJourneyStep]);
 
   const handleConfirm = async () => {
     setError(null);
@@ -44,6 +48,7 @@ export default function Transcription() {
         aplicacoes
       });
 
+      trackJourneyStep("step_1_transcription", "complete");
       navigate("/research/structured");
     } catch (err: any) {
       setError(err.message || "Erro ao gerar briefing. O LLM pode estar carregando.");

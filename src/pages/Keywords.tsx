@@ -132,7 +132,7 @@ function buildSearchLevelsFromBlocks(blocks: StrategyBlock[], classifications: s
 
 export default function Keywords() {
   const navigate = useNavigate();
-  const { strategy, setSearchResults, setCqlQuery, briefing } = useResearch();
+  const { strategy, setSearchResults, setCqlQuery, briefing, trackJourneyStep } = useResearch();
 
   // Initialize blocks from strategy (LLM-generated keywords)
   const [blocks, setBlocks] = useState<StrategyBlock[]>([{
@@ -153,6 +153,10 @@ export default function Keywords() {
   const [error, setError] = useState<string | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [ignoreSecret, setIgnoreSecret] = useState(false);
+
+  useEffect(() => {
+    trackJourneyStep("step_3_keywords", "view");
+  }, [trackJourneyStep]);
 
   // Populate from strategy when available
   useEffect(() => {
@@ -430,6 +434,7 @@ export default function Keywords() {
     try {
       const results = await aiService.searchPatents(cql, inpiQuery, classifications, ignoreSecret);
       setSearchResults(results);
+      trackJourneyStep("step_3_keywords", "complete");
       navigate("/research/results");
     } catch (err: any) {
       setError(err.message || "Erro na busca. Verifique as credenciais do Espacenet e INPI.");
