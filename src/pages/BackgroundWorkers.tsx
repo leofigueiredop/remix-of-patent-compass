@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import AppLayout from "@/components/AppLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { RefreshCw, Clock, CheckCircle2, AlertCircle, FileDown, Files, PauseCircle, PlayCircle, Settings } from "lucide-react";
+import { RefreshCw, Clock, CheckCircle2, AlertCircle, FileDown, Files, PauseCircle, PlayCircle, Settings, Layers3, Loader2, CheckCheck } from "lucide-react";
 import { api } from "@/services/auth";
 
 type RpiJob = {
@@ -117,6 +117,8 @@ type WorkerState = {
   docRunning: boolean;
   opsRunning: boolean;
   inpiRunning: boolean;
+  inpiTextRunning?: boolean;
+  inpiDocRunning?: boolean;
   bqRunning: boolean;
   bigQueryEnabled?: boolean;
   bigQueryProject?: string | null;
@@ -163,12 +165,19 @@ function formatDate(value?: string | null): string {
 }
 
 function statusBadge(status: string) {
-  if (status === "running") return <Badge className="bg-blue-500/10 text-blue-500 border-blue-500/20">Processando</Badge>;
+  if (status === "running" || status === "running_google_patents" || status === "running_ops") return <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/20">Processando</Badge>;
+  if (status === "pending_google_patents") return <Badge className="bg-indigo-500/10 text-indigo-600 border-indigo-500/20">Pendente GP</Badge>;
+  if (status === "pending_ops") return <Badge className="bg-violet-500/10 text-violet-600 border-violet-500/20">Pendente OPS</Badge>;
+  if (status === "waiting_inpi_text") return <Badge className="bg-cyan-500/10 text-cyan-700 border-cyan-500/20">Aguardando INPI Text</Badge>;
+  if (status === "waiting_inpi") return <Badge className="bg-orange-500/10 text-orange-700 border-orange-500/20">Aguardando INPI Doc</Badge>;
   if (status === "pending") return <Badge variant="secondary">Pendente</Badge>;
   if (status === "completed") return <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20">Sucesso</Badge>;
   if (status === "skipped_sigilo") return <Badge variant="outline">Sigilo</Badge>;
   if (status === "not_found") return <Badge variant="destructive">Sem Documento</Badge>;
   if (status === "waiting_indexing") return <Badge variant="outline">Aguardando Indexação</Badge>;
+  if (status === "failed_google_patents") return <Badge variant="destructive">Erro GP</Badge>;
+  if (status === "failed_ops") return <Badge variant="destructive">Erro OPS</Badge>;
+  if (status === "failed_permanent") return <Badge variant="destructive">Erro Permanente</Badge>;
   if (status === "failed") return <Badge variant="destructive">Erro</Badge>;
   return <Badge variant="secondary">{status}</Badge>;
 }
@@ -184,11 +193,43 @@ function sourceLabel(value?: string | null) {
   return value;
 }
 
+function queueBadge(paused: boolean, running: boolean) {
+  if (paused) return <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50">Pausada</Badge>;
+  if (running) return <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/20">Executando</Badge>;
+  return <Badge variant="secondary">Ociosa</Badge>;
+}
+
+function MetricCard({
+  title,
+  value,
+  icon,
+  tone = "default"
+}: {
+  title: string;
+  value: number;
+  icon: ReactNode;
+  tone?: "default" | "success" | "danger";
+}) {
+  const valueClass = tone === "success" ? "text-emerald-600" : tone === "danger" ? "text-red-600" : "text-slate-900";
+  return (
+    <Card className="border-slate-200 shadow-sm">
+      <CardHeader className="pb-2">
+        <CardDescription>{title}</CardDescription>
+        <CardTitle className={`text-2xl flex items-center gap-2 ${valueClass}`}>
+          {icon}
+          {value}
+        </CardTitle>
+      </CardHeader>
+    </Card>
+  );
+}
+
 function RpiTable({ rows, onRetry }: { rows: RpiJob[]; onRetry?: (id: string) => void }) {
   if (rows.length === 0) {
     return <div className="p-8 text-sm text-muted-foreground">Sem registros.</div>;
   }
   return (
+    <div className="rounded-xl border border-slate-200 overflow-x-auto">
     <Table>
       <TableHeader>
         <TableRow>
@@ -223,6 +264,7 @@ function RpiTable({ rows, onRetry }: { rows: RpiJob[]; onRetry?: (id: string) =>
         ))}
       </TableBody>
     </Table>
+    </div>
   );
 }
 
@@ -231,6 +273,7 @@ function DocsTable({ rows, onRetry }: { rows: DocJob[]; onRetry?: (id: string) =
     return <div className="p-8 text-sm text-muted-foreground">Sem registros.</div>;
   }
   return (
+    <div className="rounded-xl border border-slate-200 overflow-x-auto">
     <Table>
       <TableHeader>
         <TableRow>
@@ -258,7 +301,7 @@ function DocsTable({ rows, onRetry }: { rows: DocJob[]; onRetry?: (id: string) =
             <TableCell className="text-xs text-muted-foreground">{formatDate(row.finished_at)}</TableCell>
             <TableCell className="text-right">
               <div className="flex gap-2 justify-end">
-                {onRetry && (row.status === "failed" || row.status === "not_found") && (
+                {onRetry && ["failed", "failed_google_patents", "failed_ops", "failed_permanent", "not_found", "waiting_inpi", "pending_ops"].includes(row.status) && (
                   <Button size="sm" variant="outline" onClick={() => onRetry(row.id)}>Reprocessar</Button>
                 )}
               </div>
@@ -267,12 +310,14 @@ function DocsTable({ rows, onRetry }: { rows: DocJob[]; onRetry?: (id: string) =
         ))}
       </TableBody>
     </Table>
+    </div>
   );
 }
 
 function OpsTable({ rows, onRetry }: { rows: OpsJob[]; onRetry?: (id: string) => void }) {
   if (rows.length === 0) return <div className="p-8 text-sm text-muted-foreground">Sem registros.</div>;
   return (
+    <div className="rounded-xl border border-slate-200 overflow-x-auto">
     <Table>
       <TableHeader>
         <TableRow>
@@ -300,7 +345,7 @@ function OpsTable({ rows, onRetry }: { rows: OpsJob[]; onRetry?: (id: string) =>
             <TableCell className="text-xs text-muted-foreground">{formatDate(row.finished_at)}</TableCell>
             <TableCell className="text-right">
               <div className="flex gap-2 justify-end">
-                {onRetry && (row.status === "failed" || row.status === "not_found") && (
+                {onRetry && ["failed", "failed_permanent", "not_found"].includes(row.status) && (
                   <Button size="sm" variant="outline" onClick={() => onRetry(row.id)}>Reprocessar</Button>
                 )}
               </div>
@@ -309,12 +354,14 @@ function OpsTable({ rows, onRetry }: { rows: OpsJob[]; onRetry?: (id: string) =>
         ))}
       </TableBody>
     </Table>
+    </div>
   );
 }
 
 function InpiTable({ rows, onRetry }: { rows: InpiJob[]; onRetry?: (id: string) => void }) {
   if (rows.length === 0) return <div className="p-8 text-sm text-muted-foreground">Sem registros.</div>;
   return (
+    <div className="rounded-xl border border-slate-200 overflow-x-auto">
     <Table>
       <TableHeader>
         <TableRow>
@@ -342,7 +389,7 @@ function InpiTable({ rows, onRetry }: { rows: InpiJob[]; onRetry?: (id: string) 
             <TableCell className="text-xs text-muted-foreground max-w-[320px] truncate" title={row.error || ""}>{row.error || "-"}</TableCell>
             <TableCell className="text-right">
               <div className="flex gap-2 justify-end">
-                {onRetry && (row.status === "failed" || row.status === "failed_permanent") && (
+                {onRetry && ["failed", "failed_permanent"].includes(row.status) && (
                   <Button size="sm" variant="outline" onClick={() => onRetry(row.id)}>Reprocessar</Button>
                 )}
               </div>
@@ -351,6 +398,7 @@ function InpiTable({ rows, onRetry }: { rows: InpiJob[]; onRetry?: (id: string) 
         ))}
       </TableBody>
     </Table>
+    </div>
   );
 }
 
@@ -396,6 +444,18 @@ export default function BackgroundWorkers() {
     inpiSuccess: data.inpi.counts?.success ?? data.inpi.success.length,
     inpiErrors: data.inpi.counts?.errors ?? data.inpi.errors.length
   }), [data]);
+
+  const allPaused = state.rpiPaused && state.docsPaused && state.opsPaused && state.inpiPaused && state.bqPaused;
+  const anyRunning = state.rpiRunning || state.docRunning || state.opsRunning || state.inpiRunning || state.bqRunning || state.inpiTextRunning || state.inpiDocRunning;
+  const docsStageCounters = useMemo(() => {
+    const rows = [...data.docs.processing, ...data.docs.errors];
+    const byStatus = (statuses: string[]) => rows.filter((row) => statuses.includes(row.status)).length;
+    return {
+      gp: byStatus(["pending_google_patents", "running_google_patents", "failed_google_patents"]),
+      ops: byStatus(["pending_ops", "running_ops", "failed_ops"]),
+      inpi: byStatus(["waiting_inpi_text", "waiting_inpi"])
+    };
+  }, [data.docs.processing, data.docs.errors]);
 
   const fetchQueues = async () => {
     setLoading(true);
@@ -466,9 +526,8 @@ export default function BackgroundWorkers() {
   const retryAllDocsErrors = async () => {
     setLoading(true);
     try {
-      const ids = data.docs.errors.map((row) => row.id);
-      const response = await api.post(`/background-workers/docs/retry-errors`, { ids });
-      setActionMessage(`Docs reprocessados: ${response.data?.updated ?? 0}`);
+      const response = await api.post(`/background-workers/docs/retry-errors`, {});
+      setActionMessage(`Docs reenfileirados (erro + processando): ${response.data?.updated ?? 0}`);
       await fetchQueues();
     } finally {
       setLoading(false);
@@ -605,27 +664,28 @@ export default function BackgroundWorkers() {
   return (
     <AppLayout>
       <div className="flex flex-col gap-6 w-full mx-auto">
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 md:p-6 shadow-sm">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="animate-in fade-in slide-in-from-left duration-700">
             <h1 className="text-2xl font-bold flex items-center gap-3 text-slate-900 mb-2">
                 <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center">
                     <Settings className="w-5 h-5 text-slate-600" />
                 </div>
-                Background Workers
+                Workflows de Background
             </h1>
             <p className="text-muted-foreground text-sm mt-1">
-              Controle das filas de ingestão (RPI, INPI, Docs, OPS) e processamento em lote.
+              Painel operacional de filas com cadeia INPI Text → Google Patents → OPS → INPI Doc.
             </p>
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap animate-in fade-in zoom-in-95 duration-500">
             <Button
               variant="outline"
-              onClick={() => controlWorkers("all", state.rpiPaused && state.docsPaused && state.opsPaused && state.inpiPaused && state.bqPaused ? "resume" : "pause")}
+              onClick={() => controlWorkers("all", allPaused ? "resume" : "pause")}
               disabled={loading}
               className="gap-2 h-10 text-sm bg-white w-full sm:w-auto"
             >
-              {state.rpiPaused && state.docsPaused && state.opsPaused && state.inpiPaused && state.bqPaused ? <PlayCircle className="w-3.5 h-3.5 text-emerald-600" /> : <PauseCircle className="w-3.5 h-3.5 text-amber-600" />}
-              {state.rpiPaused && state.docsPaused && state.opsPaused && state.inpiPaused && state.bqPaused ? "Retomar Workers" : "Pausar Workers"}
+              {allPaused ? <PlayCircle className="w-3.5 h-3.5 text-emerald-600" /> : <PauseCircle className="w-3.5 h-3.5 text-amber-600" />}
+              {allPaused ? "Retomar Workers" : "Pausar Workers"}
             </Button>
             <Button variant="outline" onClick={bootstrapRpi} disabled={loading} className="gap-2 h-10 text-sm bg-white w-full sm:w-auto">
               <Files className="w-3.5 h-3.5" />
@@ -644,21 +704,41 @@ export default function BackgroundWorkers() {
               <RefreshCw className={`w-3.5 h-3.5 text-slate-500 ${loading ? "animate-spin" : ""}`} />
               Atualizar
             </Button>
-            <Badge variant={state.bigQueryEnabled ? "default" : "secondary"} className="h-10 rounded-md px-3 border border-slate-200 bg-white text-slate-700 shadow-sm font-medium w-full justify-center sm:w-auto">
-              BQ {state.bigQueryEnabled ? `ON ${state.bigQueryProject || ""} ${state.bigQueryFirstEnabled ? "(PRIORIDADE)" : ""}` : "OFF"}
-            </Badge>
-            <Badge variant={state.googlePatentsEnabled ? "default" : "secondary"} className="h-10 rounded-md px-3 border border-slate-200 bg-white text-slate-700 shadow-sm font-medium w-full justify-center sm:w-auto">
-              Google Patents {state.googlePatentsEnabled ? "ON" : "OFF"}
-            </Badge>
-            <Badge variant={state.googlePatentsCircuitOpen ? "destructive" : "secondary"} className="h-10 rounded-md px-3 border border-slate-200 bg-white text-slate-700 shadow-sm font-medium w-full justify-center sm:w-auto">
-              Circuito GP {state.googlePatentsCircuitOpen ? "ABERTO" : "OK"}
-            </Badge>
-            <Badge variant="secondary" className="h-10 rounded-md px-3 border border-slate-200 bg-white text-slate-700 shadow-sm font-medium w-full justify-center sm:w-auto">
-              GP req {state.googlePatentsMetrics?.requests ?? 0} • retry {state.googlePatentsMetrics?.retries ?? 0}
-            </Badge>
-            <Badge variant="secondary" className="h-10 rounded-md px-3 border border-slate-200 bg-white text-slate-700 shadow-sm font-medium w-full justify-center sm:w-auto">
-              PDF curto {state.googlePatentsMetrics?.shortPdfRejected ?? 0} • limpeza {state.googlePatentsMetrics?.invalidBucketDeleted ?? 0}
-            </Badge>
+          </div>
+        </div>
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs text-slate-500 mb-1">Estado global</div>
+              <div className="flex items-center gap-2">
+                {anyRunning ? <Loader2 className="w-4 h-4 animate-spin text-blue-600" /> : <CheckCheck className="w-4 h-4 text-emerald-600" />}
+                <span className="text-sm font-medium text-slate-800">{anyRunning ? "Workers ativos" : "Sem execução ativa"}</span>
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs text-slate-500 mb-1">Fila Docs por etapa</div>
+              <div className="text-sm text-slate-800">GP {docsStageCounters.gp} • OPS {docsStageCounters.ops} • INPI {docsStageCounters.inpi}</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs text-slate-500 mb-1">Google Patents</div>
+              <div className="text-sm text-slate-800">Req {state.googlePatentsMetrics?.requests ?? 0} • Retry {state.googlePatentsMetrics?.retries ?? 0}</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs text-slate-500 mb-1">Qualidade de PDF</div>
+              <div className="text-sm text-slate-800">Curto {state.googlePatentsMetrics?.shortPdfRejected ?? 0} • Limpeza {state.googlePatentsMetrics?.invalidBucketDeleted ?? 0}</div>
+            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {queueBadge(state.rpiPaused, state.rpiRunning)}
+            <Badge variant="outline" className="border-slate-300">RPI</Badge>
+            {queueBadge(state.docsPaused, state.docRunning)}
+            <Badge variant="outline" className="border-slate-300">Docs</Badge>
+            {queueBadge(state.opsPaused, state.opsRunning)}
+            <Badge variant="outline" className="border-slate-300">OPS</Badge>
+            {queueBadge(state.inpiPaused, state.inpiRunning || Boolean(state.inpiTextRunning) || Boolean(state.inpiDocRunning))}
+            <Badge variant="outline" className="border-slate-300">INPI (Text {state.inpiTextRunning ? "ON" : "OFF"} • Doc {state.inpiDocRunning ? "ON" : "OFF"})</Badge>
+            <Badge variant={state.bigQueryEnabled ? "default" : "secondary"}>BQ {state.bigQueryEnabled ? "ON" : "OFF"}</Badge>
+            <Badge variant={state.googlePatentsEnabled ? "default" : "secondary"}>Google Patents {state.googlePatentsEnabled ? "ON" : "OFF"}</Badge>
+            <Badge variant={state.googlePatentsCircuitOpen ? "destructive" : "secondary"}>Circuito GP {state.googlePatentsCircuitOpen ? "ABERTO" : "OK"}</Badge>
           </div>
         </div>
 
@@ -719,45 +799,30 @@ export default function BackgroundWorkers() {
               )}
             </CardContent>
           </Card>
-          <TabsList className="w-full justify-start overflow-x-auto whitespace-nowrap">
+          <TabsList className="w-full justify-start overflow-x-auto whitespace-nowrap bg-slate-100 p-1">
             <TabsTrigger value="rpi" className="gap-2">
               <Files className="w-4 h-4" />
-              Fila RPI
+              Fila RPI <span className="text-xs text-muted-foreground">({counters.rpiProcessing + counters.rpiErrors})</span>
             </TabsTrigger>
             <TabsTrigger value="docs" className="gap-2">
               <FileDown className="w-4 h-4" />
-              Fila Docs
+              Fila Docs <span className="text-xs text-muted-foreground">({counters.docsProcessing + counters.docsErrors})</span>
             </TabsTrigger>
             <TabsTrigger value="ops" className="gap-2">
-              <Files className="w-4 h-4" />
-              Fila OPS
+              <Layers3 className="w-4 h-4" />
+              Fila OPS <span className="text-xs text-muted-foreground">({counters.opsProcessing + counters.opsErrors})</span>
             </TabsTrigger>
             <TabsTrigger value="inpi" className="gap-2">
               <Files className="w-4 h-4" />
-              Fila INPI
+              Fila INPI <span className="text-xs text-muted-foreground">({counters.inpiProcessing + counters.inpiErrors})</span>
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="rpi" className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>Processando</CardDescription>
-                  <CardTitle className="text-2xl flex items-center gap-2"><Clock className="w-5 h-5" />{counters.rpiProcessing}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>Sucesso</CardDescription>
-                  <CardTitle className="text-2xl flex items-center gap-2"><CheckCircle2 className="w-5 h-5 text-emerald-600" />{counters.rpiSuccess}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>Erros</CardDescription>
-                  <CardTitle className="text-2xl flex items-center gap-2"><AlertCircle className="w-5 h-5 text-red-600" />{counters.rpiErrors}</CardTitle>
-                </CardHeader>
-              </Card>
+              <MetricCard title="Processando" value={counters.rpiProcessing} icon={<Clock className="w-5 h-5" />} />
+              <MetricCard title="Sucesso" value={counters.rpiSuccess} icon={<CheckCircle2 className="w-5 h-5" />} tone="success" />
+              <MetricCard title="Erros" value={counters.rpiErrors} icon={<AlertCircle className="w-5 h-5" />} tone="danger" />
             </div>
             <Card>
               <CardHeader>
@@ -788,24 +853,9 @@ export default function BackgroundWorkers() {
 
           <TabsContent value="docs" className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>Processando</CardDescription>
-                  <CardTitle className="text-2xl flex items-center gap-2"><Clock className="w-5 h-5" />{counters.docsProcessing}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>Sucesso</CardDescription>
-                  <CardTitle className="text-2xl flex items-center gap-2"><CheckCircle2 className="w-5 h-5 text-emerald-600" />{counters.docsSuccess}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>Erros/Logs</CardDescription>
-                  <CardTitle className="text-2xl flex items-center gap-2"><AlertCircle className="w-5 h-5 text-red-600" />{counters.docsErrors}</CardTitle>
-                </CardHeader>
-              </Card>
+              <MetricCard title="Processando" value={counters.docsProcessing} icon={<Clock className="w-5 h-5" />} />
+              <MetricCard title="Sucesso" value={counters.docsSuccess} icon={<CheckCircle2 className="w-5 h-5" />} tone="success" />
+              <MetricCard title="Erros/Logs" value={counters.docsErrors} icon={<AlertCircle className="w-5 h-5" />} tone="danger" />
             </div>
             <Card>
               <CardHeader>
@@ -826,8 +876,8 @@ export default function BackgroundWorkers() {
                       <Button variant="outline" size="sm" disabled={loading} onClick={reprocessShortDocs}>
                         Reprocessar docs 1 página
                       </Button>
-                      <Button variant="outline" size="sm" disabled={loading || data.docs.errors.length === 0} onClick={() => retryAllDocsErrors()}>
-                        Reprocessar todos os erros
+                      <Button variant="outline" size="sm" disabled={loading} onClick={() => retryAllDocsErrors()}>
+                        Reenfileirar erro + processando
                       </Button>
                     </div>
                     <DocsTable rows={data.docs.errors} onRetry={retryDocsJob} />
@@ -839,24 +889,9 @@ export default function BackgroundWorkers() {
 
           <TabsContent value="ops" className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>Processando</CardDescription>
-                  <CardTitle className="text-2xl flex items-center gap-2"><Clock className="w-5 h-5" />{counters.opsProcessing}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>Sucesso</CardDescription>
-                  <CardTitle className="text-2xl flex items-center gap-2"><CheckCircle2 className="w-5 h-5 text-emerald-600" />{counters.opsSuccess}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>Erros/Logs</CardDescription>
-                  <CardTitle className="text-2xl flex items-center gap-2"><AlertCircle className="w-5 h-5 text-red-600" />{counters.opsErrors}</CardTitle>
-                </CardHeader>
-              </Card>
+              <MetricCard title="Processando" value={counters.opsProcessing} icon={<Clock className="w-5 h-5" />} />
+              <MetricCard title="Sucesso" value={counters.opsSuccess} icon={<CheckCircle2 className="w-5 h-5" />} tone="success" />
+              <MetricCard title="Erros/Logs" value={counters.opsErrors} icon={<AlertCircle className="w-5 h-5" />} tone="danger" />
             </div>
             <Card>
               <CardHeader>
@@ -886,24 +921,9 @@ export default function BackgroundWorkers() {
           </TabsContent>
           <TabsContent value="inpi" className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>Processando</CardDescription>
-                  <CardTitle className="text-2xl flex items-center gap-2"><Clock className="w-5 h-5" />{counters.inpiProcessing}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>Sucesso</CardDescription>
-                  <CardTitle className="text-2xl flex items-center gap-2"><CheckCircle2 className="w-5 h-5 text-emerald-600" />{counters.inpiSuccess}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>Erros</CardDescription>
-                  <CardTitle className="text-2xl flex items-center gap-2"><AlertCircle className="w-5 h-5 text-red-600" />{counters.inpiErrors}</CardTitle>
-                </CardHeader>
-              </Card>
+              <MetricCard title="Processando" value={counters.inpiProcessing} icon={<Clock className="w-5 h-5" />} />
+              <MetricCard title="Sucesso" value={counters.inpiSuccess} icon={<CheckCircle2 className="w-5 h-5" />} tone="success" />
+              <MetricCard title="Erros" value={counters.inpiErrors} icon={<AlertCircle className="w-5 h-5" />} tone="danger" />
             </div>
             <Card>
               <CardHeader>

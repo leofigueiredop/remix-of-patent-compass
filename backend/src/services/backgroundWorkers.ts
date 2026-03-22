@@ -56,6 +56,8 @@ const GOOGLE_PATENTS_RETRY_MAX = Math.max(1, parseInt(process.env.GOOGLE_PATENTS
 const GOOGLE_PATENTS_BREAKER_THRESHOLD = Math.max(2, parseInt(process.env.GOOGLE_PATENTS_BREAKER_THRESHOLD || '8', 10));
 const GOOGLE_PATENTS_BREAKER_COOLDOWN_MS = Math.max(30_000, parseInt(process.env.GOOGLE_PATENTS_BREAKER_COOLDOWN_MS || '120000', 10));
 const MIN_FULL_DOCUMENT_PAGES = Math.max(2, parseInt(process.env.MIN_FULL_DOCUMENT_PAGES || '2', 10));
+const INPI_JOB_MIN_INTERVAL_MS = Math.max(5_000, parseInt(process.env.INPI_JOB_MIN_INTERVAL_MS || '12000', 10));
+const INPI_JOB_DELAY_JITTER_MS = Math.max(500, parseInt(process.env.INPI_JOB_DELAY_JITTER_MS || '4000', 10));
 const S3_ENDPOINT = process.env.S3_ENDPOINT || '';
 const S3_REGION = process.env.S3_REGION || 'garage';
 const S3_ACCESS_KEY = process.env.S3_ACCESS_KEY || '';
@@ -84,6 +86,7 @@ let opsCircuitOpenUntil = 0;
 let lastGooglePatentsRequestAt = 0;
 let googlePatentsFailureCount = 0;
 let googlePatentsCircuitOpenUntil = 0;
+let lastInpiJobCompletedAt = 0;
 let bigQueryAccessToken: string | null = null;
 let bigQueryAccessTokenExpiration = 0;
 const googlePatentsMetrics = {
@@ -1178,6 +1181,7 @@ async function queueDocumentJobForPatent(params: {
     publicationNumber?: string;
     status?: string;
     dispatchCode?: string;
+    waitForInpiText?: boolean;
 }) {
     const existing = await prisma.documentDownloadJob.findUnique({
         where: { patent_id: params.patentId }
@@ -1240,11 +1244,12 @@ async function queueDocumentJobForPatent(params: {
         }
         await cleanupInvalidDocumentAssets(existingStorageKey, params.publicationNumber || existing?.publication_number || params.patentId).catch(() => undefined);
     }
-    if (existing && ['pending', 'running', 'completed'].includes(existing.status)) return;
+    if (existing && ['pending', 'running', 'completed', 'waiting_inpi_text'].includes(existing.status)) return;
+    const pendingStatus = params.waitForInpiText ? 'waiting_inpi_text' : 'pending_google_patents';
     await prisma.documentDownloadJob.upsert({
         where: { patent_id: params.patentId },
         update: {
-            status: 'pending',
+            status: pendingStatus,
             error: null,
             storage_key: null,
             publication_number: params.publicationNumber || existing?.publication_number || null,
@@ -1255,7 +1260,7 @@ async function queueDocumentJobForPatent(params: {
             patent_id: params.patentId,
             rpi_number: params.rpiNumber,
             publication_number: params.publicationNumber || null,
-            status: 'pending'
+            status: pendingStatus
         }
     });
 }
@@ -1636,7 +1641,8 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
                 rpiNumber,
                 publicationNumber: numeroPublicacao || numeroRaw || patentNumber,
                 status: dispatchTitle,
-                dispatchCode: dispatchCode
+                dispatchCode: dispatchCode,
+                waitForInpiText: Boolean(INPI_SCRAPE_FIRST_ENABLED)
             });
         } else if (shouldQueueOpsBiblio) {
             await queueOpsBibliographicJob({
@@ -2882,24 +2888,37 @@ async function processNextDocumentJob() {
     docRunning = true;
     try {
         let job = await prisma.documentDownloadJob.findFirst({
-            where: { status: 'pending' },
+            where: { status: 'pending_google_patents' },
             orderBy: [{ created_at: 'asc' }]
         });
         if (!job) {
             job = await prisma.documentDownloadJob.findFirst({
+                where: { status: 'pending_ops' },
+                orderBy: [{ updated_at: 'asc' }, { created_at: 'asc' }]
+            });
+        }
+        if (!job) {
+            job = await prisma.documentDownloadJob.findFirst({
+                where: { status: 'pending' },
+                orderBy: [{ created_at: 'asc' }]
+            });
+        }
+        if (!job) {
+            job = await prisma.documentDownloadJob.findFirst({
                 where: {
-                    status: 'failed',
+                    status: { in: ['failed', 'failed_google_patents', 'failed_ops'] },
                     attempts: { lt: MAX_DOC_ATTEMPTS }
                 },
                 orderBy: [{ attempts: 'asc' }, { updated_at: 'asc' }, { created_at: 'asc' }]
             });
         }
         if (!job) return;
+        const stage: 'google_patents' | 'ops' = job.status === 'pending_ops' || job.status === 'failed_ops' ? 'ops' : 'google_patents';
         const nextAttempt = job.attempts + 1;
         await prisma.documentDownloadJob.update({
             where: { id: job.id },
             data: {
-                status: 'running',
+                status: stage === 'ops' ? 'running_ops' : 'running_google_patents',
                 started_at: new Date(),
                 attempts: { increment: 1 },
                 error: null
@@ -2980,6 +2999,49 @@ async function processNextDocumentJob() {
                 await cleanupInvalidDocumentAssets(existingStorageKey, publicationNumber).catch(() => undefined);
             }
 
+            const shouldPreferInpiDocForRecentDispatch = async (): Promise<boolean> => {
+                const publication = await prismaAny.inpiPublication.findFirst({
+                    where: {
+                        patent_id: job.patent_id,
+                        rpi: String(job.rpi_number || ''),
+                        despacho_code: { in: ['3.1', '1.3', '16.1'] }
+                    },
+                    select: {
+                        date: true,
+                        despacho_code: true
+                    },
+                    orderBy: { created_at: 'desc' }
+                }).catch(() => null);
+                const publicationDate = parseBrDateToIso(publication?.date || '');
+                if (!publicationDate) return false;
+                const sixMonthsAgo = new Date();
+                sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+                return publicationDate >= sixMonthsAgo;
+            };
+            if (await shouldPreferInpiDocForRecentDispatch()) {
+                await queueInpiProcessingJob({
+                    patentNumber: job.patent_id,
+                    priority: 99,
+                    mode: 'document'
+                }).catch(() => undefined);
+                await prisma.documentDownloadJob.update({
+                    where: { id: job.id },
+                    data: {
+                        status: 'waiting_inpi',
+                        error: truncateError(`DOC_RECENT_DISPATCH_DIRECT_INPI publication=${publicationNumber} dispatch=3.1|1.3|16.1`),
+                        finished_at: new Date()
+                    }
+                });
+                documentJobLog({
+                    jobId: job.id,
+                    patentId: job.patent_id,
+                    publicationNumber,
+                    status: 'waiting_inpi',
+                    code: 'DOC_RECENT_DISPATCH_DIRECT_INPI'
+                });
+                return;
+            }
+
             const googleSearchCandidates = Array.from(new Set([
                 publicationNumber,
                 normalizeText(patent.numero_publicacao || ''),
@@ -3048,7 +3110,9 @@ async function processNextDocumentJob() {
                 return false;
             };
 
-            const googlePrimaryRecovered = await tryGooglePatentsFallback('DOC_PRIMARY');
+            const googlePrimaryRecovered = stage === 'google_patents'
+                ? await tryGooglePatentsFallback('DOC_PRIMARY')
+                : false;
             
             const publicationBiblio = await prismaAny.inpiPublication.findFirst({
                 where: { patent_number: publicationNumber, bibliographic_status: 'completed' },
@@ -3119,6 +3183,26 @@ async function processNextDocumentJob() {
 
             if (googlePrimaryRecovered) return;
 
+            if (stage === 'google_patents') {
+                await prisma.documentDownloadJob.update({
+                    where: { id: job.id },
+                    data: {
+                        status: 'pending_ops',
+                        error: truncateError(`DOC_GOOGLE_PATENTS_NOT_FOUND publication=${publicationNumber}`),
+                        finished_at: null
+                    }
+                });
+                documentJobLog({
+                    jobId: job.id,
+                    patentId: job.patent_id,
+                    publicationNumber,
+                    candidatesSearched: googleSearchCandidates,
+                    status: 'pending_ops',
+                    code: 'DOC_QUEUE_OPS_AFTER_GOOGLE'
+                });
+                return;
+            }
+
             let opsBundle: { pdf: Buffer; docdbId: string } | null = null;
             for (const candidate of googleSearchCandidates.length ? googleSearchCandidates : [publicationNumber]) {
                 opsBundle = await downloadOpsPatentPdf(candidate).catch(() => null);
@@ -3176,10 +3260,19 @@ async function processNextDocumentJob() {
             const message = truncateError(`DOC_RUNTIME_ERROR ${raw}`);
             const lower = message.toLowerCase();
             const notFound = lower.includes('not found') || lower.includes('404') || lower.includes('não encontrado');
+            if (notFound && stage === 'ops') {
+                await queueInpiProcessingJob({
+                    patentNumber: job.patent_id,
+                    priority: 95,
+                    mode: 'document'
+                }).catch(() => undefined);
+            }
             await prisma.documentDownloadJob.update({
                 where: { id: job.id },
                 data: {
-                    status: notFound ? 'not_found' : (nextAttempt >= MAX_DOC_ATTEMPTS ? 'failed_permanent' : 'failed'),
+                    status: notFound
+                        ? (stage === 'ops' ? 'waiting_inpi' : 'pending_ops')
+                        : (nextAttempt >= MAX_DOC_ATTEMPTS ? 'failed_permanent' : (stage === 'ops' ? 'failed_ops' : 'failed_google_patents')),
                     error: message,
                     finished_at: new Date()
                 }
@@ -3187,7 +3280,9 @@ async function processNextDocumentJob() {
             documentJobLog({
                 jobId: job.id,
                 patentId: job.patent_id,
-                status: notFound ? 'not_found' : (nextAttempt >= MAX_DOC_ATTEMPTS ? 'failed_permanent' : 'failed'),
+                status: notFound
+                    ? (stage === 'ops' ? 'waiting_inpi' : 'pending_ops')
+                    : (nextAttempt >= MAX_DOC_ATTEMPTS ? 'failed_permanent' : (stage === 'ops' ? 'failed_ops' : 'failed_google_patents')),
                 code: notFound ? 'DOC_RUNTIME_NOT_FOUND' : 'DOC_RUNTIME_FAILURE',
                 detail: raw
             });
@@ -3325,7 +3420,7 @@ export async function retryDocumentJob(jobId: string) {
     const updated = await prisma.documentDownloadJob.update({
         where: { id: jobId },
         data: {
-            status: 'pending',
+            status: 'pending_google_patents',
             attempts: 0,
             error: null,
             started_at: null,
@@ -3370,13 +3465,27 @@ export async function retryAllRpiErrorJobs(ids?: string[], preferBigQuery = fals
 }
 
 export async function retryAllDocumentErrorJobs(ids?: string[]) {
+    const requeueStatuses = [
+        'failed',
+        'failed_permanent',
+        'failed_google_patents',
+        'failed_ops',
+        'not_found',
+        'waiting_indexing',
+        'waiting_inpi',
+        'waiting_inpi_text',
+        'pending_ops',
+        'running',
+        'running_google_patents',
+        'running_ops'
+    ];
     const where = ids && ids.length > 0
-        ? { id: { in: Array.from(new Set(ids)) }, status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing', 'waiting_inpi'] } }
-        : { status: { in: ['failed', 'failed_permanent', 'not_found', 'waiting_indexing', 'waiting_inpi'] } };
+        ? { id: { in: Array.from(new Set(ids)) }, status: { in: requeueStatuses } }
+        : { status: { in: requeueStatuses } };
     const result = await prisma.documentDownloadJob.updateMany({
         where,
         data: {
-            status: 'pending',
+            status: 'pending_google_patents',
             attempts: 0,
             error: null,
             started_at: null,
@@ -3652,10 +3761,10 @@ export async function enqueueBigQueryFromFailedSources(source: 'docs' | 'ops' | 
 }
 
 // INPI Workers - separados por modo (text/doc)
-async function processNextInpiJobByMode(mode: 'text' | 'document') {
-    if (inpiPaused) return;
-    if (mode === 'text' && inpiTextRunning) return;
-    if (mode === 'document' && inpiDocRunning) return;
+async function processNextInpiJobByMode(mode: 'text' | 'document'): Promise<boolean> {
+    if (inpiPaused) return false;
+    if (mode === 'text' && inpiTextRunning) return false;
+    if (mode === 'document' && inpiDocRunning) return false;
     if (mode === 'text') inpiTextRunning = true;
     else inpiDocRunning = true;
     const modeTag = `mode=${mode}`;
@@ -3677,7 +3786,7 @@ async function processNextInpiJobByMode(mode: 'text' | 'document') {
                 orderBy: [{ attempts: 'asc' }, { updated_at: 'asc' }, { created_at: 'asc' }]
             });
         }
-        if (!job) return;
+        if (!job) return false;
         const includeDocuments = mode === 'document';
         const nextAttempt = job.attempts + 1;
         await prisma.inpiProcessingJob.update({
@@ -3735,6 +3844,18 @@ async function processNextInpiJobByMode(mode: 'text' | 'document') {
                         }
                     }).catch(() => undefined);
                 }
+            } else {
+                await prisma.documentDownloadJob.updateMany({
+                    where: {
+                        patent_id: job.patent_number,
+                        status: 'waiting_inpi_text'
+                    },
+                    data: {
+                        status: 'pending_google_patents',
+                        error: null,
+                        finished_at: null
+                    }
+                }).catch(() => undefined);
             }
             await prisma.inpiProcessingJob.update({
                 where: { id: job.id },
@@ -3760,9 +3881,25 @@ async function processNextInpiJobByMode(mode: 'text' | 'document') {
                     error: `${modeTag} ${errorMessage}`.trim()
                 }
             });
+            if (!includeDocuments) {
+                await prisma.documentDownloadJob.updateMany({
+                    where: {
+                        patent_id: job.patent_number,
+                        status: 'waiting_inpi_text'
+                    },
+                    data: {
+                        status: 'pending_google_patents',
+                        error: truncateError(`INPI_TEXT_FAILED_FALLBACK_TO_GOOGLE ${errorMessage}`),
+                        finished_at: null
+                    }
+                }).catch(() => undefined);
+            }
         }
+        lastInpiJobCompletedAt = Date.now();
+        return true;
     } catch (error) {
         console.error(`Erro no INPI Worker ${mode.toUpperCase()} loop:`, error);
+        return false;
     } finally {
         if (mode === 'text') inpiTextRunning = false;
         else inpiDocRunning = false;
@@ -3770,10 +3907,16 @@ async function processNextInpiJobByMode(mode: 'text' | 'document') {
 }
 
 async function processNextInpiJobs() {
-    await Promise.all([
-        processNextInpiJobByMode('text'),
-        processNextInpiJobByMode('document')
-    ]);
+    if (inpiPaused || inpiTextRunning || inpiDocRunning) return;
+    const elapsed = Date.now() - lastInpiJobCompletedAt;
+    if (lastInpiJobCompletedAt > 0 && elapsed < INPI_JOB_MIN_INTERVAL_MS) return;
+    if (lastInpiJobCompletedAt > 0) {
+        const jitter = Math.floor(Math.random() * INPI_JOB_DELAY_JITTER_MS);
+        if (jitter > 0) await sleep(jitter);
+    }
+    const processedDoc = await processNextInpiJobByMode('document');
+    if (processedDoc) return;
+    await processNextInpiJobByMode('text');
 }
 
 // Funções para gerenciamento do worker INPI

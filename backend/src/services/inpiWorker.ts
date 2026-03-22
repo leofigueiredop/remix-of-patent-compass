@@ -22,6 +22,9 @@ const INPI_HUMANIZE_TYPING_DELAY_MIN = 45; // Digitação mais lenta
 const INPI_HUMANIZE_TYPING_DELAY_MAX = 120;
 const INPI_RANDOM_MOUSE_MOVEMENTS = true;
 const INPI_RANDOM_SCROLLING = true;
+const INPI_NAVIGATION_TIMEOUT_MS = Math.max(90_000, parseInt(process.env.INPI_NAVIGATION_TIMEOUT_MS || '120000', 10));
+const INPI_WAIT_TIMEOUT_MS = Math.max(60_000, parseInt(process.env.INPI_WAIT_TIMEOUT_MS || '90000', 10));
+const INPI_DOWNLOAD_TIMEOUT_MS = Math.max(60_000, parseInt(process.env.INPI_DOWNLOAD_TIMEOUT_MS || '90000', 10));
 
 // Controle de rate limiting
 let lastRequestTime = 0;
@@ -224,7 +227,7 @@ async function ensureLoggedIn(page: Page): Promise<boolean> {
     // Verificar se já está logado
     await page.goto('https://busca.inpi.gov.br/pePI/', { 
         waitUntil: 'networkidle2', 
-        timeout: 45000 
+        timeout: INPI_NAVIGATION_TIMEOUT_MS 
     }).catch(() => undefined);
     
     await humanPause(1.2);
@@ -245,7 +248,7 @@ async function ensureLoggedIn(page: Page): Promise<boolean> {
     console.log('🔐 Realizando login no INPI...');
     await page.goto(loginUrl, { 
         waitUntil: 'networkidle2', 
-        timeout: 60000 
+        timeout: INPI_NAVIGATION_TIMEOUT_MS 
     });
     
     await humanPause(1.5);
@@ -272,7 +275,7 @@ async function ensureLoggedIn(page: Page): Promise<boolean> {
         if (foundLogin) {
             await page.waitForNavigation({ 
                 waitUntil: 'networkidle2', 
-                timeout: 30000 
+                timeout: INPI_WAIT_TIMEOUT_MS 
             }).catch(() => undefined);
             
             await humanPause(1.8);
@@ -326,7 +329,7 @@ async function ensureLoggedIn(page: Page): Promise<boolean> {
         const loginSuccess = await Promise.race([
             page.waitForNavigation({ 
                 waitUntil: 'networkidle2', 
-                timeout: 45000 
+                timeout: INPI_WAIT_TIMEOUT_MS 
             }),
             new Promise(resolve => setTimeout(() => resolve(false), 6000))
         ]).then(() => true).catch(() => false);
@@ -342,7 +345,7 @@ async function ensureLoggedIn(page: Page): Promise<boolean> {
             
             await page.waitForNavigation({ 
                 waitUntil: 'networkidle2', 
-                timeout: 30000 
+                timeout: INPI_WAIT_TIMEOUT_MS 
             }).catch(() => undefined);
         }
         
@@ -418,6 +421,8 @@ async function ensureSessionPage(): Promise<Page> {
         
         sharedBrowser = await initBrowser();
         sharedPage = await sharedBrowser.newPage();
+        sharedPage.setDefaultNavigationTimeout(INPI_NAVIGATION_TIMEOUT_MS);
+        sharedPage.setDefaultTimeout(INPI_WAIT_TIMEOUT_MS);
         
         // Configurações realistas do navegador
         await sharedPage.setViewport({ width: 1280, height: 1024 });
@@ -445,7 +450,7 @@ async function navigateToPatentSearch(page: Page) {
     
     await page.goto('https://busca.inpi.gov.br/pePI/', { 
         waitUntil: 'networkidle2', 
-        timeout: 60000 
+        timeout: INPI_NAVIGATION_TIMEOUT_MS 
     });
     
     await humanPause(1.5);
@@ -470,7 +475,7 @@ async function navigateToPatentSearch(page: Page) {
         
         await page.waitForNavigation({ 
             waitUntil: 'networkidle2', 
-            timeout: 20000 
+            timeout: INPI_WAIT_TIMEOUT_MS 
         }).catch(() => undefined);
         
         await humanPause(1.8);
@@ -484,7 +489,7 @@ async function searchAndOpenPatentDetail(page: Page, codPedido: string) {
     const searchUrl = 'https://busca.inpi.gov.br/pePI/jsp/patentes/PatenteSearchBasico.jsp';
     await page.goto(searchUrl, { 
         waitUntil: 'networkidle2', 
-        timeout: 60000 
+        timeout: INPI_NAVIGATION_TIMEOUT_MS 
     });
     
     await humanPause(2.0); // Pausa longa
@@ -525,7 +530,7 @@ async function searchAndOpenPatentDetail(page: Page, codPedido: string) {
     
     await page.waitForNavigation({ 
         waitUntil: 'networkidle2', 
-        timeout: 60000 
+        timeout: INPI_WAIT_TIMEOUT_MS 
     }).catch(() => undefined);
     
     await humanPause(2.5); // Pausa longa após busca
@@ -570,7 +575,7 @@ async function searchAndOpenPatentDetail(page: Page, codPedido: string) {
     if (resultClicked) {
         await page.waitForNavigation({ 
             waitUntil: 'networkidle2', 
-            timeout: 60000 
+            timeout: INPI_WAIT_TIMEOUT_MS 
         }).catch(() => undefined);
         
         await humanPause(2.0);
@@ -582,7 +587,7 @@ async function searchAndOpenPatentDetail(page: Page, codPedido: string) {
     const detailUrl = `https://busca.inpi.gov.br/pePI/servlet/PatenteServletController?Action=detail&CodPedido=${codPedido}`;
     await page.goto(detailUrl, { 
         waitUntil: 'networkidle2', 
-        timeout: 60000 
+        timeout: INPI_NAVIGATION_TIMEOUT_MS 
     });
     
     await humanPause(2.0);
@@ -600,7 +605,7 @@ async function downloadDocument(url: string, filename: string): Promise<string> 
             method: 'GET',
             url: url,
             responseType: 'stream',
-            timeout: 30000,
+            timeout: INPI_DOWNLOAD_TIMEOUT_MS,
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'application/pdf,text/html,*/*',
@@ -719,6 +724,60 @@ async function extractPatentData(page: Page, codPedido: string, options: Process
             const text = $(el).text();
             return text.length > 100 && text.length < 2000;
         }).first().text());
+    };
+
+    const extractAnuidades = () => {
+        const rows = $('tr').toArray();
+        const result: Array<{ title: string; start_date: string; end_date: string; payment_date: string; status: string }> = [];
+        for (const row of rows) {
+            const cols = $(row).find('td');
+            if (cols.length < 2) continue;
+            const joined = normalizeFlat($(row).text()).toLowerCase();
+            if (!joined.includes('anuidade')) continue;
+            const values = cols.toArray().map((col) => normalizeFlat($(col).text()));
+            const title = values.find((value) => /anuidade/i.test(value)) || values[0] || '';
+            if (!title) continue;
+            result.push({
+                title,
+                start_date: values[1] || '',
+                end_date: values[2] || '',
+                payment_date: values[3] || '',
+                status: values[4] || values[1] || ''
+            });
+        }
+        return result;
+    };
+
+    const extractPeticoes = () => {
+        const rows = $('tr').toArray();
+        const result: Array<{ service_code: string; protocol: string; date: string; client: string; delivery: string; rule_text: string }> = [];
+        for (const row of rows) {
+            const cols = $(row).find('td');
+            if (cols.length < 3) continue;
+            const values = cols.toArray().map((col) => normalizeFlat($(col).text()));
+            const joined = values.join(' ').toLowerCase();
+            const hasProtocol = /\b\d{6,}\b/.test(joined) || joined.includes('protocolo');
+            const hasService = /\b\d{2,4}\b/.test(values[0] || '') || joined.includes('serviço') || joined.includes('servico');
+            if (!hasProtocol || !hasService) continue;
+            const serviceCode = values[0] || '';
+            const protocol = values.find((value) => /\d{6,}/.test(value)) || values[1] || '';
+            const date = values.find((value) => /\d{2}\/\d{2}\/\d{4}/.test(value)) || '';
+            const client = values.find((value) => /universidade|ltda|s\/a|sa|eireli|me|brasil|federal/i.test(value)) || '';
+            const delivery = values.find((value) => /delivery|email|correio|digital|físico|fisico/i.test(value)) || '';
+            const ruleCandidates = $(row).find('a, [title], [data-original-title]').toArray()
+                .map((el) => normalizeFlat($(el).attr('title') || $(el).attr('data-original-title') || $(el).text()))
+                .filter(Boolean);
+            const rule_text = ruleCandidates.find((item) => item.length > 8) || '';
+            result.push({
+                service_code: serviceCode,
+                protocol,
+                date,
+                client,
+                delivery,
+                rule_text
+            });
+        }
+        return result;
     };
     
     // Extrair documentos disponíveis
@@ -917,7 +976,7 @@ async function extractPatentData(page: Page, codPedido: string, options: Process
 
     // Publicações (RPI) completas
     const publicationsTableAll = $('font:contains("Publicações")').closest('table').next('table');
-    const publicacoes: Array<{ rpi: string; date: string; despacho_code: string; complement: string; rpi_url?: string }> = [];
+    const publicacoes: Array<{ rpi: string; date: string; despacho_code: string; complement: string; despacho_rule?: string; rpi_url?: string }> = [];
     if (publicationsTableAll.length) {
         const rows = publicationsTableAll.find('tr').slice(1);
         for (let i = 0; i < rows.length; i++) {
@@ -928,9 +987,15 @@ async function extractPatentData(page: Page, codPedido: string, options: Process
                 const despacho_code = normalizeFlat($(cols[2]).text());
                 const pdfLink = $(cols[3]).find('a').attr('href');
                 const complement = normalizeFlat($(cols[4]).text());
+                const despacho_rule = normalizeFlat(
+                    $(cols[2]).find('a').first().attr('title')
+                    || $(cols[2]).find('a').first().attr('data-original-title')
+                    || $(cols[2]).find('[title]').first().attr('title')
+                    || ''
+                );
                 const rpi_url = pdfLink ? (pdfLink.startsWith('http') ? pdfLink : `https://busca.inpi.gov.br${pdfLink}`) : undefined;
                 if (rpi) {
-                    publicacoes.push({ rpi, date, despacho_code, complement, rpi_url });
+                    publicacoes.push({ rpi, date, despacho_code, complement, despacho_rule, rpi_url });
                 }
             }
         }
@@ -944,12 +1009,12 @@ async function extractPatentData(page: Page, codPedido: string, options: Process
         resumoDetalhado: extractResumoDetalhado(),
         dataDeposito: extractTableData('Data do Depósito') || extractTableData('Depósito'),
         dataPublicacao: extractTableData('Data de Publicação') || extractTableData('Publicação'),
-        titular: extractTableData('Titular') || extractTableData('Inventor'),
-        titularCompleto: extractTableData('Titular'),
-        inventor: extractTableData('Inventor') || extractTableData('Inventores'),
-        inventores: extractTableData('Inventor') || extractTableData('Inventores'),
+        titular: extractTableData('Nome do Depositante') || extractTableData('Depositante') || extractTableData('Titular') || extractTableData('Inventor'),
+        titularCompleto: extractTableData('Nome do Depositante') || extractTableData('Depositante') || extractTableData('Titular'),
+        inventor: extractTableData('Nome do Inventor') || extractTableData('Inventor') || extractTableData('Inventores'),
+        inventores: extractTableData('Nome do Inventor') || extractTableData('Inventor') || extractTableData('Inventores'),
         procurador: extractProcurador(),
-        classificacao: extractTableData('Classificação') || extractTableData('IPC'),
+        classificacao: extractTableData('Classificação CPC') || extractTableData('Classificação') || extractTableData('IPC'),
         classificacaoIPC: extractTableData('Classificação Internacional') || extractTableData('IPC'),
         prioridade: extractTableData('Prioridade') || extractTableData('Reivindicação de Prioridade'),
         status: classifyPatentStatus(
@@ -962,6 +1027,8 @@ async function extractPatentData(page: Page, codPedido: string, options: Process
         temDocumentos: documentos.length > 0,
         documentosBaixados: documentos.filter(d => d.baixado).length,
         publicacoes,
+        anuidades: extractAnuidades(),
+        peticoes: extractPeticoes(),
         url: page.url(),
         html: html,
         timestamp: new Date().toISOString()
@@ -1010,7 +1077,8 @@ export async function processInpiPatent(codPedido: string, options: ProcessInpiP
                                 const existing = await prisma.inpiPublication.findFirst({
                                     where: { patent_id: targetCodPedido, rpi: pub.rpi, despacho_code: pub.despacho_code, date: pub.date, complement: pub.complement }
                                 });
-                                const despacho_desc = classifyPatentStatus(pub.despacho_code, pub.complement);
+                                const despachoBase = classifyPatentStatus(pub.despacho_code, pub.complement);
+                                const despacho_desc = [despachoBase, normalizeFlat((pub as any).despacho_rule || '')].filter(Boolean).join(' | ');
                                 if (existing) {
                                     await prisma.inpiPublication.update({
                                         where: { id: existing.id },
@@ -1039,6 +1107,38 @@ export async function processInpiPatent(codPedido: string, options: ProcessInpiP
                                 const msg = (e as any)?.message ?? String(e);
                                 console.warn(`Falha ao persistir publicação RPI ${pub.rpi}: ${msg}`);
                             }
+                        }
+                    }
+                    if (Array.isArray(patentData.peticoes)) {
+                        await prisma.inpiPetition.deleteMany({ where: { patent_id: targetCodPedido } }).catch(() => undefined);
+                        const petitionsData = patentData.peticoes
+                            .map((item) => ({
+                                patent_id: targetCodPedido,
+                                service_code: normalizeFlat(item.service_code) || null,
+                                protocol: normalizeFlat(item.protocol) || null,
+                                date: normalizeFlat(item.date) || null,
+                                client: normalizeFlat(item.client) || null,
+                                delivery: [normalizeFlat(item.delivery), normalizeFlat((item as any).rule_text || '')].filter(Boolean).join(' | ') || null
+                            }))
+                            .filter((item) => item.service_code || item.protocol || item.date || item.client || item.delivery);
+                        if (petitionsData.length) {
+                            await prisma.inpiPetition.createMany({ data: petitionsData });
+                        }
+                    }
+                    if (Array.isArray(patentData.anuidades)) {
+                        await prisma.inpiAnnuity.deleteMany({ where: { patent_id: targetCodPedido } }).catch(() => undefined);
+                        const annuitiesData = patentData.anuidades
+                            .map((item) => ({
+                                patent_id: targetCodPedido,
+                                title: normalizeFlat(item.title) || null,
+                                start_date: normalizeFlat(item.start_date) || null,
+                                end_date: normalizeFlat(item.end_date) || null,
+                                payment_date: normalizeFlat(item.payment_date) || null,
+                                status: normalizeFlat(item.status) || null
+                            }))
+                            .filter((item) => item.title || item.start_date || item.end_date || item.payment_date || item.status);
+                        if (annuitiesData.length) {
+                            await prisma.inpiAnnuity.createMany({ data: annuitiesData });
                         }
                     }
                     await prisma.inpiPatent.upsert({

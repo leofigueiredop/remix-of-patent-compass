@@ -3791,7 +3791,7 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
             take: limit
         }),
         prisma.documentDownloadJob.findMany({
-            where: { status: { in: ['pending', 'running'] } },
+            where: { status: { in: ['pending', 'running', 'pending_google_patents', 'running_google_patents', 'pending_ops', 'running_ops', 'waiting_inpi_text', 'waiting_inpi'] } },
             orderBy: { created_at: 'asc' },
             include: {
                 patent: { select: { numero_publicacao: true, title: true, status: true } }
@@ -3807,7 +3807,7 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
             take: limit
         }),
         prisma.documentDownloadJob.findMany({
-            where: { status: { in: ['failed', 'failed_permanent', 'not_found', 'skipped_sigilo'] } },
+            where: { status: { in: ['failed', 'failed_permanent', 'failed_google_patents', 'failed_ops', 'not_found', 'skipped_sigilo'] } },
             orderBy: { finished_at: 'desc' },
             include: {
                 patent: { select: { numero_publicacao: true, title: true, status: true } }
@@ -3869,13 +3869,13 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
             where: { status: { in: ['failed', 'failed_permanent'] } }
         }),
         prisma.documentDownloadJob.count({
-            where: { status: { in: ['pending', 'running'] } }
+            where: { status: { in: ['pending', 'running', 'pending_google_patents', 'running_google_patents', 'pending_ops', 'running_ops', 'waiting_inpi_text', 'waiting_inpi'] } }
         }),
         prisma.documentDownloadJob.count({
             where: { status: 'completed' }
         }),
         prisma.documentDownloadJob.count({
-            where: { status: { in: ['failed', 'failed_permanent', 'not_found', 'skipped_sigilo'] } }
+            where: { status: { in: ['failed', 'failed_permanent', 'failed_google_patents', 'failed_ops', 'not_found', 'skipped_sigilo'] } }
         }),
         prismaAny.opsBibliographicJob.count({
             where: { status: { in: ['pending', 'running'] } }
@@ -3921,7 +3921,13 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
     const mapRpi = (rows: any[]) => rows.map((row) => ({ ...row, source: 'rpi_xml' }));
     const mapDocs = (rows: any[]) => rows.map((row) => ({
         ...row,
-        source: row.storage_key ? 'bucket' : (extractSource(row.error) || (row.status === 'not_found' ? 'google_patents' : null))
+        source: row.status?.includes('ops')
+            ? 'ops_api'
+            : row.status === 'waiting_inpi' || row.status === 'waiting_inpi_text'
+                ? 'inpi'
+                : row.storage_key
+                    ? 'bucket'
+                    : (extractSource(row.error) || (row.status === 'not_found' ? 'google_patents' : null))
     }));
     const mapOps = (rows: any[]) => rows.map((row) => ({
         ...row,
@@ -4073,14 +4079,14 @@ fastify.post('/background-workers/requeue-by-filter', async (request: any) => {
             await prisma.documentDownloadJob.upsert({
                 where: { patent_id: row.patent_id },
                 update: {
-                    status: 'pending',
+                    status: 'pending_google_patents',
                     error: null,
                     finished_at: null,
                     publication_number: row.patent_number || undefined
                 },
                 create: {
                     patent_id: row.patent_id,
-                    status: 'pending',
+                    status: 'pending_google_patents',
                     publication_number: row.patent_number || undefined
                 }
             });
