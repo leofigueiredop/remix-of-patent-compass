@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import AppLayout from "@/components/AppLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -61,6 +61,11 @@ type QueuePayload = {
       success: number;
       errors: number;
     };
+    pagination?: {
+      processing: { page: number; pageSize: number; total: number; totalPages: number };
+      success: { page: number; pageSize: number; total: number; totalPages: number };
+      errors: { page: number; pageSize: number; total: number; totalPages: number };
+    };
   };
   ops: {
     processing: OpsJob[];
@@ -93,6 +98,8 @@ type QueuePayload = {
     };
   };
 };
+
+type DocsTabKey = "processing" | "success" | "errors";
 
 type OpsJob = {
   id: string;
@@ -402,6 +409,40 @@ function InpiTable({ rows, onRetry }: { rows: InpiJob[]; onRetry?: (id: string) 
   );
 }
 
+function QueuePagination({
+  page,
+  totalPages,
+  total,
+  pageSize,
+  loading,
+  onPageChange
+}: {
+  page: number;
+  totalPages: number;
+  total: number;
+  pageSize: number;
+  loading: boolean;
+  onPageChange: (nextPage: number) => void;
+}) {
+  const safeTotalPages = Math.max(1, totalPages || 1);
+  const safePage = Math.min(safeTotalPages, Math.max(1, page || 1));
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+      <div className="text-xs text-slate-600">
+        Página {safePage}/{safeTotalPages} • {total} registros • {pageSize}/página
+      </div>
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" disabled={loading || safePage <= 1} onClick={() => onPageChange(safePage - 1)}>
+          Anterior
+        </Button>
+        <Button variant="outline" size="sm" disabled={loading || safePage >= safeTotalPages} onClick={() => onPageChange(safePage + 1)}>
+          Próxima
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export default function BackgroundWorkers() {
   const [data, setData] = useState<QueuePayload>(initialData);
   const [loading, setLoading] = useState(false);
@@ -419,7 +460,12 @@ export default function BackgroundWorkers() {
   });
   const [mainTab, setMainTab] = useState("rpi");
   const [rpiTab, setRpiTab] = useState("processing");
-  const [docsTab, setDocsTab] = useState("processing");
+  const [docsTab, setDocsTab] = useState<DocsTabKey>("processing");
+  const [docsPages, setDocsPages] = useState<Record<DocsTabKey, number>>({
+    processing: 1,
+    success: 1,
+    errors: 1
+  });
   const [opsTab, setOpsTab] = useState("processing");
   const [inpiTab, setInpiTab] = useState("processing");
   const [enqueueFrom, setEnqueueFrom] = useState("");
@@ -457,11 +503,30 @@ export default function BackgroundWorkers() {
     };
   }, [data.docs.processing, data.docs.errors]);
 
-  const fetchQueues = async () => {
+  const docsPagination = useMemo(() => {
+    const fallback = { page: 1, pageSize: 50, total: 0, totalPages: 1 };
+    return {
+      processing: data.docs.pagination?.processing || fallback,
+      success: data.docs.pagination?.success || fallback,
+      errors: data.docs.pagination?.errors || fallback
+    };
+  }, [data.docs.pagination]);
+
+  const fetchQueues = useCallback(async () => {
     setLoading(true);
     try {
+      const docsStatus: DocsTabKey = docsTab === "success" || docsTab === "errors" ? docsTab : "processing";
+      const params = new URLSearchParams({
+        limit: "60",
+        docsPageSize: "50",
+        docsProcessingPage: String(docsPages.processing),
+        docsSuccessPage: String(docsPages.success),
+        docsErrorsPage: String(docsPages.errors),
+        docsLazy: "true",
+        docsStatus: mainTab === "docs" ? docsStatus : "processing"
+      });
       const [queues, workerState] = await Promise.all([
-        api.get(`/background-workers/queues?limit=120`),
+        api.get(`/background-workers/queues?${params.toString()}`),
         api.get(`/background-workers/state`)
       ]);
       setData(queues.data);
@@ -469,7 +534,7 @@ export default function BackgroundWorkers() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [docsPages.errors, docsPages.processing, docsPages.success, docsTab, mainTab]);
 
   const bootstrapRpi = async () => {
     setLoading(true);
@@ -656,10 +721,10 @@ export default function BackgroundWorkers() {
   };
 
   useEffect(() => {
-    fetchQueues();
-    const timer = setInterval(() => fetchQueues(), 8000);
+    void fetchQueues();
+    const timer = setInterval(() => void fetchQueues(), 8000);
     return () => clearInterval(timer);
-  }, []);
+  }, [fetchQueues]);
 
   return (
     <AppLayout>
@@ -863,15 +928,43 @@ export default function BackgroundWorkers() {
                 <CardDescription>Somente patentes sem sigilo. Falhas e sem-documento ficam registradas para consulta.</CardDescription>
               </CardHeader>
               <CardContent>
-                <Tabs value={docsTab} onValueChange={setDocsTab}>
+                <Tabs value={docsTab} onValueChange={(value) => setDocsTab(value as DocsTabKey)}>
                   <TabsList className="w-full justify-start overflow-x-auto whitespace-nowrap">
                     <TabsTrigger value="processing">Processando</TabsTrigger>
                     <TabsTrigger value="success">Sucesso</TabsTrigger>
                     <TabsTrigger value="errors">Erros</TabsTrigger>
                   </TabsList>
-                  <TabsContent value="processing"><DocsTable rows={data.docs.processing} /></TabsContent>
-                  <TabsContent value="success"><DocsTable rows={data.docs.success} /></TabsContent>
+                  <TabsContent value="processing" className="space-y-3">
+                    <QueuePagination
+                      page={docsPagination.processing.page}
+                      totalPages={docsPagination.processing.totalPages}
+                      total={docsPagination.processing.total}
+                      pageSize={docsPagination.processing.pageSize}
+                      loading={loading}
+                      onPageChange={(nextPage) => setDocsPages((prev) => ({ ...prev, processing: nextPage }))}
+                    />
+                    <DocsTable rows={data.docs.processing} />
+                  </TabsContent>
+                  <TabsContent value="success" className="space-y-3">
+                    <QueuePagination
+                      page={docsPagination.success.page}
+                      totalPages={docsPagination.success.totalPages}
+                      total={docsPagination.success.total}
+                      pageSize={docsPagination.success.pageSize}
+                      loading={loading}
+                      onPageChange={(nextPage) => setDocsPages((prev) => ({ ...prev, success: nextPage }))}
+                    />
+                    <DocsTable rows={data.docs.success} />
+                  </TabsContent>
                   <TabsContent value="errors" className="space-y-3">
+                    <QueuePagination
+                      page={docsPagination.errors.page}
+                      totalPages={docsPagination.errors.totalPages}
+                      total={docsPagination.errors.total}
+                      pageSize={docsPagination.errors.pageSize}
+                      loading={loading}
+                      onPageChange={(nextPage) => setDocsPages((prev) => ({ ...prev, errors: nextPage }))}
+                    />
                     <div className="flex justify-end gap-2">
                       <Button variant="outline" size="sm" disabled={loading} onClick={reprocessShortDocs}>
                         Reprocessar docs 1 página

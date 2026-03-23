@@ -4039,7 +4039,19 @@ fastify.get('/patents/processed', async (request: any, reply) => {
 
 fastify.get('/background-workers/queues', async (request: any, reply) => {
     try {
-        const limit = Math.min(200, Math.max(20, parseInt((request.query?.limit || '100') as string, 10)));
+        const limit = Math.min(200, Math.max(20, parseInt((request.query?.limit || '80') as string, 10)));
+        const docsPageSize = Math.min(100, Math.max(10, parseInt((request.query?.docsPageSize || '50') as string, 10)));
+        const docsProcessingPage = Math.max(1, parseInt((request.query?.docsProcessingPage || '1') as string, 10));
+        const docsSuccessPage = Math.max(1, parseInt((request.query?.docsSuccessPage || '1') as string, 10));
+        const docsErrorsPage = Math.max(1, parseInt((request.query?.docsErrorsPage || '1') as string, 10));
+        const docsLazy = String(request.query?.docsLazy || 'false').toLowerCase() === 'true';
+        const docsStatus = String(request.query?.docsStatus || 'processing').toLowerCase();
+        const loadDocsProcessing = !docsLazy || docsStatus === 'processing';
+        const loadDocsSuccess = !docsLazy || docsStatus === 'success';
+        const loadDocsErrors = !docsLazy || docsStatus === 'errors';
+        const docsProcessingSkip = (docsProcessingPage - 1) * docsPageSize;
+        const docsSuccessSkip = (docsSuccessPage - 1) * docsPageSize;
+        const docsErrorsSkip = (docsErrorsPage - 1) * docsPageSize;
         const [rpiProcessing, rpiSuccess, rpiErrors, docsProcessing, docsSuccess, docsErrors, opsProcessing, opsSuccess, opsErrors, inpiProcessing, inpiSuccess, inpiErrors, bqProcessing, bqSuccess, bqErrors, rpiProcessingCount, rpiSuccessCount, rpiErrorsCount, docsProcessingCount, docsSuccessCount, docsErrorsCount, opsProcessingCount, opsSuccessCount, opsErrorsCount, inpiProcessingCount, inpiSuccessCount, inpiErrorsCount, bqProcessingCount, bqSuccessCount, bqErrorsCount] = await Promise.all([
         prisma.rpiImportJob.findMany({
             where: { status: { in: ['pending', 'running'] } },
@@ -4056,30 +4068,33 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
             orderBy: { finished_at: 'desc' },
             take: limit
         }),
-        prisma.documentDownloadJob.findMany({
+        loadDocsProcessing ? prisma.documentDownloadJob.findMany({
             where: { status: { in: ['pending', 'running', 'pending_google_patents', 'running_google_patents', 'pending_ops', 'running_ops', 'waiting_inpi_text', 'waiting_inpi'] } },
             orderBy: { created_at: 'asc' },
             include: {
                 patent: { select: { numero_publicacao: true, title: true, status: true } }
             },
-            take: limit
-        }),
-        prisma.documentDownloadJob.findMany({
+            take: docsPageSize,
+            skip: docsProcessingSkip
+        }) : Promise.resolve([]),
+        loadDocsSuccess ? prisma.documentDownloadJob.findMany({
             where: { status: 'completed' },
             orderBy: { finished_at: 'desc' },
             include: {
                 patent: { select: { numero_publicacao: true, title: true, status: true } }
             },
-            take: limit
-        }),
-        prisma.documentDownloadJob.findMany({
+            take: docsPageSize,
+            skip: docsSuccessSkip
+        }) : Promise.resolve([]),
+        loadDocsErrors ? prisma.documentDownloadJob.findMany({
             where: { status: { in: ['failed', 'failed_permanent', 'failed_google_patents', 'failed_ops', 'not_found', 'skipped_sigilo'] } },
             orderBy: { finished_at: 'desc' },
             include: {
                 patent: { select: { numero_publicacao: true, title: true, status: true } }
             },
-            take: limit
-        }),
+            take: docsPageSize,
+            skip: docsErrorsSkip
+        }) : Promise.resolve([]),
         prismaAny.opsBibliographicJob.findMany({
             where: { status: { in: ['pending', 'running'] } },
             orderBy: { created_at: 'asc' },
@@ -4221,6 +4236,26 @@ fastify.get('/background-workers/queues', async (request: any, reply) => {
                     processing: docsProcessingCount,
                     success: docsSuccessCount,
                     errors: docsErrorsCount
+                },
+                pagination: {
+                    processing: {
+                        page: docsProcessingPage,
+                        pageSize: docsPageSize,
+                        total: docsProcessingCount,
+                        totalPages: Math.max(1, Math.ceil(docsProcessingCount / docsPageSize))
+                    },
+                    success: {
+                        page: docsSuccessPage,
+                        pageSize: docsPageSize,
+                        total: docsSuccessCount,
+                        totalPages: Math.max(1, Math.ceil(docsSuccessCount / docsPageSize))
+                    },
+                    errors: {
+                        page: docsErrorsPage,
+                        pageSize: docsPageSize,
+                        total: docsErrorsCount,
+                        totalPages: Math.max(1, Math.ceil(docsErrorsCount / docsPageSize))
+                    }
                 }
             },
             ops: {
