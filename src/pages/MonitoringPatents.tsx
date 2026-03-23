@@ -5,10 +5,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from "@/components/ui/sheet";
-import { Search, Eye, Users, ShieldCheck, FileSearch, Layers, Loader2 } from "lucide-react";
+import { Search, Eye, Users, ShieldCheck, FileSearch, Layers, Loader2, FilterX } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import OperationalPageHeader from "@/components/operations/OperationalPageHeader";
 
 const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000").replace(/\/+$/, "");
 
@@ -164,22 +165,16 @@ export default function MonitoringPatents() {
     return (
         <AppLayout>
             <div className="flex flex-col gap-6 w-full mx-auto">
-                <div className="flex justify-between items-end">
-                    <div className="animate-in fade-in slide-in-from-left duration-700">
-                        <h1 className="text-2xl font-bold flex items-center gap-3 text-slate-900 mb-2">
-                            <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center">
-                                <ShieldCheck className="w-5 h-5 text-amber-600" />
-                            </div>
-                            Monitoramento de Colidência
-                        </h1>
-                        <p className="text-muted-foreground text-sm mt-1">
-                            Gerenciamento do portfólio vigiado e análise de conflitos.
-                        </p>
-                    </div>
-                    <div className="text-xs text-muted-foreground bg-slate-100 px-3 py-1.5 rounded-full font-medium">
-                        {loading ? "Atualizando..." : `${rows.length} ativos na página`}
-                    </div>
-                </div>
+                <OperationalPageHeader
+                    title="Monitoramento de Colidência"
+                    description="Gerenciamento do portfólio monitorado com priorização orientada por risco."
+                    icon={<ShieldCheck className="w-5 h-5 text-slate-600" />}
+                    actions={
+                        <div className="text-xs text-muted-foreground bg-slate-100 px-3 py-1.5 rounded-full font-medium">
+                            {loading ? "Atualizando..." : `${rows.length} ativos na página`}
+                        </div>
+                    }
+                />
 
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
                     <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
@@ -210,7 +205,7 @@ export default function MonitoringPatents() {
                 </div>
 
                 {/* Filters */}
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-5 gap-3">
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-6 gap-3">
                     <Input className="bg-slate-50 border-slate-200 focus-visible:ring-amber-500" placeholder="Buscar por número, pedido ou título" value={query} onChange={(e) => setQuery(e.target.value)} />
                     <Input className="bg-slate-50 border-slate-200 focus-visible:ring-amber-500" placeholder="Filtrar por procurador" value={attorney} onChange={(e) => setAttorney(e.target.value)} />
                     <select className="h-9 rounded-md border border-slate-200 bg-slate-50 px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-500" value={source} onChange={(e) => setSource(e.target.value)}>
@@ -225,6 +220,9 @@ export default function MonitoringPatents() {
                     </select>
                     <Button className="gap-2 bg-slate-900 hover:bg-slate-800 text-white" onClick={() => void searchNow()}>
                         <Search className="w-4 h-4" /> Filtrar
+                    </Button>
+                    <Button variant="outline" className="gap-2" onClick={() => { setQuery(""); setAttorney(""); setSource("all"); setActive("all"); void load(1); }}>
+                        <FilterX className="w-4 h-4" /> Limpar
                     </Button>
                 </div>
 

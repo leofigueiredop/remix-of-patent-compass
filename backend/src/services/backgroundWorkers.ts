@@ -4051,6 +4051,21 @@ export async function enqueueInpiDocumentReprocessing(patentNumbers?: string[], 
     return enqueueInpiReprocessing(patentNumbers, priority, 'document');
 }
 
+export async function enqueuePriorityInpiDocumentJob(patentNumber: string, priority = 99) {
+    const normalizedPriority = Math.max(1, Math.min(100, Number(priority) || 99));
+    await queueInpiProcessingJob({
+        patentNumber,
+        priority: normalizedPriority,
+        mode: 'document'
+    });
+    processNextInpiJobs().catch(() => undefined);
+    return {
+        patentNumber: normalizeInpiCodPedido(patentNumber),
+        priority: normalizedPriority,
+        mode: 'document'
+    };
+}
+
 export async function startBackgroundWorkers() {
     if (loopsStarted) return;
     loopsStarted = true;

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import AppLayout from "@/components/AppLayout";
-import { Bell, Search, Filter, AlertCircle, ShieldAlert, CheckCircle2 } from "lucide-react";
+import { Bell, Search, Filter, AlertCircle, ShieldAlert, CheckCircle2, FilterX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { api } from "@/services/auth";
+import OperationalPageHeader from "@/components/operations/OperationalPageHeader";
+import OperationalKpiCard from "@/components/operations/OperationalKpiCard";
 
 type AlertRow = {
     id: string;
@@ -117,58 +119,22 @@ export default function Alerts() {
     return (
         <AppLayout>
             <div className="flex flex-col gap-6 w-full mx-auto">
-                <div className="flex justify-between items-end">
-                    <div className="animate-in fade-in slide-in-from-left duration-700">
-                        <h1 className="text-2xl font-bold flex items-center gap-3 text-slate-900 mb-2">
-                            <div className="w-10 h-10 rounded-xl bg-rose-50 border border-rose-100 flex items-center justify-center">
-                                <Bell className="w-5 h-5 text-rose-600" />
-                            </div>
-                            Central de Alertas
-                        </h1>
-                        <p className="text-muted-foreground text-sm mt-1">
-                            Notificações operacionais, eventos críticos e falhas de sistema.
-                        </p>
-                    </div>
-                </div>
+                <OperationalPageHeader
+                    title="Central de Alertas"
+                    description="Notificações operacionais, eventos críticos e falhas com priorização rápida."
+                    icon={<Bell className="w-5 h-5 text-slate-600" />}
+                    actions={
+                        <Button variant="outline" className="gap-2 h-10 text-sm bg-white text-slate-600 shrink-0" onClick={markSelectedAsRead} disabled={selectedIds.length === 0}>
+                            <CheckCircle2 className="w-4 h-4" /> Marcar selecionados
+                        </Button>
+                    }
+                />
 
-                {/* KPIs */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-start justify-between">
-                        <div>
-                            <p className="text-xs font-medium text-slate-500 mb-1">Não Lidos</p>
-                            <h3 className="text-2xl font-bold text-slate-900">{kpis.unread}</h3>
-                        </div>
-                        <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
-                            <Bell className="w-4 h-4" />
-                        </div>
-                    </div>
-                    <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-start justify-between">
-                        <div>
-                            <p className="text-xs font-medium text-slate-500 mb-1">Críticos</p>
-                            <h3 className="text-2xl font-bold text-slate-900">{kpis.critical}</h3>
-                        </div>
-                        <div className="w-8 h-8 rounded-full bg-rose-50 flex items-center justify-center text-rose-600">
-                            <ShieldAlert className="w-4 h-4" />
-                        </div>
-                    </div>
-                    <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-start justify-between">
-                        <div>
-                            <p className="text-xs font-medium text-slate-500 mb-1">Meus Alertas</p>
-                            <h3 className="text-2xl font-bold text-slate-900">{kpis.mine}</h3>
-                        </div>
-                        <div className="w-8 h-8 rounded-full bg-amber-50 flex items-center justify-center text-amber-600">
-                            <AlertCircle className="w-4 h-4" />
-                        </div>
-                    </div>
-                    <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-start justify-between">
-                        <div>
-                            <p className="text-xs font-medium text-slate-500 mb-1">Resolvidos Hoje</p>
-                            <h3 className="text-2xl font-bold text-slate-900">{kpis.solvedToday}</h3>
-                        </div>
-                        <div className="w-8 h-8 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600">
-                            <CheckCircle2 className="w-4 h-4" />
-                        </div>
-                    </div>
+                    <OperationalKpiCard label="Não Lidos" value={kpis.unread} icon={<Bell className="w-4 h-4" />} tone="info" />
+                    <OperationalKpiCard label="Críticos" value={kpis.critical} icon={<ShieldAlert className="w-4 h-4" />} tone="critical" />
+                    <OperationalKpiCard label="Meus Alertas" value={kpis.mine} icon={<AlertCircle className="w-4 h-4" />} tone="warning" />
+                    <OperationalKpiCard label="Resolvidos Hoje" value={kpis.solvedToday} icon={<CheckCircle2 className="w-4 h-4" />} tone="success" />
                 </div>
 
                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
@@ -199,11 +165,23 @@ export default function Alerts() {
                     />
                     <Input type="date" className="h-10 w-full sm:w-40 bg-white" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
                     <Input type="date" className="h-10 w-full sm:w-40 bg-white" value={toDate} onChange={(e) => setToDate(e.target.value)} />
-                    <Button variant="outline" className="gap-2 bg-white text-slate-600 shrink-0 w-full sm:w-auto" onClick={() => void loadAlerts()} disabled={loading}>
+                    <Button variant="outline" className="gap-2 h-10 text-sm bg-white text-slate-600 shrink-0 w-full sm:w-auto" onClick={() => void loadAlerts()} disabled={loading}>
                         <Filter className="w-4 h-4" /> Filtros
                     </Button>
-                    <Button variant="outline" className="gap-2 bg-white text-slate-600 shrink-0 w-full sm:w-auto" onClick={markSelectedAsRead} disabled={selectedIds.length === 0}>
-                        <CheckCircle2 className="w-4 h-4" /> Marcar selecionados
+                    <Button
+                        variant="outline"
+                        className="gap-2 h-10 text-sm bg-white text-slate-600 shrink-0 w-full sm:w-auto"
+                        onClick={() => {
+                            setQuery("");
+                            setUnreadOnly(false);
+                            setSeverityFilter("all");
+                            setFromDate("");
+                            setToDate("");
+                            setDespachoFilter("");
+                            void loadAlerts();
+                        }}
+                    >
+                        <FilterX className="w-4 h-4" /> Limpar
                     </Button>
                 </div>
 

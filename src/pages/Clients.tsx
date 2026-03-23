@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import AppLayout from "@/components/AppLayout";
-import { Users, Search, Plus, Filter, Mail, Briefcase, Sparkles, UserRoundCog } from "lucide-react";
+import { Users, Search, Plus, Filter, Mail, Briefcase, Sparkles, UserRoundCog, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -10,6 +10,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { api } from "@/services/auth";
+import OperationalPageHeader from "@/components/operations/OperationalPageHeader";
+import OperationalKpiCard from "@/components/operations/OperationalKpiCard";
 
 type Client = {
     id: string;
@@ -22,6 +24,8 @@ type Client = {
         patents: number;
     };
     contacts_count?: number;
+    pi_types?: Array<"patente" | "marca" | "di">;
+    primary_pi_type?: "patente" | "marca" | "di";
 };
 
 type ClientContact = {
@@ -48,6 +52,7 @@ export default function Clients() {
     const [autofilling, setAutofilling] = useState(false);
     const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
     const [hasContactFilter, setHasContactFilter] = useState<"all" | "yes" | "no">("all");
+    const [piTypeFilter, setPiTypeFilter] = useState<"all" | "patente" | "marca" | "di">("all");
     const [profileOpen, setProfileOpen] = useState(false);
     const [selectedClient, setSelectedClient] = useState<Client | null>(null);
     const [contacts, setContacts] = useState<ClientContact[]>([]);
@@ -58,6 +63,7 @@ export default function Clients() {
     const [newContactPrimary, setNewContactPrimary] = useState(false);
     const [savingContact, setSavingContact] = useState(false);
     const [routingRules, setRoutingRules] = useState<Array<{ occurrenceType: string; roleArea: "patents" | "financial" | "brands" | "general"; overrideContactId?: string }>>([]);
+    const [newPiTypes, setNewPiTypes] = useState<Array<"patente" | "marca" | "di">>(["patente"]);
 
     const loadClients = async () => {
         setLoading(true);
@@ -173,13 +179,15 @@ export default function Clients() {
             await api.post(`/clients`, {
                 name: newName,
                 email: newEmail || null,
-                document: newDocument || null
+                document: newDocument || null,
+                piTypes: newPiTypes
             });
             toast.success("Cliente cadastrado com sucesso!");
             setIsCreateModalOpen(false);
             setNewName("");
             setNewEmail("");
             setNewDocument("");
+            setNewPiTypes(["patente"]);
             loadClients();
         } catch (error: any) {
             toast.error(error.response?.data?.error || "Erro ao criar cliente. Verifique se o backend tem a rota implementada.");
@@ -198,51 +206,52 @@ export default function Clients() {
         const matchesContact = hasContactFilter === "all"
             || (hasContactFilter === "yes" && contactCount > 0)
             || (hasContactFilter === "no" && contactCount === 0);
-        return matchesQuery && matchesStatus && matchesContact;
+        const matchesPiType = piTypeFilter === "all"
+            || Array.isArray(c.pi_types) && c.pi_types.includes(piTypeFilter);
+        return matchesQuery && matchesStatus && matchesContact && matchesPiType;
     });
     const crmClientMetrics = {
         total: clients.length,
         active: clients.filter((c) => String(c.status || "active").toLowerCase() === "active").length,
         withoutContact: clients.filter((c) => Number(c.contacts_count || 0) === 0).length,
         monitoredAssets: clients.reduce((sum, c) => sum + Number(c._count?.patents || 0), 0),
+        patente: clients.filter((c) => (c.pi_types || []).includes("patente")).length,
+        marca: clients.filter((c) => (c.pi_types || []).includes("marca")).length,
+        di: clients.filter((c) => (c.pi_types || []).includes("di")).length
     };
 
     return (
         <AppLayout>
             <div className="flex flex-col gap-6 w-full mx-auto">
-                <div className="flex justify-between items-end">
-                    <div className="animate-in fade-in slide-in-from-left duration-700">
-                        <h1 className="text-2xl font-bold flex items-center gap-3 text-slate-900 mb-2">
-                            <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center">
-                                <Users className="w-5 h-5 text-blue-600" />
-                            </div>
-                            CRM de Clientes de PI
-                        </h1>
-                        <p className="text-muted-foreground text-sm mt-1">
-                            Cadastre contas, responsáveis e regras de roteamento para operações de propriedade intelectual.
-                        </p>
-                    </div>
-                    <Button onClick={() => setIsCreateModalOpen(true)} className="gap-2 bg-blue-600 hover:bg-blue-700 text-white">
-                        <Plus className="w-4 h-4" /> Novo Cliente
-                    </Button>
-                </div>
+                <OperationalPageHeader
+                    title="CRM de Clientes de PI"
+                    description="Cadastre contas, responsáveis e regras de roteamento para operações de propriedade intelectual."
+                    icon={<Users className="w-5 h-5 text-slate-600" />}
+                    actions={
+                        <Button onClick={() => setIsCreateModalOpen(true)} className="gap-2 h-10 text-sm bg-blue-600 hover:bg-blue-700 text-white">
+                            <Plus className="w-4 h-4" /> Novo Cliente
+                        </Button>
+                    }
+                />
 
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                    <div className="rounded-xl border border-slate-200 bg-white p-3">
-                        <p className="text-xs text-slate-500">Clientes totais</p>
-                        <p className="text-2xl font-semibold text-slate-900">{crmClientMetrics.total}</p>
+                    <OperationalKpiCard label="Clientes totais" value={crmClientMetrics.total} icon={<Users className="w-4 h-4" />} tone="default" />
+                    <OperationalKpiCard label="Contas ativas" value={crmClientMetrics.active} icon={<CheckCircle2 className="w-4 h-4" />} tone="success" />
+                    <OperationalKpiCard label="Sem contato cadastrado" value={crmClientMetrics.withoutContact} icon={<UserRoundCog className="w-4 h-4" />} tone="warning" />
+                    <OperationalKpiCard label="Ativos monitorados" value={crmClientMetrics.monitoredAssets} icon={<Briefcase className="w-4 h-4" />} tone="info" />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3">
+                        <p className="text-xs text-indigo-700">Clientes com Patente</p>
+                        <p className="text-2xl font-semibold text-indigo-700">{crmClientMetrics.patente}</p>
                     </div>
-                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                        <p className="text-xs text-emerald-700">Contas ativas</p>
-                        <p className="text-2xl font-semibold text-emerald-700">{crmClientMetrics.active}</p>
+                    <div className="rounded-xl border border-fuchsia-200 bg-fuchsia-50 p-3">
+                        <p className="text-xs text-fuchsia-700">Clientes com Marca</p>
+                        <p className="text-2xl font-semibold text-fuchsia-700">{crmClientMetrics.marca}</p>
                     </div>
-                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-                        <p className="text-xs text-amber-700">Sem contato cadastrado</p>
-                        <p className="text-2xl font-semibold text-amber-700">{crmClientMetrics.withoutContact}</p>
-                    </div>
-                    <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
-                        <p className="text-xs text-blue-700">Ativos monitorados</p>
-                        <p className="text-2xl font-semibold text-blue-700">{crmClientMetrics.monitoredAssets}</p>
+                    <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-3">
+                        <p className="text-xs text-cyan-700">Clientes com DI</p>
+                        <p className="text-2xl font-semibold text-cyan-700">{crmClientMetrics.di}</p>
                     </div>
                 </div>
 
@@ -276,7 +285,18 @@ export default function Clients() {
                             <SelectItem value="no">Sem contato</SelectItem>
                         </SelectContent>
                     </Select>
-                    <Button variant="outline" className="gap-2 bg-white text-slate-600 w-full sm:w-auto">
+                    <Select value={piTypeFilter} onValueChange={(value: any) => setPiTypeFilter(value)}>
+                        <SelectTrigger className="w-full sm:w-44">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">Todos tipos PI</SelectItem>
+                            <SelectItem value="patente">Patente</SelectItem>
+                            <SelectItem value="marca">Marca</SelectItem>
+                            <SelectItem value="di">DI</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    <Button variant="outline" className="gap-2 h-10 text-sm bg-white text-slate-600 w-full sm:w-auto">
                         <Filter className="w-4 h-4" /> Filtros
                     </Button>
                 </div>
@@ -308,6 +328,9 @@ export default function Clients() {
                                         <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">{String(client.status || "active").toLowerCase() === "active" ? "Ativo" : "Inativo"}</Badge>
                                         <Badge variant="secondary">Contatos {client.contacts_count || 0}</Badge>
                                         <Badge variant="secondary">Ativos {client._count?.patents || 0}</Badge>
+                                        {(client.pi_types || ["patente"]).map((type) => (
+                                            <Badge key={`${client.id}-${type}`} variant="outline">{type.toUpperCase()}</Badge>
+                                        ))}
                                     </div>
                                     <Button variant="outline" className="w-full h-9" onClick={() => loadClientProfile(client)}>
                                         Abrir Perfil
@@ -321,6 +344,7 @@ export default function Clients() {
                                     <TableHead className="font-semibold text-slate-700">Cliente</TableHead>
                                     <TableHead className="font-semibold text-slate-700">Contato</TableHead>
                                     <TableHead className="font-semibold text-slate-700 text-center">Ativos Monitorados</TableHead>
+                                    <TableHead className="font-semibold text-slate-700">Tipo PI</TableHead>
                                     <TableHead className="font-semibold text-slate-700">Status</TableHead>
                                     <TableHead className="font-semibold text-slate-700 text-right">Ações</TableHead>
                                 </TableRow>
@@ -353,6 +377,13 @@ export default function Clients() {
                                             <Badge variant="secondary" className="bg-slate-100 text-slate-700 font-mono">
                                                 <Briefcase className="w-3 h-3 mr-1" /> {client._count?.patents || 0}
                                             </Badge>
+                                        </TableCell>
+                                        <TableCell>
+                                            <div className="flex flex-wrap gap-1">
+                                                {(client.pi_types || ["patente"]).map((type) => (
+                                                    <Badge key={`${client.id}-desk-${type}`} variant="outline" className="uppercase">{type}</Badge>
+                                                ))}
+                                            </div>
                                         </TableCell>
                                         <TableCell>
                                             <Badge variant="outline" className={String(client.status || "active").toLowerCase() === "active" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-100 text-slate-600 border-slate-200"}>
@@ -418,6 +449,30 @@ export default function Clients() {
                                 placeholder="contato@empresa.com.br" 
                                 className="focus-visible:ring-blue-500"
                             />
+                        </div>
+                        <div className="grid gap-2">
+                            <Label className="text-slate-700">Tipo de PI atendido</Label>
+                            <div className="flex flex-wrap gap-2">
+                                {(["patente", "marca", "di"] as const).map((type) => {
+                                    const checked = newPiTypes.includes(type);
+                                    return (
+                                        <label key={type} className="flex items-center gap-2 text-xs text-slate-700 border rounded-md px-2 py-1 bg-slate-50">
+                                            <input
+                                                type="checkbox"
+                                                checked={checked}
+                                                onChange={(e) => {
+                                                    setNewPiTypes((prev) => {
+                                                        if (e.target.checked) return Array.from(new Set([...prev, type]));
+                                                        const next = prev.filter((item) => item !== type);
+                                                        return next.length ? next : ["patente"];
+                                                    });
+                                                }}
+                                            />
+                                            {type.toUpperCase()}
+                                        </label>
+                                    );
+                                })}
+                            </div>
                         </div>
                     </div>
                     <DialogFooter>

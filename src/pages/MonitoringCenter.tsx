@@ -13,6 +13,7 @@ import { api } from "@/services/auth";
 import { toast } from "sonner";
 import NewMonitoringWizard from "@/components/monitoring/NewMonitoringWizard";
 import { useLocation } from "react-router-dom";
+import OperationalPageHeader from "@/components/operations/OperationalPageHeader";
 
 type ClientOption = {
   id: string;
@@ -254,40 +255,41 @@ export default function MonitoringCenter() {
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Hub Operacional de Monitoramentos</h1>
-            <p className="text-sm text-muted-foreground mt-1">Triagem, priorização, análise IA e conversão para demanda em um único fluxo.</p>
-          </div>
-          <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap lg:w-auto">
-            <Button variant="outline" onClick={() => refreshAll(page)} disabled={loading} className="w-full sm:w-auto h-10">
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCcw className="w-4 h-4" />}
-            </Button>
-            <Button variant="outline" onClick={runLatestRpi} disabled={busyId === "rpi"} className="w-full sm:w-auto h-10">
-              {busyId === "rpi" ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <WandSparkles className="w-4 h-4 mr-2" />}
-              Processar RPI mais recente
-            </Button>
-            <div className="flex w-full items-center gap-2 rounded-lg border border-slate-200 px-2 py-1.5 bg-white sm:w-auto">
-              <Input
-                className="h-8 w-full sm:w-28 border-0 p-0 text-sm"
-                placeholder="RPI antiga"
-                value={manualRpiNumber}
-                onChange={(e) => setManualRpiNumber(e.target.value)}
-              />
-              <Button size="sm" variant="outline" onClick={runManualRpi} disabled={busyId === "rpi-manual"} className="h-9">
-                {busyId === "rpi-manual" ? <Loader2 className="w-3 h-3 animate-spin" /> : "Reprocessar"}
+        <OperationalPageHeader
+          title="Hub Operacional de Monitoramentos"
+          description="Triagem, priorização, análise IA e conversão para demanda em um fluxo único."
+          icon={<BriefcaseBusiness className="w-5 h-5 text-slate-600" />}
+          actions={
+            <>
+              <Button variant="outline" onClick={() => refreshAll(page)} disabled={loading} className="h-10">
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCcw className="w-4 h-4" />}
               </Button>
-            </div>
-            <Button onClick={() => setWizardOpen(true)} className="bg-emerald-600 hover:bg-emerald-700 text-white w-full sm:w-auto h-10">
-              <Plus className="w-4 h-4 mr-2" />
-              Novo Monitoramento
-            </Button>
-            <Button variant="outline" onClick={convertSelected} disabled={busyId === "bulk-convert"} className="w-full sm:w-auto h-10">
-              {busyId === "bulk-convert" ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <BriefcaseBusiness className="w-4 h-4 mr-2" />}
-              Converter selecionadas
-            </Button>
-          </div>
-        </div>
+              <Button variant="outline" onClick={runLatestRpi} disabled={busyId === "rpi"} className="h-10">
+                {busyId === "rpi" ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <WandSparkles className="w-4 h-4 mr-2" />}
+                Processar RPI mais recente
+              </Button>
+              <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-2 py-1.5 bg-white">
+                <Input
+                  className="h-8 w-28 border-0 p-0 text-sm"
+                  placeholder="RPI antiga"
+                  value={manualRpiNumber}
+                  onChange={(e) => setManualRpiNumber(e.target.value)}
+                />
+                <Button size="sm" variant="outline" onClick={runManualRpi} disabled={busyId === "rpi-manual"} className="h-9">
+                  {busyId === "rpi-manual" ? <Loader2 className="w-3 h-3 animate-spin" /> : "Reprocessar"}
+                </Button>
+              </div>
+              <Button onClick={() => setWizardOpen(true)} className="bg-emerald-600 hover:bg-emerald-700 text-white h-10">
+                <Plus className="w-4 h-4 mr-2" />
+                Novo Monitoramento
+              </Button>
+              <Button variant="outline" onClick={convertSelected} disabled={busyId === "bulk-convert"} className="h-10">
+                {busyId === "bulk-convert" ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <BriefcaseBusiness className="w-4 h-4 mr-2" />}
+                Converter selecionadas
+              </Button>
+            </>
+          }
+        />
 
         <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
           <Card><CardHeader className="pb-2"><CardTitle className="text-xs">Monit. ativos</CardTitle></CardHeader><CardContent className="text-2xl font-bold">{dashboard.profiles.totalActive}</CardContent></Card>

@@ -9,6 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { api } from "@/services/auth";
+import OperationalPageHeader from "@/components/operations/OperationalPageHeader";
+import OperationalKpiCard from "@/components/operations/OperationalKpiCard";
 
 const DEFAULT_COLUMNS: Array<{ id: DemandStatus; title: string; color: string }> = [
     { id: "nova", title: "Novas Demandas", color: "bg-blue-50 border-blue-200 text-blue-700" },
@@ -27,6 +29,7 @@ type Demand = {
     description?: string | null;
     status: DemandStatus;
     priority: DemandPriority;
+    pi_type?: "patente" | "marca" | "di";
     client_name?: string | null;
     owner_name?: string | null;
     patent_number?: string | null;
@@ -52,6 +55,7 @@ export default function Demands() {
     const [newOwner, setNewOwner] = useState("");
     const [newPatentNumber, setNewPatentNumber] = useState("");
     const [newPriority, setNewPriority] = useState<DemandPriority>("media");
+    const [newPiType, setNewPiType] = useState<"patente" | "marca" | "di">("patente");
     const [creating, setCreating] = useState(false);
     const [columns, setColumns] = useState(DEFAULT_COLUMNS);
     const [selectedDemandId, setSelectedDemandId] = useState<string | null>(null);
@@ -60,13 +64,14 @@ export default function Demands() {
     const [savingComment, setSavingComment] = useState(false);
     const [statusFilter, setStatusFilter] = useState<"all" | DemandStatus>("all");
     const [priorityFilter, setPriorityFilter] = useState<"all" | DemandPriority>("all");
+    const [piTypeFilter, setPiTypeFilter] = useState<"all" | "patente" | "marca" | "di">("all");
     const [slaRiskOnly, setSlaRiskOnly] = useState(false);
 
     const loadDemands = useCallback(async () => {
         setLoading(true);
         try {
             const [{ data }, settingsRes] = await Promise.all([
-                api.get(`/demands`, { params: { q: query || undefined } }),
+                api.get(`/demands`, { params: { q: query || undefined, piType: piTypeFilter !== "all" ? piTypeFilter : undefined } }),
                 api.get(`/settings/system`).catch(() => ({ data: {} }))
             ]);
             setRows(Array.isArray(data?.rows) ? data.rows : []);
@@ -87,7 +92,7 @@ export default function Demands() {
         } finally {
             setLoading(false);
         }
-    }, [query]);
+    }, [query, piTypeFilter]);
 
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -102,9 +107,10 @@ export default function Demands() {
             const matchesPriority = priorityFilter === "all" || row.priority === priorityFilter;
             const isSlaRisk = row.sla_due_at ? new Date(row.sla_due_at).getTime() <= (Date.now() + 1000 * 60 * 60 * 24 * 2) : false;
             const matchesSlaRisk = !slaRiskOnly || isSlaRisk;
-            return matchesStatus && matchesPriority && matchesSlaRisk;
+            const matchesPiType = piTypeFilter === "all" || (row.pi_type || "patente") === piTypeFilter;
+            return matchesStatus && matchesPriority && matchesSlaRisk && matchesPiType;
         });
-    }, [rows, statusFilter, priorityFilter, slaRiskOnly]);
+    }, [rows, statusFilter, priorityFilter, slaRiskOnly, piTypeFilter]);
 
     const rowsByStatus = useMemo(() => {
         return columns.reduce((acc, col) => {
@@ -145,7 +151,8 @@ export default function Demands() {
                 description: newDescription,
                 ownerName: newOwner,
                 patentNumber: newPatentNumber,
-                priority: newPriority
+                priority: newPriority,
+                piType: newPiType
             });
             toast.success("Demanda criada com sucesso.");
             setCreateOpen(false);
@@ -154,6 +161,7 @@ export default function Demands() {
             setNewOwner("");
             setNewPatentNumber("");
             setNewPriority("media");
+            setNewPiType("patente");
             await loadDemands();
         } catch (error: any) {
             toast.error(error?.response?.data?.error || "Não foi possível criar a demanda.");
@@ -165,18 +173,11 @@ export default function Demands() {
     return (
         <AppLayout>
             <div className="flex flex-col gap-6 w-full mx-auto">
-                <div className="flex flex-col gap-3 md:flex-row md:justify-between md:items-end">
-                    <div className="animate-in fade-in slide-in-from-left duration-700">
-                        <h1 className="text-2xl font-bold flex items-center gap-3 text-slate-900 mb-2">
-                            <div className="w-10 h-10 rounded-xl bg-violet-50 border border-violet-100 flex items-center justify-center">
-                                <Workflow className="w-5 h-5 text-violet-600" />
-                            </div>
-                            CRM de Demandas de PI
-                        </h1>
-                        <p className="text-muted-foreground text-sm mt-1">
-                            Gerencie carteira, prazos críticos e tratativas com clientes em propriedade intelectual.
-                        </p>
-                    </div>
+                <OperationalPageHeader
+                    title="CRM de Demandas de PI"
+                    description="Gerencie carteira, prazos críticos e tratativas com clientes em propriedade intelectual."
+                    icon={<Workflow className="w-5 h-5 text-slate-600" />}
+                    actions={
                     <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center md:w-auto">
                         <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 w-full sm:w-auto">
                             <button 
@@ -196,24 +197,27 @@ export default function Demands() {
                             <Plus className="w-4 h-4" /> Nova Demanda
                         </Button>
                     </div>
-                </div>
+                    }
+                />
 
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                    <div className="rounded-xl border border-slate-200 bg-white p-3">
-                        <p className="text-xs text-slate-500">Carteira ativa</p>
-                        <p className="text-2xl font-semibold text-slate-900">{crmMetrics.total}</p>
+                    <OperationalKpiCard label="Carteira ativa" value={crmMetrics.total} icon={<Workflow className="w-4 h-4" />} tone="default" />
+                    <OperationalKpiCard label="Prioridade crítica" value={crmMetrics.critical} icon={<Filter className="w-4 h-4" />} tone="critical" />
+                    <OperationalKpiCard label="SLA em risco (48h)" value={crmMetrics.slaRisk} icon={<Search className="w-4 h-4" />} tone="warning" />
+                    <OperationalKpiCard label="Aguardando cliente" value={crmMetrics.waitingClient} icon={<List className="w-4 h-4" />} tone="info" />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3">
+                        <p className="text-xs text-indigo-700">Demandas Patente</p>
+                        <p className="text-2xl font-semibold text-indigo-700">{rows.filter((row) => (row.pi_type || "patente") === "patente").length}</p>
                     </div>
-                    <div className="rounded-xl border border-rose-200 bg-rose-50 p-3">
-                        <p className="text-xs text-rose-600">Prioridade crítica</p>
-                        <p className="text-2xl font-semibold text-rose-700">{crmMetrics.critical}</p>
+                    <div className="rounded-xl border border-fuchsia-200 bg-fuchsia-50 p-3">
+                        <p className="text-xs text-fuchsia-700">Demandas Marca</p>
+                        <p className="text-2xl font-semibold text-fuchsia-700">{rows.filter((row) => row.pi_type === "marca").length}</p>
                     </div>
-                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-                        <p className="text-xs text-amber-700">SLA em risco (48h)</p>
-                        <p className="text-2xl font-semibold text-amber-700">{crmMetrics.slaRisk}</p>
-                    </div>
-                    <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
-                        <p className="text-xs text-blue-700">Aguardando cliente</p>
-                        <p className="text-2xl font-semibold text-blue-700">{crmMetrics.waitingClient}</p>
+                    <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-3">
+                        <p className="text-xs text-cyan-700">Demandas DI</p>
+                        <p className="text-2xl font-semibold text-cyan-700">{rows.filter((row) => row.pi_type === "di").length}</p>
                     </div>
                 </div>
 
@@ -243,6 +247,16 @@ export default function Demands() {
                         <option value="alta">Alta</option>
                         <option value="critica">Crítica</option>
                     </select>
+                    <select
+                        value={piTypeFilter}
+                        onChange={(e) => setPiTypeFilter(e.target.value as any)}
+                        className="h-10 rounded-md border border-slate-200 px-3 text-sm bg-white w-full sm:w-auto"
+                    >
+                        <option value="all">Todos tipos PI</option>
+                        <option value="patente">Patente</option>
+                        <option value="marca">Marca</option>
+                        <option value="di">DI</option>
+                    </select>
                     <label className="flex items-center gap-2 px-2 text-xs text-slate-600">
                         <input type="checkbox" checked={slaRiskOnly} onChange={(e) => setSlaRiskOnly(e.target.checked)} />
                         Somente SLA em risco
@@ -271,7 +285,10 @@ export default function Demands() {
                                         <div key={demand.id} className="rounded-lg border border-slate-200 bg-white p-3 space-y-2 shadow-sm">
                                             <div className="flex items-start justify-between gap-2">
                                                 <p className="text-sm font-semibold text-slate-800 line-clamp-2">{demand.title}</p>
-                                                <Badge variant="outline" className="text-[10px] uppercase">{demand.priority}</Badge>
+                                                <div className="flex gap-1">
+                                                    <Badge variant="outline" className="text-[10px] uppercase">{demand.priority}</Badge>
+                                                    <Badge variant="secondary" className="text-[10px] uppercase">{(demand.pi_type || "patente")}</Badge>
+                                                </div>
                                             </div>
                                             {demand.client_name && <p className="text-xs text-slate-500">{demand.client_name}</p>}
                                             {demand.contact_email && <p className="text-[11px] text-slate-500">{demand.contact_email}</p>}
@@ -325,7 +342,10 @@ export default function Demands() {
                                         {row.patent_number && <p className="text-xs text-slate-500 font-mono">{row.patent_number}</p>}
                                     </div>
                                     <span className="text-slate-600">{row.client_name || "-"}</span>
-                                    <Badge variant="outline" className="w-fit uppercase">{row.priority}</Badge>
+                                    <div className="flex gap-1">
+                                        <Badge variant="outline" className="w-fit uppercase">{row.priority}</Badge>
+                                        <Badge variant="secondary" className="w-fit uppercase">{(row.pi_type || "patente")}</Badge>
+                                    </div>
                                     <span className="text-slate-600">{columns.find((col) => col.id === row.status)?.title || row.status}</span>
                                     <span className="text-xs text-slate-500">{new Date(row.updated_at).toLocaleString("pt-BR")}</span>
                                 </div>
@@ -333,6 +353,7 @@ export default function Demands() {
                                     <p className="font-medium text-slate-800">{row.title}</p>
                                     <div className="flex flex-wrap gap-1">
                                         <Badge variant="outline" className="uppercase">{row.priority}</Badge>
+                                        <Badge variant="secondary" className="uppercase">{row.pi_type || "patente"}</Badge>
                                         <Badge variant="secondary">{columns.find((col) => col.id === row.status)?.title || row.status}</Badge>
                                     </div>
                                     <p className="text-xs text-slate-500">{row.client_name || "Sem cliente"}</p>
@@ -390,6 +411,19 @@ export default function Demands() {
                                 <option value="media">Média</option>
                                 <option value="alta">Alta</option>
                                 <option value="critica">Crítica</option>
+                            </select>
+                        </div>
+                        <div className="grid gap-2">
+                            <Label htmlFor="demand-pi-type">Tipo de PI</Label>
+                            <select
+                                id="demand-pi-type"
+                                value={newPiType}
+                                onChange={(e) => setNewPiType(e.target.value as any)}
+                                className="h-10 rounded-md border border-slate-200 px-3 text-sm bg-white"
+                            >
+                                <option value="patente">Patente</option>
+                                <option value="marca">Marca</option>
+                                <option value="di">DI</option>
                             </select>
                         </div>
                     </div>

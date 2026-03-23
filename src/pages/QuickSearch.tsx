@@ -1,14 +1,18 @@
 import { useRef, useState } from "react";
-import { Search, Loader2, ExternalLink, Hash, User, UserCheck, FileText, X, ChevronDown, ChevronUp, Building2, Lightbulb, ChevronLeft, ChevronRight, Expand, Download } from "lucide-react";
+import { Search, Loader2, Hash, User, UserCheck, FileText, X, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Download, Eye, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import AppLayout from "@/components/AppLayout";
 import PatentDocumentModal, { PatentDocumentData } from "@/components/PatentDocumentModal";
 import axios from "axios";
+import { toast } from "sonner";
+import OperationalPageHeader from "@/components/operations/OperationalPageHeader";
 
 const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000").replace(/\/$/, "");
 
@@ -91,7 +95,6 @@ export default function QuickSearch() {
     const [detailCache, setDetailCache] = useState<Record<string, PatentDetail>>({});
     const [loadingDetails, setLoadingDetails] = useState<Record<string, boolean>>({});
     const [detailErrors, setDetailErrors] = useState<Record<string, string>>({});
-    const [figureIndexByPatent, setFigureIndexByPatent] = useState<Record<string, number>>({});
     const [modalOpen, setModalOpen] = useState(false);
     const [modalFigures, setModalFigures] = useState<string[]>([]);
     const [modalIndex, setModalIndex] = useState(0);
@@ -275,7 +278,6 @@ export default function QuickSearch() {
         setDetailCache({});
         setLoadingDetails({});
         setDetailErrors({});
-        setFigureIndexByPatent({});
         setTotals({ inpi: 0, espacenet: 0, all: 0 });
         setInpiPagination({
             page: 1,
@@ -328,7 +330,6 @@ export default function QuickSearch() {
         setDetailCache({});
         setLoadingDetails({});
         setDetailErrors({});
-        setFigureIndexByPatent({});
         setTab("inpi");
 
         try {
@@ -380,10 +381,6 @@ export default function QuickSearch() {
         return detailCache[codPedido] || null;
     };
 
-    const getPatentKey = (patent: PatentResult, idx: number) => {
-        return `${patent.source}-${patent.publicationNumber || idx}`;
-    };
-
     const getPatentFigures = (patent: PatentResult, detail: PatentDetail | null): string[] => {
         const detailFigures = detail?.figures || [];
         const baseFigures = patent.figures || [];
@@ -403,31 +400,11 @@ export default function QuickSearch() {
         return url.includes(".pdf") || url.includes("/patent/storage/");
     };
 
-    const getCurrentFigureIndex = (patent: PatentResult, idx: number, total: number) => {
-        if (total <= 0) return 0;
-        const key = getPatentKey(patent, idx);
-        const current = figureIndexByPatent[key] || 0;
-        return Math.min(current, total - 1);
-    };
-
-    const setFigureIndex = (patent: PatentResult, idx: number, nextIndex: number, total: number) => {
-        if (total <= 0) return;
-        const bounded = ((nextIndex % total) + total) % total;
-        const key = getPatentKey(patent, idx);
-        setFigureIndexByPatent(prev => ({ ...prev, [key]: bounded }));
-    };
-
-    const openFigureModal = (figures: string[], index: number) => {
-        if (!figures.length) return;
-        const bounded = Math.min(Math.max(index, 0), figures.length - 1);
-        setModalFigures(figures);
-        setModalIndex(bounded);
-        setModalOpen(true);
-    };
-
     const openPatentModal = (patent: PatentResult, detail?: PatentDetail | null) => {
+        const codPedido = getCodPedido(patent) || undefined;
         setSelectedPatent({
             publicationNumber: patent.publicationNumber,
+            cod_pedido: codPedido,
             title: detail?.title || patent.title,
             applicant: detail?.applicant || patent.applicant,
             inventor: detail?.inventor || patent.inventor,
@@ -439,9 +416,33 @@ export default function QuickSearch() {
             status: detail?.status || patent.status,
             figures: getPatentFigures(patent, detail).map((item) => resolveAssetUrl(item)),
             inpiUrl: detail?.inpiUrl || patent.inpiUrl || patent.url,
-            storage: detail?.storage || patent.storage
+            storage: detail?.storage || patent.storage,
+            document_status: detail?.storage?.hasStoredDocument || patent.storage?.hasStoredDocument ? "completed" : "not_queued",
+            document_error: null
         });
         setPatentModalOpen(true);
+    };
+
+    const addToMonitoring = async (patent: PatentResult, monitorType: "processo" | "colidencia" | "mercado") => {
+        const patentNumber = (patent.publicationNumber || "").trim();
+        if (!patentNumber) return;
+        try {
+            await axios.post(`${API_URL}/monitoring/patents/add`, {
+                patentNumber,
+                patentId: getCodPedido(patent) || patentNumber,
+                monitorType
+            });
+            toast.success(`Patente adicionada ao monitoramento de ${monitorType}.`);
+        } catch {
+            toast.error("Não foi possível adicionar ao monitoramento.");
+        }
+    };
+
+    const documentAvailabilityBadge = (patent: PatentResult, detail?: PatentDetail | null) => {
+        const stored = Boolean(detail?.storage?.hasStoredDocument || patent.storage?.hasStoredDocument);
+        if (stored) return <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">Completo</Badge>;
+        if (patent.source === "INPI") return <Badge className="bg-amber-100 text-amber-700 border-amber-200">Parcial</Badge>;
+        return <Badge variant="outline">Ausente</Badge>;
     };
 
     const clearAll = () => {
@@ -466,7 +467,6 @@ export default function QuickSearch() {
         setError("");
         setExpandedIdx(null);
         setTab("inpi");
-        setFigureIndexByPatent({});
         setModalOpen(false);
         setModalFigures([]);
         setModalIndex(0);
@@ -501,25 +501,18 @@ export default function QuickSearch() {
     return (
         <AppLayout>
             <div className="flex flex-col gap-6 w-full mx-auto">
-                {/* Header */}
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                    <div>
-                        <h1 className="text-2xl font-bold flex items-center gap-3 text-slate-900">
-                            <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center">
-                                <Search className="w-5 h-5 text-emerald-600" />
-                            </div>
-                            Busca Rápida
-                        </h1>
-                        <p className="text-muted-foreground text-sm mt-1">
-                            Motor híbrido para varrer base local e Espacenet com contexto técnico unificado
-                        </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                        <Badge variant="secondary" className="bg-emerald-50 text-emerald-700 border-emerald-200">Tempo real</Badge>
-                        <Badge variant="secondary" className="bg-cyan-50 text-cyan-700 border-cyan-200">Base local + EPO</Badge>
-                        <Badge variant="secondary" className="bg-slate-100 text-slate-700 border-slate-200">Pronto para diligência</Badge>
-                    </div>
-                </div>
+                <OperationalPageHeader
+                    title="Busca Rápida"
+                    description="Motor híbrido para varrer base local e Espacenet com contexto técnico unificado."
+                    icon={<Search className="w-5 h-5 text-slate-600" />}
+                    actions={
+                        <>
+                            <Badge variant="secondary" className="h-10 px-3 bg-emerald-50 text-emerald-700 border-emerald-200">Tempo real</Badge>
+                            <Badge variant="secondary" className="h-10 px-3 bg-cyan-50 text-cyan-700 border-cyan-200">Base local + EPO</Badge>
+                            <Badge variant="secondary" className="h-10 px-3 bg-slate-100 text-slate-700 border-slate-200">Pronto para diligência</Badge>
+                        </>
+                    }
+                />
 
                 {/* Search Form */}
                 <form onSubmit={handleSearch} className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-sm space-y-4">
@@ -671,243 +664,112 @@ export default function QuickSearch() {
                                                     </Button>
                                                 </div>
                                             </div>
-                                            {inpiResults.map((patent, idx) => {
-                                                const isExpanded = expandedIdx === idx;
-                                                const detail = getDetail(patent);
-                                                const codPedido = getCodPedido(patent);
-                                                const isLoadingThis = Boolean(codPedido && loadingDetails[codPedido]);
-                                                const detailError = codPedido ? detailErrors[codPedido] : "";
-                                                const applicantText = detail?.applicant || patent.applicant;
-                                                const inventorText = detail?.inventor || patent.inventor || "";
-                                                const abstractText = detail?.abstract || patent.abstract || "";
-                                                const statusText = detail?.status || patent.status || "";
-                                                const isSigilo = /sigil|restrit|proteg/i.test(statusText);
-                                                const statusDisplay = statusText;
-                                                const figures = getPatentFigures(patent, detail);
-                                                const currentFigureIndex = getCurrentFigureIndex(patent, idx, figures.length);
-                                                const currentFigure = figures[currentFigureIndex];
-
-                                                return (
-                                                    <div key={idx} className="bg-card rounded-xl border hover:shadow-md transition-shadow overflow-hidden">
-                                                        <div
-                                                            className="p-5 cursor-pointer"
-                                                            onClick={() => openPatentModal(patent, detail)}
-                                                        >
-                                                            <div className="flex items-start justify-between gap-4">
-                                                                <div className="flex-1 min-w-0">
-                                                                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                                                        <span className="text-xs font-mono font-medium text-accent bg-accent/10 px-2 py-0.5 rounded">
-                                                                            {patent.publicationNumber}
-                                                                        </span>
-                                                                        <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-                                                                            Base Local
-                                                                        </span>
-                                                                        {isSigilo && (
-                                                                            <span className="text-[11px] font-black text-red-700 bg-red-100 border border-red-300 px-2 py-0.5 rounded">
-                                                                                EM SIGILO
-                                                                            </span>
-                                                                        )}
-                                                                        {patent.date && (
-                                                                            <span className="text-xs text-muted-foreground">
-                                                                                {patent.date}
-                                                                            </span>
-                                                                        )}
-                                                                    </div>
-                                                                    <h3 className="font-semibold text-sm mb-1 line-clamp-2">
-                                                                        {detail?.title || patent.title}
-                                                                    </h3>
-                                                                    {applicantText && (
-                                                                        <p className="text-xs text-muted-foreground mb-1">
-                                                                            <span className="font-medium">Titular:</span> {applicantText}
-                                                                        </p>
-                                                                    )}
-                                                                    {inventorText && (
-                                                                        <p className="text-xs text-muted-foreground mb-1">
-                                                                            <span className="font-medium">Inventor:</span> {inventorText}
-                                                                        </p>
-                                                                    )}
-                                                                    {abstractText && (
-                                                                        <p className="text-xs text-muted-foreground line-clamp-2">
-                                                                            <span className="font-medium">Resumo:</span> {abstractText}
-                                                                        </p>
-                                                                    )}
-                                                                    {figures.length > 0 && (
-                                                                        <div className="mt-2 rounded border bg-muted/20 overflow-hidden">
-                                                                            {isPdfAsset(currentFigure) ? (
-                                                                                <iframe
-                                                                                    src={`${resolveAssetUrl(currentFigure)}#view=FitH`}
-                                                                                    title={`Preview ${patent.publicationNumber}`}
-                                                                                    className="w-full h-32"
-                                                                                />
-                                                                            ) : (
-                                                                                <img
-                                                                                    src={resolveAssetUrl(currentFigure)}
-                                                                                    alt={`Figura de ${patent.publicationNumber}`}
-                                                                                    className="w-full h-32 object-cover"
-                                                                                />
-                                                                            )}
-                                                                        </div>
-                                                                    )}
-                                                                    {patent.classification && (
-                                                                        <p className="text-xs text-muted-foreground">
-                                                                            <span className="font-medium">IPC:</span> {patent.classification}
-                                                                        </p>
-                                                                    )}
-                                                                </div>
-                                                                <div className="flex items-center gap-1 shrink-0">
-                                                                    {patent.source === "INPI" && codPedido && (
-                                                                        <Button
-                                                                            size="xs"
-                                                                            variant={queuedPatents[codPedido || ''] ? "secondary" : "outline"}
-                                                                            disabled={queueingPatents[codPedido || ''] || !!queuedPatents[codPedido || '']}
-                                                                            onClick={(e) => {
-                                                                                e.stopPropagation();
-                                                                                void handleQueuePatent(patent);
-                                                                            }}
-                                                                            className="gap-1 px-2"
-                                                                        >
-                                                                            {queueingPatents[codPedido || ''] ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-                                                                            {queuedPatents[codPedido || ''] ? 'Na fila' : 'Baixar'}
-                                                                        </Button>
-                                                                    )}
-                                                                    <button
-                                                                        type="button"
-                                                                        className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
-                                                                        title="Abrir/fechar detalhes"
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            void toggleDetail(idx, patent);
-                                                                        }}
-                                                                    >
-                                                                        {isExpanded
-                                                                            ? <ChevronUp className="w-4 h-4" />
-                                                                            : <ChevronDown className="w-4 h-4" />
-                                                                        }
-                                                                    </button>
-                                                                    <div className="p-2">
-                                                                        <ExternalLink className="w-4 h-4 text-muted-foreground" />
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-
-                                                        {isExpanded && (
-                                                            <div className="border-t px-5 py-4 bg-muted/20 space-y-3">
-                                                                {isLoadingThis ? (
-                                                                    <div className="flex items-center gap-2 text-sm text-muted-foreground py-4 justify-center">
-                                                                        <Loader2 className="w-4 h-4 animate-spin" />
-                                                                        Carregando detalhes da base local...
-                                                                    </div>
-                                                                ) : detailError ? (
-                                                                    <p className="text-sm text-destructive text-center py-2">
-                                                                        {detailError}
-                                                                    </p>
-                                                                ) : (
-                                                                    <>
-                                                                        {applicantText && (
-                                                                            <div className="flex items-start gap-2">
-                                                                                <Building2 className="w-4 h-4 text-accent mt-0.5 shrink-0" />
-                                                                                <div>
-                                                                                    <p className="text-xs font-medium text-muted-foreground">Depositante / Titular</p>
-                                                                                    <p className="text-sm">{applicantText}</p>
-                                                                                </div>
-                                                                            </div>
-                                                                        )}
-                                                                        {inventorText && (
-                                                                            <div className="flex items-start gap-2">
-                                                                                <Lightbulb className="w-4 h-4 text-yellow-500 mt-0.5 shrink-0" />
-                                                                                <div>
-                                                                                    <p className="text-xs font-medium text-muted-foreground">Inventor(es)</p>
-                                                                                    <p className="text-sm">{inventorText}</p>
-                                                                                </div>
-                                                                            </div>
-                                                                        )}
-                                                                        {abstractText && (
-                                                                            <div>
-                                                                                <p className="text-xs font-medium text-muted-foreground mb-1">Resumo</p>
-                                                                                <p className="text-sm text-muted-foreground leading-relaxed">{abstractText}</p>
-                                                                            </div>
-                                                                        )}
-                                                                        {(detail?.classification || patent.classification) && (
-                                                                            <div>
-                                                                                <p className="text-xs font-medium text-muted-foreground mb-1">Classificação Completa</p>
-                                                                                <p className="text-sm font-mono">{detail?.classification || patent.classification}</p>
-                                                                            </div>
-                                                                        )}
-                                                                        {statusDisplay && (
-                                                                            <div>
-                                                                                <p className="text-xs font-medium text-muted-foreground mb-1">Situação</p>
-                                                                                <p className={isSigilo ? "text-sm font-bold text-red-600" : "text-sm"}>{statusDisplay}</p>
-                                                                            </div>
-                                                                        )}
-                                                                        {figures.length > 0 && currentFigure && (
-                                                                            <div className="space-y-2">
-                                                                                <div className="flex items-center justify-between">
-                                                                                    <p className="text-xs font-medium text-muted-foreground">Figuras</p>
-                                                                                    <p className="text-xs text-muted-foreground">
-                                                                                        {currentFigureIndex + 1} de {figures.length}
-                                                                                    </p>
-                                                                                </div>
-                                                                                <div className="relative rounded-lg border bg-background overflow-hidden">
-                                                                                    {isPdfAsset(currentFigure) ? (
-                                                                                        <iframe
-                                                                                            src={`${resolveAssetUrl(currentFigure)}#view=FitH`}
-                                                                                            title={`PDF Figura ${currentFigureIndex + 1}`}
-                                                                                            className="w-full h-64"
-                                                                                        />
-                                                                                    ) : (
-                                                                                        <img
-                                                                                            src={resolveAssetUrl(currentFigure)}
-                                                                                            alt={`Figura ${currentFigureIndex + 1} da patente ${patent.publicationNumber}`}
-                                                                                            className="w-full h-64 object-contain bg-muted/30"
-                                                                                        />
-                                                                                    )}
-                                                                                    {figures.length > 1 && (
-                                                                                        <>
-                                                                                            <Button
-                                                                                                type="button"
-                                                                                                variant="secondary"
-                                                                                                size="icon"
-                                                                                                className="absolute left-3 top-1/2 -translate-y-1/2"
-                                                                                                onClick={() => setFigureIndex(patent, idx, currentFigureIndex - 1, figures.length)}
-                                                                                            >
-                                                                                                <ChevronLeft className="w-4 h-4" />
-                                                                                            </Button>
-                                                                                            <Button
-                                                                                                type="button"
-                                                                                                variant="secondary"
-                                                                                                size="icon"
-                                                                                                className="absolute right-3 top-1/2 -translate-y-1/2"
-                                                                                                onClick={() => setFigureIndex(patent, idx, currentFigureIndex + 1, figures.length)}
-                                                                                            >
-                                                                                                <ChevronRight className="w-4 h-4" />
-                                                                                            </Button>
-                                                                                        </>
-                                                                                    )}
+                                            <div className="rounded-xl border bg-card overflow-x-auto">
+                                                <Table className="min-w-[1260px]">
+                                                    <TableHeader>
+                                                        <TableRow>
+                                                            <TableHead className="w-[180px]">Número</TableHead>
+                                                            <TableHead className="min-w-[360px]">Resumo / Titular</TableHead>
+                                                            <TableHead className="w-[150px]">Documento</TableHead>
+                                                            <TableHead className="min-w-[240px]">Situação</TableHead>
+                                                            <TableHead className="w-[130px]">Fonte</TableHead>
+                                                            <TableHead className="text-right w-[320px]">Ações</TableHead>
+                                                        </TableRow>
+                                                    </TableHeader>
+                                                    <TableBody>
+                                                        {inpiResults.map((patent, idx) => {
+                                                            const isExpanded = expandedIdx === idx;
+                                                            const detail = getDetail(patent);
+                                                            const codPedido = getCodPedido(patent);
+                                                            const isLoadingThis = Boolean(codPedido && loadingDetails[codPedido]);
+                                                            const detailError = codPedido ? detailErrors[codPedido] : "";
+                                                            const applicantText = detail?.applicant || patent.applicant;
+                                                            const abstractText = detail?.abstract || patent.abstract || "";
+                                                            const statusText = detail?.status || patent.status || "";
+                                                            return (
+                                                                <>
+                                                                    <TableRow key={`${patent.publicationNumber}-${idx}`} className="align-top">
+                                                                        <TableCell className="font-mono text-sm font-semibold whitespace-nowrap">{patent.publicationNumber}</TableCell>
+                                                                        <TableCell>
+                                                                            <div className="font-semibold text-sm line-clamp-1" title={detail?.title || patent.title}>{detail?.title || patent.title}</div>
+                                                                            <div className="text-xs text-muted-foreground uppercase tracking-wide line-clamp-1" title={applicantText}>{applicantText || "-"}</div>
+                                                                            <div className="text-xs text-muted-foreground line-clamp-1" title={abstractText}>{abstractText || "-"}</div>
+                                                                        </TableCell>
+                                                                        <TableCell>{documentAvailabilityBadge(patent, detail)}</TableCell>
+                                                                        <TableCell className="text-xs text-muted-foreground">{statusText || "-"}</TableCell>
+                                                                        <TableCell>
+                                                                            <Badge variant="secondary">Base Local</Badge>
+                                                                        </TableCell>
+                                                                        <TableCell>
+                                                                            <div className="flex justify-end gap-1 flex-wrap">
+                                                                                {patent.source === "INPI" && codPedido && (
                                                                                     <Button
-                                                                                        type="button"
-                                                                                        variant="secondary"
-                                                                                        size="icon"
-                                                                                        className="absolute right-3 top-3"
-                                                                                        onClick={() => openFigureModal(figures, currentFigureIndex)}
+                                                                                        size="sm"
+                                                                                        variant={queuedPatents[codPedido] ? "secondary" : "outline"}
+                                                                                        disabled={queueingPatents[codPedido] || !!queuedPatents[codPedido]}
+                                                                                        onClick={() => void handleQueuePatent(patent)}
+                                                                                        className="gap-1"
                                                                                     >
-                                                                                        <Expand className="w-4 h-4" />
+                                                                                        {queueingPatents[codPedido] ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                                                                                        {queuedPatents[codPedido] ? "Na fila" : "Solicitar raspagem"}
                                                                                     </Button>
-                                                                                </div>
+                                                                                )}
+                                                                                <DropdownMenu>
+                                                                                    <DropdownMenuTrigger asChild>
+                                                                                        <Button variant="ghost" size="sm" className="text-emerald-600 gap-1">
+                                                                                            <Bell className="w-3.5 h-3.5" /> Monitorar <ChevronDown className="w-3 h-3" />
+                                                                                        </Button>
+                                                                                    </DropdownMenuTrigger>
+                                                                                    <DropdownMenuContent align="end">
+                                                                                        <DropdownMenuItem onClick={() => void addToMonitoring(patent, "processo")}>Monitorar Processo</DropdownMenuItem>
+                                                                                        <DropdownMenuItem onClick={() => void addToMonitoring(patent, "colidencia")}>Monitorar Colidência</DropdownMenuItem>
+                                                                                        <DropdownMenuItem onClick={() => void addToMonitoring(patent, "mercado")}>Monitorar Mercado</DropdownMenuItem>
+                                                                                    </DropdownMenuContent>
+                                                                                </DropdownMenu>
+                                                                                <Button variant="ghost" size="sm" className="gap-1" onClick={() => openPatentModal(patent, detail)}>
+                                                                                    <Eye className="w-3.5 h-3.5" /> Visualizar
+                                                                                </Button>
+                                                                                <Button variant="ghost" size="sm" onClick={() => void toggleDetail(idx, patent)}>
+                                                                                    {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                                                                </Button>
                                                                             </div>
-                                                                        )}
-                                                                        {!applicantText && !inventorText && !abstractText && figures.length === 0 && (
-                                                                            <p className="text-sm text-muted-foreground text-center py-2">
-                                                                                Detalhes não disponíveis para esta patente.
-                                                                            </p>
-                                                                        )}
-                                                                    </>
-                                                                )}
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                );
-                                            })}
+                                                                        </TableCell>
+                                                                    </TableRow>
+                                                                    {isExpanded && (
+                                                                        <TableRow key={`${patent.publicationNumber}-${idx}-expanded`}>
+                                                                            <TableCell colSpan={6} className="bg-muted/30">
+                                                                                {isLoadingThis ? (
+                                                                                    <div className="flex items-center gap-2 text-sm text-muted-foreground py-4 justify-center">
+                                                                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                                                                        Carregando detalhes da base local...
+                                                                                    </div>
+                                                                                ) : detailError ? (
+                                                                                    <p className="text-sm text-destructive text-center py-2">{detailError}</p>
+                                                                                ) : (
+                                                                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                                                                                        <div>
+                                                                                            <div className="font-semibold mb-1">Depositante / Titular</div>
+                                                                                            <div className="text-muted-foreground">{applicantText || "-"}</div>
+                                                                                        </div>
+                                                                                        <div>
+                                                                                            <div className="font-semibold mb-1">Inventor(es)</div>
+                                                                                            <div className="text-muted-foreground">{detail?.inventor || patent.inventor || "-"}</div>
+                                                                                        </div>
+                                                                                        <div>
+                                                                                            <div className="font-semibold mb-1">Classificação</div>
+                                                                                            <div className="text-muted-foreground">{detail?.classification || patent.classification || "-"}</div>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                )}
+                                                                            </TableCell>
+                                                                        </TableRow>
+                                                                    )}
+                                                                </>
+                                                            );
+                                                        })}
+                                                    </TableBody>
+                                                </Table>
+                                            </div>
                                         </div>
                                     )}
                                 </TabsContent>
@@ -918,61 +780,51 @@ export default function QuickSearch() {
                                             Nenhum resultado do Espacenet para os critérios informados.
                                         </div>
                                     ) : (
-                                        <div className="space-y-3">
-                                            {espacenetResults.map((patent, idx) => (
-                                                <div key={`esp-${idx}`} className="bg-card rounded-xl border hover:shadow-md transition-shadow overflow-hidden">
-                                                    <div className="p-5">
-                                                        <div className="flex items-start justify-between gap-4">
-                                                            <div className="flex-1 min-w-0">
-                                                                <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                                                    <span className="text-xs font-mono font-medium text-accent bg-accent/10 px-2 py-0.5 rounded">
-                                                                        {patent.publicationNumber}
-                                                                    </span>
-                                                                    <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-                                                                        Espacenet
-                                                                    </span>
-                                                                    {patent.date && (
-                                                                        <span className="text-xs text-muted-foreground">
-                                                                            {patent.date}
-                                                                        </span>
-                                                                    )}
+                                        <div className="rounded-xl border bg-card overflow-x-auto">
+                                            <Table className="min-w-[1080px]">
+                                                <TableHeader>
+                                                    <TableRow>
+                                                        <TableHead className="w-[180px]">Número</TableHead>
+                                                        <TableHead className="min-w-[360px]">Resumo / Titular</TableHead>
+                                                        <TableHead className="w-[130px]">Fonte</TableHead>
+                                                        <TableHead className="w-[160px]">Data</TableHead>
+                                                        <TableHead className="text-right w-[260px]">Ações</TableHead>
+                                                    </TableRow>
+                                                </TableHeader>
+                                                <TableBody>
+                                                    {espacenetResults.map((patent, idx) => (
+                                                        <TableRow key={`esp-${idx}`}>
+                                                            <TableCell className="font-mono text-sm font-semibold whitespace-nowrap">{patent.publicationNumber}</TableCell>
+                                                            <TableCell>
+                                                                <div className="font-semibold text-sm line-clamp-1" title={patent.title}>{patent.title}</div>
+                                                                <div className="text-xs text-muted-foreground uppercase tracking-wide line-clamp-1">{patent.applicant || "-"}</div>
+                                                                <div className="text-xs text-muted-foreground line-clamp-1">{patent.abstract || "-"}</div>
+                                                            </TableCell>
+                                                            <TableCell><Badge variant="secondary">Espacenet</Badge></TableCell>
+                                                            <TableCell className="text-xs text-muted-foreground">{patent.date || "-"}</TableCell>
+                                                            <TableCell>
+                                                                <div className="flex justify-end gap-1">
+                                                                    <DropdownMenu>
+                                                                        <DropdownMenuTrigger asChild>
+                                                                            <Button variant="ghost" size="sm" className="text-emerald-600 gap-1">
+                                                                                <Bell className="w-3.5 h-3.5" /> Monitorar <ChevronDown className="w-3 h-3" />
+                                                                            </Button>
+                                                                        </DropdownMenuTrigger>
+                                                                        <DropdownMenuContent align="end">
+                                                                            <DropdownMenuItem onClick={() => void addToMonitoring(patent, "processo")}>Monitorar Processo</DropdownMenuItem>
+                                                                            <DropdownMenuItem onClick={() => void addToMonitoring(patent, "colidencia")}>Monitorar Colidência</DropdownMenuItem>
+                                                                            <DropdownMenuItem onClick={() => void addToMonitoring(patent, "mercado")}>Monitorar Mercado</DropdownMenuItem>
+                                                                        </DropdownMenuContent>
+                                                                    </DropdownMenu>
+                                                                    <Button variant="ghost" size="sm" className="gap-1" onClick={() => openPatentModal(patent, null)}>
+                                                                        <Eye className="w-3.5 h-3.5" /> Visualizar
+                                                                    </Button>
                                                                 </div>
-                                                                <h3 className="font-semibold text-sm mb-1 line-clamp-2">
-                                                                    {patent.title}
-                                                                </h3>
-                                                                {patent.applicant && (
-                                                                    <p className="text-xs text-muted-foreground mb-1">
-                                                                        <span className="font-medium">Titular:</span> {patent.applicant}
-                                                                    </p>
-                                                                )}
-                                                                {patent.inventor && (
-                                                                    <p className="text-xs text-muted-foreground mb-1">
-                                                                        <span className="font-medium">Inventor:</span> {patent.inventor}
-                                                                    </p>
-                                                                )}
-                                                                {patent.abstract && (
-                                                                    <p className="text-xs text-muted-foreground line-clamp-2">
-                                                                        <span className="font-medium">Resumo:</span> {patent.abstract}
-                                                                    </p>
-                                                                )}
-                                                                {patent.classification && (
-                                                                    <p className="text-xs text-muted-foreground">
-                                                                        <span className="font-medium">IPC:</span> {patent.classification}
-                                                                    </p>
-                                                                )}
-                                                            </div>
-                                                            <button
-                                                                type="button"
-                                                                className="p-2 rounded-lg hover:bg-muted transition-colors shrink-0"
-                                                                title="Abrir documento da patente"
-                                                                onClick={() => openPatentModal(patent, null)}
-                                                            >
-                                                                <ExternalLink className="w-4 h-4 text-muted-foreground" />
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ))}
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ))}
+                                                </TableBody>
+                                            </Table>
                                         </div>
                                     )}
                                 </TabsContent>

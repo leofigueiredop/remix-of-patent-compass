@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000").replace(/\/+$/, "");
 
@@ -26,6 +27,7 @@ export interface InpiPetition {
   protocol?: string;
   date?: string;
   client?: string;
+  delivery?: string;
 }
 
 export interface InpiAnnuity {
@@ -42,12 +44,16 @@ export interface PatentDocumentData {
   cod_pedido?: string;
   title: string;
   applicant?: string;
+  depositante?: string;
+  titular?: string;
   inventor?: string;
   date?: string;
+  publication_date?: string;
   abstract?: string;
   resumo_detalhado?: string;
   procurador?: string;
   classification?: string;
+  classifications?: Array<{ code?: string; description?: string }>;
   source?: string;
   url: string;
   status?: string;
@@ -63,10 +69,12 @@ export interface PatentDocumentData {
   };
   publications?: InpiPublication[];
   petitions?: InpiPetition[];
+  protocols?: Array<{ id: string; protocol?: string; date?: string; service_code?: string; client?: string }>;
   annuities?: InpiAnnuity[];
   scraping_status?: string;
   document_status?: string;
   document_error?: string | null;
+  document_last_success_at?: string | null;
   doc_jobs?: Array<{
     id: string;
     publication_number?: string;
@@ -227,8 +235,12 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
           resumo_detalhado: data.resumo_detalhado || data.abstract || patent.resumo_detalhado || patent.abstract,
           procurador: data.procurador || patent.procurador,
           applicant: data.applicant || patent.applicant,
+          depositante: data.depositante || data.applicant || patent.depositante || patent.applicant,
+          titular: data.titular || data.depositante || data.applicant || patent.titular || patent.applicant,
           inventor: data.inventors || patent.inventor,
           date: data.filing_date || patent.date,
+          publication_date: data.publication_date || patent.publication_date,
+          classifications: Array.isArray(data.classifications) ? data.classifications : patent.classifications,
           status: data.status || patent.status,
           figures: Array.isArray(data.figures) ? data.figures : patent.figures,
           inpiUrl: data.inpiUrl || patent.inpiUrl,
@@ -237,10 +249,12 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
           storage: data.storage || patent.storage,
           publications: data.publications,
           petitions: data.petitions,
+          protocols: data.protocols,
           annuities: data.annuities,
           scraping_status: data.scraping_status,
           document_status: data.document_status,
           document_error: data.document_error,
+          document_last_success_at: data.document_last_success_at,
           doc_jobs: data.doc_jobs
         });
       } catch (err) {
@@ -328,20 +342,45 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
     }
   };
 
-  const headerItems = useMemo(() => {
-    const target = detailedData || patent;
-    if (!target) return [];
-    return [
-      { label: "Número", value: target.publicationNumber || "N/A" },
-      { label: "Fonte", value: target.source || "N/A" },
-      { label: "Titular", value: target.applicant || "N/A" },
-      { label: "Inventor", value: target.inventor || "N/A" },
-      { label: "Data", value: target.date || "N/A" },
-      { label: "IPC", value: target.classification || "N/A" },
-      { label: "Situação", value: target.status || "N/A" },
-      { label: "Documento", value: (target.document_status || (target.storage?.hasStoredDocument ? "completed" : "not_queued")).toUpperCase() }
-    ];
-  }, [patent, detailedData]);
+  const targetData = detailedData || patent;
+  const activeDocumentError = useMemo(() => {
+    if (!targetData) return "";
+    if (targetData.storage?.hasStoredDocument || targetData.document_status === "completed") return "";
+    return targetData.document_error || "";
+  }, [targetData]);
+  const classificationRows = useMemo(() => {
+    if (!targetData) return [];
+    if (Array.isArray(targetData.classifications) && targetData.classifications.length > 0) {
+      return targetData.classifications
+        .map((item) => ({
+          code: (item.code || "").trim(),
+          description: (item.description || "").trim()
+        }))
+        .filter((item) => item.code || item.description);
+    }
+    const raw = (targetData.classification || "").trim();
+    if (!raw) return [];
+    return raw
+      .split(/\s*;\s*/g)
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((entry) => ({ code: entry, description: "" }));
+  }, [targetData]);
+  const protocolRows = useMemo(() => {
+    if (!targetData) return [];
+    if (Array.isArray(targetData.protocols) && targetData.protocols.length > 0) {
+      return targetData.protocols.filter((item) => (item.protocol || "").trim().length > 0);
+    }
+    return (targetData.petitions || [])
+      .filter((item) => (item.protocol || "").trim().length > 0)
+      .map((item) => ({
+        id: item.id,
+        protocol: item.protocol,
+        date: item.date,
+        service_code: item.service_code,
+        client: item.client
+      }));
+  }, [targetData]);
 
   const handleDownload = () => {
     if (!pdfUrl || !patent) return;
@@ -405,7 +444,7 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
                   )}
                 </div>
                 <h3 className="text-lg font-bold text-slate-900 leading-snug line-clamp-3 mb-4">
-                  {patent.title || "Sem título"}
+                  {targetData?.title || patent.title || "Sem título"}
                 </h3>
                 
                 {patent.source === "INPI" && (
@@ -428,7 +467,7 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
               <div className="flex-1 overflow-hidden flex flex-col">
                 <Tabs defaultValue="metadata" className="flex-1 flex flex-col h-full">
                   <div className="px-5 pt-3 border-b border-slate-100 bg-slate-50/50">
-                    <TabsList className="w-full h-9 bg-transparent p-0 justify-start gap-6 border-none">
+                    <TabsList className="w-full h-9 bg-transparent p-0 justify-start gap-6 border-none overflow-x-auto">
                       <TabsTrigger value="metadata" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-slate-900 rounded-none px-1 py-2 text-xs font-semibold text-slate-500 data-[state=active]:text-slate-900 h-full">
                         Metadados
                       </TabsTrigger>
@@ -440,6 +479,10 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
                         Petições
                         {detailedData?.petitions && <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-200 h-4 px-1.5 text-[9px]">{detailedData.petitions.length}</Badge>}
                       </TabsTrigger>
+                      <TabsTrigger value="protocols" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-slate-900 rounded-none px-1 py-2 text-xs font-semibold text-slate-500 data-[state=active]:text-slate-900 h-full flex items-center gap-2">
+                        Protocolos
+                        <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-200 h-4 px-1.5 text-[9px]">{protocolRows.length}</Badge>
+                      </TabsTrigger>
                       <TabsTrigger value="annuities" className="data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-slate-900 rounded-none px-1 py-2 text-xs font-semibold text-slate-500 data-[state=active]:text-slate-900 h-full flex items-center gap-2">
                         Anuidades
                         {detailedData?.annuities && <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-200 h-4 px-1.5 text-[9px]">{detailedData.annuities.length}</Badge>}
@@ -449,36 +492,86 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
 
                   <div className="flex-1 overflow-y-auto">
                     <TabsContent value="metadata" className="m-0 p-5 space-y-6">
-                      {/* Grid de Metadados (Mais clean) */}
-                      <div className="grid grid-cols-2 gap-4">
-                        {headerItems.filter(item => !['Número', 'Fonte', 'Documento'].includes(item.label)).map((item) => (
-                          <div key={item.label} className="flex flex-col gap-1">
-                            <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">{item.label}</span>
-                            <span className="text-sm font-medium text-slate-800 break-words">{item.value}</span>
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Título</span>
+                          <span className="text-sm font-semibold text-slate-900 break-words">{targetData?.title || "-"}</span>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Situação</span>
+                          <span className="text-sm font-medium text-slate-800 break-words">{targetData?.status || "-"}</span>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Depositante</span>
+                          <span className="text-sm font-medium text-slate-800 break-words">{targetData?.depositante || targetData?.applicant || "-"}</span>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Titular</span>
+                          <span className="text-sm font-medium text-slate-800 break-words">{targetData?.titular || targetData?.applicant || "-"}</span>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Inventor</span>
+                          <span className="text-sm font-medium text-slate-800 break-words">{targetData?.inventor || "-"}</span>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Número</span>
+                          <span className="text-sm font-medium text-slate-800 font-mono break-all">{targetData?.publicationNumber || "-"}</span>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Data de Depósito</span>
+                          <span className="text-sm font-medium text-slate-800 break-words">{targetData?.date || "-"}</span>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Data de Publicação</span>
+                          <span className="text-sm font-medium text-slate-800 break-words">{targetData?.publication_date || "-"}</span>
+                        </div>
+                        {(targetData?.procurador || patent.procurador) && (
+                          <div className="flex flex-col gap-1 sm:col-span-2">
+                            <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Procurador</span>
+                            <span className="text-sm font-medium text-slate-800 break-words">{targetData?.procurador || patent.procurador}</span>
                           </div>
-                        ))}
+                        )}
                       </div>
 
-                      {(detailedData?.procurador || patent.procurador) && (
-                        <div className="flex flex-col gap-1 pt-4 border-t border-slate-100">
-                          <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Procurador</span>
-                          <span className="text-sm font-medium text-slate-800">{detailedData?.procurador || patent.procurador}</span>
-                        </div>
-                      )}
-
-                      {(detailedData?.resumo_detalhado || detailedData?.abstract || patent.resumo_detalhado || patent.abstract) && (
+                      {(targetData?.resumo_detalhado || targetData?.abstract || patent.resumo_detalhado || patent.abstract) && (
                         <div className="flex flex-col gap-2 pt-4 border-t border-slate-100">
                           <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Resumo</span>
                           <p className="text-sm text-slate-600 leading-relaxed text-justify">
-                            {detailedData?.resumo_detalhado || detailedData?.abstract || patent.resumo_detalhado || patent.abstract}
+                            {targetData?.resumo_detalhado || targetData?.abstract || patent.resumo_detalhado || patent.abstract}
                           </p>
                         </div>
                       )}
 
-                      {(detailedData?.document_error || patent.document_error) && (
+                      <div className="pt-4 border-t border-slate-100 space-y-2">
+                        <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Classificações (IPC/CPC)</span>
+                        <div className="rounded-lg border border-slate-200 overflow-hidden">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="w-[180px]">Código</TableHead>
+                                <TableHead>Descrição</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {classificationRows.length > 0 ? classificationRows.map((row, index) => (
+                                <TableRow key={`${row.code || "class"}-${index}`}>
+                                  <TableCell className="font-mono text-xs">{row.code || "-"}</TableCell>
+                                  <TableCell className="text-xs text-slate-600">{row.description || "-"}</TableCell>
+                                </TableRow>
+                              )) : (
+                                <TableRow>
+                                  <TableCell colSpan={2} className="text-center text-xs text-slate-500 py-6">Sem classificações detalhadas.</TableCell>
+                                </TableRow>
+                              )}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+
+                      {activeDocumentError && (
                         <div className="p-3 bg-red-50 rounded-lg border border-red-100 mt-4">
                           <span className="text-xs font-bold text-red-800 block mb-1">Último erro de documento:</span> 
-                          <span className="text-xs text-red-600">{detailedData?.document_error || patent.document_error}</span>
+                          <span className="text-xs text-red-600">{activeDocumentError}</span>
                         </div>
                       )}
                     </TabsContent>
@@ -490,22 +583,33 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
                           Carregando histórico do INPI...
                         </div>
                       ) : (
-                        <div className="space-y-2 relative before:absolute before:inset-0 before:ml-2 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-slate-200 before:to-transparent">
-                          {detailedData?.publications && detailedData.publications.length > 0 ? detailedData.publications.map((p) => (
-                            <div key={p.id} className={`relative flex items-start gap-4 p-3 rounded-lg border transition-colors ${p.despacho_code === '3.1' ? 'bg-amber-50/50 border-amber-100' : 'bg-white border-slate-100 hover:border-slate-200'}`}>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <span className="text-xs font-bold text-slate-700">{p.date}</span>
-                                  <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4">{p.despacho_code}</Badge>
-                                  <span className="text-[10px] text-slate-400 font-mono">RPI {p.rpi}</span>
-                                </div>
-                                <p className="text-xs font-medium text-slate-800">{p.despacho_desc}</p>
-                                {p.complement && <p className="text-xs text-slate-500 mt-1 line-clamp-2" title={p.complement}>{p.complement}</p>}
-                              </div>
-                            </div>
-                          )) : (
-                            <p className="text-sm text-slate-500 text-center py-8">Nenhum evento registrado.</p>
-                          )}
+                        <div className="rounded-lg border border-slate-200 overflow-hidden">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Data</TableHead>
+                                <TableHead>RPI</TableHead>
+                                <TableHead>Despacho</TableHead>
+                                <TableHead>Descrição</TableHead>
+                                <TableHead>Complemento</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {detailedData?.publications && detailedData.publications.length > 0 ? detailedData.publications.map((p) => (
+                                <TableRow key={p.id}>
+                                  <TableCell className="text-xs whitespace-nowrap">{p.date || "-"}</TableCell>
+                                  <TableCell className="text-xs font-mono whitespace-nowrap">{p.rpi || "-"}</TableCell>
+                                  <TableCell className="text-xs font-mono">{p.despacho_code || "-"}</TableCell>
+                                  <TableCell className="text-xs">{p.despacho_desc || "-"}</TableCell>
+                                  <TableCell className="text-xs text-slate-500">{p.complement || "-"}</TableCell>
+                                </TableRow>
+                              )) : (
+                                <TableRow>
+                                  <TableCell colSpan={5} className="text-center py-8 text-sm text-slate-500">Nenhum evento registrado.</TableCell>
+                                </TableRow>
+                              )}
+                            </TableBody>
+                          </Table>
                         </div>
                       )}
                     </TabsContent>
@@ -524,6 +628,8 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
                                 <th className="px-3 py-2 font-medium">Data</th>
                                 <th className="px-3 py-2 font-medium">Código</th>
                                 <th className="px-3 py-2 font-medium">Protocolo</th>
+                                <th className="px-3 py-2 font-medium">Cliente</th>
+                                <th className="px-3 py-2 font-medium">Regra / Prazo</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
@@ -532,14 +638,52 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
                                   <td className="px-3 py-2 whitespace-nowrap">{p.date}</td>
                                   <td className="px-3 py-2 font-mono">{p.service_code}</td>
                                   <td className="px-3 py-2 font-mono">{p.protocol}</td>
+                                  <td className="px-3 py-2">{p.client || "-"}</td>
+                                  <td className="px-3 py-2 text-slate-500">{p.delivery || "-"}</td>
                                 </tr>
                               )) : (
                                 <tr>
-                                  <td colSpan={3} className="px-3 py-8 text-center text-slate-500">Nenhuma petição encontrada.</td>
+                                  <td colSpan={5} className="px-3 py-8 text-center text-slate-500">Nenhuma petição encontrada.</td>
                                 </tr>
                               )}
                             </tbody>
                           </table>
+                        </div>
+                      )}
+                    </TabsContent>
+
+                    <TabsContent value="protocols" className="m-0 p-5">
+                      {loadingDetails ? (
+                        <div className="flex items-center justify-center gap-2 text-sm text-slate-500 py-8">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Carregando protocolos...
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border border-slate-200 overflow-hidden">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Protocolo</TableHead>
+                                <TableHead>Data</TableHead>
+                                <TableHead>Código Serviço</TableHead>
+                                <TableHead>Cliente</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {protocolRows.length > 0 ? protocolRows.map((item) => (
+                                <TableRow key={item.id}>
+                                  <TableCell className="font-mono text-xs">{item.protocol || "-"}</TableCell>
+                                  <TableCell className="text-xs whitespace-nowrap">{item.date || "-"}</TableCell>
+                                  <TableCell className="font-mono text-xs">{item.service_code || "-"}</TableCell>
+                                  <TableCell className="text-xs">{item.client || "-"}</TableCell>
+                                </TableRow>
+                              )) : (
+                                <TableRow>
+                                  <TableCell colSpan={4} className="text-center py-8 text-sm text-slate-500">Nenhum protocolo encontrado.</TableCell>
+                                </TableRow>
+                              )}
+                            </TableBody>
+                          </Table>
                         </div>
                       )}
                     </TabsContent>
@@ -556,6 +700,7 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
                             <thead className="bg-slate-50 text-slate-500 border-b border-slate-200">
                               <tr>
                                 <th className="px-3 py-2 font-medium">Anuidade</th>
+                                <th className="px-3 py-2 font-medium">Início</th>
                                 <th className="px-3 py-2 font-medium">Vencimento</th>
                                 <th className="px-3 py-2 font-medium">Status</th>
                               </tr>
@@ -564,6 +709,7 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
                               {detailedData?.annuities && detailedData.annuities.length > 0 ? detailedData.annuities.map((a) => (
                                 <tr key={a.id} className="bg-white hover:bg-slate-50">
                                   <td className="px-3 py-2 font-medium">{a.title}</td>
+                                  <td className="px-3 py-2">{a.start_date || "-"}</td>
                                   <td className="px-3 py-2">{a.end_date}</td>
                                   <td className="px-3 py-2">
                                     {a.payment_date ? (
@@ -575,7 +721,7 @@ export default function PatentDocumentModal({ open, onOpenChange, patent }: Pate
                                 </tr>
                               )) : (
                                 <tr>
-                                  <td colSpan={3} className="px-3 py-8 text-center text-slate-500">Nenhuma anuidade encontrada.</td>
+                                  <td colSpan={4} className="px-3 py-8 text-center text-slate-500">Nenhuma anuidade encontrada.</td>
                                 </tr>
                               )}
                             </tbody>

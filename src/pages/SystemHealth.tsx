@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import axios from "axios";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import OperationalPageHeader from "@/components/operations/OperationalPageHeader";
 
 const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000").replace(/\/+$/, "");
 
@@ -53,25 +54,64 @@ export default function SystemHealth() {
         if (status === "offline") return { text: "Offline", className: "text-rose-600" };
         return { text: "Desconhecido", className: "text-slate-500" };
     };
+    const serviceStatuses = [
+        data?.services?.inpiWeb?.status,
+        data?.services?.epoOps?.status,
+        data?.services?.database?.status,
+        data?.services?.groq?.status
+    ];
+    const criticalCount = serviceStatuses.filter((item) => item === "offline").length;
+    const degradedCount = serviceStatuses.filter((item) => item === "degraded").length;
+    const operationalCount = serviceStatuses.filter((item) => item === "online").length;
+    const syncAttention = (data?.syncs || []).filter((sync) => sync.status !== "completed").length;
 
     return (
         <AppLayout>
             <div className="flex flex-col gap-6 w-full mx-auto">
-                <div className="flex justify-between items-end">
-                    <div className="animate-in fade-in slide-in-from-left duration-700">
-                        <h1 className="text-2xl font-bold flex items-center gap-3 text-slate-900 mb-2">
-                            <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center">
-                                <Activity className="w-5 h-5 text-white" />
+                <OperationalPageHeader
+                    title="Saúde do Sistema"
+                    description="Visão operacional das integrações, banco de dados e sincronizações críticas."
+                    icon={<Activity className="w-5 h-5 text-slate-600" />}
+                    actions={
+                        <Button variant="outline" className="gap-2 bg-white" onClick={() => void load()} disabled={loading}>
+                            <RefreshCw className="w-4 h-4 text-slate-500" /> Atualizar
+                        </Button>
+                    }
+                    metrics={
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                            <div className="rounded-xl border border-rose-200 bg-rose-50 p-3">
+                                <p className="text-xs text-rose-700">Crítico</p>
+                                <p className="text-2xl font-semibold text-rose-700">{criticalCount}</p>
                             </div>
-                            Saúde do Sistema
-                        </h1>
-                        <p className="text-muted-foreground text-sm mt-1">
-                            Status das integrações, APIs externas e banco de dados.
-                        </p>
+                            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                                <p className="text-xs text-amber-700">Atenção</p>
+                                <p className="text-2xl font-semibold text-amber-700">{degradedCount}</p>
+                            </div>
+                            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                                <p className="text-xs text-emerald-700">Operacional</p>
+                                <p className="text-2xl font-semibold text-emerald-700">{operationalCount}</p>
+                            </div>
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                <p className="text-xs text-slate-500">Sincronizações com atenção</p>
+                                <p className="text-2xl font-semibold text-slate-900">{syncAttention}</p>
+                            </div>
+                        </div>
+                    }
+                />
+
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <h3 className="text-sm font-semibold text-slate-800 mb-3">Ações necessárias agora</h3>
+                    <div className="space-y-2">
+                        {criticalCount === 0 && degradedCount === 0 && syncAttention === 0 ? (
+                            <p className="text-xs text-emerald-700">Nenhuma ação urgente. Operação estável neste momento.</p>
+                        ) : (
+                            <>
+                                {criticalCount > 0 && <p className="text-xs text-rose-700">Existem integrações offline. Priorize recuperação de conectividade.</p>}
+                                {degradedCount > 0 && <p className="text-xs text-amber-700">Há integrações degradadas. Validar latência, autenticação e limites de API.</p>}
+                                {syncAttention > 0 && <p className="text-xs text-slate-600">Sincronizações com status diferente de completed. Revisar fila e reprocessamento.</p>}
+                            </>
+                        )}
                     </div>
-                    <Button variant="outline" className="gap-2 bg-white" onClick={() => void load()} disabled={loading}>
-                        <RefreshCw className="w-4 h-4 text-slate-500" /> Atualizar
-                    </Button>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

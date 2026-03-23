@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import AppLayout from "@/components/AppLayout";
 import WizardSteps from "@/components/WizardSteps";
+import OperationalPageHeader from "@/components/operations/OperationalPageHeader";
 import { useResearch } from "@/contexts/ResearchContext";
 import { aiService } from "@/services/ai";
 
@@ -96,13 +97,29 @@ export default function NewResearch() {
           onComplete={() => { }}
         />
       )}
-      <WizardSteps currentStep={0} steps={steps} />
-
-      <div className="max-w-3xl">
-        <h1 className="text-2xl font-bold mb-1">Nova Pesquisa</h1>
-        <p className="text-muted-foreground text-sm mb-8">
-          Descreva a invenção para iniciar a análise de patentes
-        </p>
+      <div className="space-y-6">
+        <WizardSteps currentStep={0} steps={steps} />
+        <OperationalPageHeader
+          title="Nova Pesquisa"
+          description="Estruture o briefing técnico para iniciar a análise de patentes com melhor qualidade de resultado."
+          icon={<FileText className="w-5 h-5 text-slate-600" />}
+          metrics={
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-xs text-slate-500">Modo selecionado</p>
+                <p className="text-sm font-semibold text-slate-800 uppercase">{inputMode}</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-xs text-slate-500">Arquivos anexados</p>
+                <p className="text-sm font-semibold text-slate-800">{selectedFiles.length}</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-xs text-slate-500">Briefing digitado</p>
+                <p className="text-sm font-semibold text-slate-800">{text.trim().length} caracteres</p>
+              </div>
+            </div>
+          }
+        />
 
         {error && (
           <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg mb-6">
@@ -110,7 +127,6 @@ export default function NewResearch() {
           </div>
         )}
 
-        {/* Input mode selector */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
           <button
             onClick={() => setInputMode("audio")}
@@ -166,7 +182,7 @@ export default function NewResearch() {
             placeholder="Descreva a invenção com o máximo de detalhes possível: qual o problema técnico, qual a solução proposta, quais os diferenciais em relação ao estado da arte..."
             value={text}
             onChange={(e) => setText(e.target.value)}
-            className="min-h-[200px] resize-y"
+            className="min-h-[260px] resize-y"
           />
         ) : (
           <div className="border-2 border-dashed border-border rounded-lg p-12 text-center">

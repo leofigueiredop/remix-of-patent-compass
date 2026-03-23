@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import AppLayout from "@/components/AppLayout";
-import { Settings as SettingsIcon, Mail, Webhook, Tags, Database, Save, CheckCircle2 } from "lucide-react";
+import { Settings as SettingsIcon, Mail, Webhook, Tags, Database, Save, CheckCircle2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,9 +22,22 @@ export default function Settings() {
         senderName: ""
     });
     const [templates, setTemplates] = useState({
+        layoutName: "Layout padrão",
+        logoUrl: "",
+        signatureHtml: "",
+        variables: ["{{cliente_nome}}", "{{demanda_titulo}}", "{{demanda_codigo}}", "{{prazo}}", "{{responsavel}}", "{{status}}"],
         collision: "",
-        process: ""
+        process: "",
+        market: ""
     });
+    const [emailTriggers, setEmailTriggers] = useState<Array<{
+        id: string;
+        event: string;
+        condition: string;
+        templateKey: string;
+        recipientMode: string;
+        active: boolean;
+    }>>([]);
     const [workflows, setWorkflows] = useState({
         statusesText: "nova, triagem, andamento, cliente, concluida",
         collisionSlaDays: "7",
@@ -51,9 +64,15 @@ export default function Settings() {
                 senderName: data?.smtp?.senderName || ""
             });
             setTemplates({
+                layoutName: data?.templates?.layoutName || "Layout padrão",
+                logoUrl: data?.templates?.logoUrl || "",
+                signatureHtml: data?.templates?.signatureHtml || "",
+                variables: Array.isArray(data?.templates?.variables) ? data.templates.variables : ["{{cliente_nome}}", "{{demanda_titulo}}", "{{demanda_codigo}}", "{{prazo}}", "{{responsavel}}", "{{status}}"],
                 collision: data?.templates?.collision || "",
-                process: data?.templates?.process || ""
+                process: data?.templates?.process || "",
+                market: data?.templates?.market || ""
             });
+            setEmailTriggers(Array.isArray(data?.emailTriggers) ? data.emailTriggers : []);
             const workflowStatuses = Array.isArray(data?.workflows?.statuses)
                 ? data.workflows.statuses
                 : ["nova", "triagem", "andamento", "cliente", "concluida"];
@@ -87,6 +106,7 @@ export default function Settings() {
             await axios.put(`${API_URL}/settings/system`, {
                 smtp,
                 templates,
+                emailTriggers,
                 workflows: {
                     statuses: workflows.statusesText
                         .split(",")
@@ -140,6 +160,12 @@ export default function Settings() {
                             className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${activeTab === "templates" ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-50"}`}
                         >
                             <Webhook className="w-4 h-4" /> Templates de Email
+                        </button>
+                        <button 
+                            onClick={() => setActiveTab("triggers")}
+                            className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${activeTab === "triggers" ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-50"}`}
+                        >
+                            <Mail className="w-4 h-4" /> Gatilhos de E-mail
                         </button>
                         <button 
                             onClick={() => setActiveTab("workflows")}
@@ -200,6 +226,32 @@ export default function Settings() {
                                     <p className="text-sm text-slate-500">Configure os textos padrão enviados aos clientes.</p>
                                 </div>
                                 <div className="flex flex-col gap-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <Label>Nome do layout</Label>
+                                            <Input value={templates.layoutName} onChange={(e) => setTemplates((prev) => ({ ...prev, layoutName: e.target.value }))} />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>URL do logo</Label>
+                                            <Input value={templates.logoUrl} onChange={(e) => setTemplates((prev) => ({ ...prev, logoUrl: e.target.value }))} placeholder="https://..." />
+                                        </div>
+                                        <div className="md:col-span-2 space-y-2">
+                                            <Label>Assinatura padrão (HTML simples)</Label>
+                                            <Textarea
+                                                value={templates.signatureHtml}
+                                                onChange={(e) => setTemplates((prev) => ({ ...prev, signatureHtml: e.target.value }))}
+                                                placeholder="<p>Equipe Aura PI</p>"
+                                            />
+                                        </div>
+                                        <div className="md:col-span-2 space-y-2">
+                                            <Label>Variáveis disponíveis</Label>
+                                            <Input
+                                                value={templates.variables.join(", ")}
+                                                onChange={(e) => setTemplates((prev) => ({ ...prev, variables: e.target.value.split(",").map((item) => item.trim()).filter(Boolean) }))}
+                                                placeholder="{{cliente_nome}}, {{demanda_titulo}}"
+                                            />
+                                        </div>
+                                    </div>
                                     <div className="space-y-2">
                                         <Label>Template - Alerta de Nova Colisão</Label>
                                         <Textarea
@@ -216,11 +268,67 @@ export default function Settings() {
                                             placeholder="Prezados, houve atualização processual na patente {{patente}}..."
                                         />
                                     </div>
+                                    <div className="space-y-2">
+                                        <Label>Template - Monitoramento de Mercado</Label>
+                                        <Textarea
+                                            value={templates.market}
+                                            onChange={(e) => setTemplates((prev) => ({ ...prev, market: e.target.value }))}
+                                            placeholder="Olá {{cliente_nome}}, encontramos movimentações relevantes para {{demanda_titulo}}..."
+                                        />
+                                    </div>
                                     <div className="pt-2 flex justify-end">
                                         <Button onClick={saveSettings} disabled={saving || loading} className="bg-slate-900 hover:bg-slate-800 text-white">
                                             {saving ? "Salvando..." : "Salvar Templates"}
                                         </Button>
                                     </div>
+                                </div>
+                            </div>
+                        )}
+                        {activeTab === "triggers" && (
+                            <div className="space-y-6 animate-in fade-in">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <h3 className="text-lg font-bold text-slate-800">Gatilhos de E-mail</h3>
+                                        <p className="text-sm text-slate-500">Automatize disparos por evento do CRM de demandas.</p>
+                                    </div>
+                                    <Button
+                                        variant="outline"
+                                        className="gap-2"
+                                        onClick={() => setEmailTriggers((prev) => [...prev, {
+                                            id: `trigger_${Date.now()}`,
+                                            event: "status_change",
+                                            condition: "sempre",
+                                            templateKey: "process",
+                                            recipientMode: "primary_contact",
+                                            active: true
+                                        }])}
+                                    >
+                                        <Plus className="w-4 h-4" /> Novo gatilho
+                                    </Button>
+                                </div>
+                                <div className="space-y-3">
+                                    {emailTriggers.length === 0 ? (
+                                        <p className="text-sm text-slate-500">Nenhum gatilho configurado.</p>
+                                    ) : emailTriggers.map((trigger, index) => (
+                                        <div key={trigger.id} className="rounded-lg border border-slate-200 p-3 grid grid-cols-1 md:grid-cols-6 gap-2">
+                                            <Input value={trigger.event} onChange={(e) => setEmailTriggers((prev) => prev.map((item, i) => i === index ? { ...item, event: e.target.value } : item))} placeholder="Evento" />
+                                            <Input value={trigger.condition} onChange={(e) => setEmailTriggers((prev) => prev.map((item, i) => i === index ? { ...item, condition: e.target.value } : item))} placeholder="Condição" />
+                                            <Input value={trigger.templateKey} onChange={(e) => setEmailTriggers((prev) => prev.map((item, i) => i === index ? { ...item, templateKey: e.target.value } : item))} placeholder="Template" />
+                                            <Input value={trigger.recipientMode} onChange={(e) => setEmailTriggers((prev) => prev.map((item, i) => i === index ? { ...item, recipientMode: e.target.value } : item))} placeholder="Destinatário" />
+                                            <label className="flex items-center gap-2 text-sm px-2">
+                                                <input type="checkbox" checked={trigger.active} onChange={(e) => setEmailTriggers((prev) => prev.map((item, i) => i === index ? { ...item, active: e.target.checked } : item))} />
+                                                Ativo
+                                            </label>
+                                            <Button variant="outline" onClick={() => setEmailTriggers((prev) => prev.filter((_, i) => i !== index))}>
+                                                <Trash2 className="w-4 h-4 mr-1" /> Remover
+                                            </Button>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="pt-2 flex justify-end">
+                                    <Button onClick={saveSettings} disabled={saving || loading} className="bg-slate-900 hover:bg-slate-800 text-white">
+                                        {saving ? "Salvando..." : "Salvar gatilhos"}
+                                    </Button>
                                 </div>
                             </div>
                         )}

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Search, Plus, FileText, Calendar, ChevronRight, ShieldCheck, Loader2, Workflow, BookOpen, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import AppLayout from "@/components/AppLayout";
+import OperationalPageHeader from "@/components/operations/OperationalPageHeader";
 import { aiService } from "@/services/ai";
 import { api } from "@/services/auth";
 import { useResearch } from "@/contexts/ResearchContext";
@@ -86,25 +87,23 @@ export default function Dashboard() {
     <AppLayout>
       <div className="flex flex-col gap-8">
         
-        {/* Header */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Dashboard Central</h1>
-            <p className="text-muted-foreground text-sm mt-1">
-              Visão geral da operação, pesquisas e monitoramentos.
-            </p>
-          </div>
-          <div className="flex w-full gap-2 sm:w-auto sm:items-center sm:gap-3">
-            <Button variant="outline" onClick={() => navigate("/search")} className="flex-1 gap-2 sm:flex-none">
-              <Search className="w-4 h-4" />
-              Busca Rápida
-            </Button>
-            <Button onClick={() => navigate("/research/new")} className="flex-1 gap-2 bg-emerald-600 hover:bg-emerald-700 sm:flex-none">
-              <Plus className="w-4 h-4" />
-              Nova Pesquisa
-            </Button>
-          </div>
-        </div>
+        <OperationalPageHeader
+          title="Dashboard Central"
+          description="Visão geral da operação, pesquisas, monitoramentos e demandas."
+          icon={<ShieldCheck className="w-5 h-5 text-slate-600" />}
+          actions={
+            <>
+              <Button variant="outline" onClick={() => navigate("/search")} className="gap-2">
+                <Search className="w-4 h-4" />
+                Busca Rápida
+              </Button>
+              <Button onClick={() => navigate("/research/new")} className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white">
+                <Plus className="w-4 h-4" />
+                Nova Pesquisa
+              </Button>
+            </>
+          }
+        />
 
         {/* Top KPIs */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

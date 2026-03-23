@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import AppLayout from "@/components/AppLayout";
-import { Workflow, Search, Filter, AlertCircle, Clock, CheckCircle2 } from "lucide-react";
+import { Workflow, Search, Filter, AlertCircle, Clock, CheckCircle2, FilterX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import axios from "axios";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import OperationalPageHeader from "@/components/operations/OperationalPageHeader";
+import OperationalKpiCard from "@/components/operations/OperationalKpiCard";
 
 const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000").replace(/\/+$/, "");
 
@@ -82,61 +84,20 @@ export default function ProcessMonitoring() {
     return (
         <AppLayout>
             <div className="flex flex-col gap-6 w-full mx-auto">
-                <div className="flex justify-between items-end">
-                    <div className="animate-in fade-in slide-in-from-left duration-700">
-                        <h1 className="text-2xl font-bold flex items-center gap-3 text-slate-900 mb-2">
-                            <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center">
-                                <Workflow className="w-5 h-5 text-blue-600" />
-                            </div>
-                            Monitoramento de Processo
-                        </h1>
-                        <p className="text-muted-foreground text-sm mt-1">
-                            Acompanhe exigências, anuidades, despachos e ciclo de vida de patentes.
-                        </p>
-                    </div>
-                </div>
+                <OperationalPageHeader
+                    title="Monitoramento de Processo"
+                    description="Acompanhe exigências, anuidades, despachos e ciclo de vida de patentes."
+                    icon={<Workflow className="w-5 h-5 text-slate-600" />}
+                />
 
-                {/* KPIs */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-start justify-between">
-                        <div>
-                            <p className="text-xs font-medium text-slate-500 mb-1">Exigências Abertas</p>
-                            <h3 className="text-2xl font-bold text-slate-900">{overview.openExigencies}</h3>
-                        </div>
-                        <div className="w-8 h-8 rounded-full bg-amber-50 flex items-center justify-center text-amber-600">
-                            <AlertCircle className="w-4 h-4" />
-                        </div>
-                    </div>
-                    <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-start justify-between">
-                        <div>
-                            <p className="text-xs font-medium text-slate-500 mb-1">Prazos em 7 dias</p>
-                            <h3 className="text-2xl font-bold text-slate-900">{overview.deadlines7d}</h3>
-                        </div>
-                        <div className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center text-red-600">
-                            <Clock className="w-4 h-4" />
-                        </div>
-                    </div>
-                    <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-start justify-between">
-                        <div>
-                            <p className="text-xs font-medium text-slate-500 mb-1">Novos Despachos</p>
-                            <h3 className="text-2xl font-bold text-slate-900">{overview.newDispatches7d}</h3>
-                        </div>
-                        <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
-                            <Workflow className="w-4 h-4" />
-                        </div>
-                    </div>
-                    <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-start justify-between">
-                        <div>
-                            <p className="text-xs font-medium text-slate-500 mb-1">Processos Regulares</p>
-                            <h3 className="text-2xl font-bold text-slate-900">{overview.regularProcesses}</h3>
-                        </div>
-                        <div className="w-8 h-8 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600">
-                            <CheckCircle2 className="w-4 h-4" />
-                        </div>
-                    </div>
+                    <OperationalKpiCard label="Exigências Abertas" value={overview.openExigencies} icon={<AlertCircle className="w-4 h-4" />} tone="warning" />
+                    <OperationalKpiCard label="Prazos em 7 dias" value={overview.deadlines7d} icon={<Clock className="w-4 h-4" />} tone="critical" />
+                    <OperationalKpiCard label="Novos Despachos" value={overview.newDispatches7d} icon={<Workflow className="w-4 h-4" />} tone="info" />
+                    <OperationalKpiCard label="Processos Regulares" value={overview.regularProcesses} icon={<CheckCircle2 className="w-4 h-4" />} tone="success" />
                 </div>
 
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                     <div className="relative flex-1">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                         <Input className="pl-9 bg-slate-50 border-slate-200" placeholder="Buscar processo, cliente ou código..." value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -160,8 +121,21 @@ export default function ProcessMonitoring() {
                         <input type="checkbox" checked={deadlineOnly} onChange={(e) => setDeadlineOnly(e.target.checked)} />
                         Com prazo
                     </label>
-                    <Button variant="outline" className="gap-2 bg-white text-slate-600" onClick={() => void load()} disabled={loading}>
+                    <Button variant="outline" className="gap-2 h-10 text-sm bg-white text-slate-600 w-full sm:w-auto" onClick={() => void load()} disabled={loading}>
                         <Filter className="w-4 h-4" /> Filtros
+                    </Button>
+                    <Button
+                        variant="outline"
+                        className="gap-2 h-10 text-sm bg-white text-slate-600 w-full sm:w-auto"
+                        onClick={() => {
+                            setQuery("");
+                            setUnreadOnly(false);
+                            setDeadlineOnly(false);
+                            setSeverityFilter("all");
+                            void load();
+                        }}
+                    >
+                        <FilterX className="w-4 h-4" /> Limpar
                     </Button>
                 </div>
 

@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import jwt from '@fastify/jwt';
 import axios from 'axios';
-import { GetObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -20,6 +20,7 @@ import {
     enqueueBigQueryFromFailedSources,
     enqueueBigQueryReprocessing,
     enqueueIncompletePatentReprocessing,
+    enqueuePriorityInpiDocumentJob,
     enqueueInpiReprocessing,
     enqueueLastFiveYearsRpi,
     enqueueAllProcessedPatentsDocumentAudit,
@@ -38,6 +39,15 @@ import {
     setBackgroundWorkerPause,
     startBackgroundWorkers
 } from './services/backgroundWorkers';
+import {
+    enqueueCollisionMonitoringJob,
+    getCollisionMonitoringWorkerState,
+    listCollisionMonitoringJobs,
+    previewCollisionCandidatesForRpi,
+    retryCollisionMonitoringJob,
+    setCollisionMonitoringWorkerPause,
+    startCollisionMonitoringWorker
+} from './services/collisionMonitoringWorker';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { createHash, randomUUID } from 'crypto';
@@ -299,6 +309,7 @@ async function ensureBusinessTables() {
             description text null,
             status text not null default 'nova',
             priority text not null default 'media',
+            pi_type text not null default 'patente',
             due_date timestamptz null,
             owner_name text null,
             patent_number text null,
@@ -313,9 +324,21 @@ async function ensureBusinessTables() {
         `alter table if exists crm_demands add column if not exists ai_summary text null`,
         `alter table if exists crm_demands add column if not exists sla_due_at timestamptz null`,
         `alter table if exists crm_demands add column if not exists metadata jsonb not null default '{}'::jsonb`,
+        `alter table if exists crm_demands add column if not exists pi_type text not null default 'patente'`,
+        `update crm_demands set pi_type='patente' where coalesce(pi_type,'')=''`,
         `create index if not exists idx_crm_demands_status on crm_demands(status)`,
         `create index if not exists idx_crm_demands_client on crm_demands(client_id)`,
+        `create index if not exists idx_crm_demands_pi_type on crm_demands(pi_type)`,
         `create index if not exists idx_crm_demands_occurrence on crm_demands(occurrence_id)`,
+        `create table if not exists client_pi_profiles (
+            id text primary key,
+            client_id text not null references "Client"(id) on delete cascade,
+            pi_type text not null,
+            created_at timestamptz not null default now(),
+            updated_at timestamptz not null default now(),
+            unique(client_id, pi_type)
+        )`,
+        `create index if not exists idx_client_pi_profiles_client on client_pi_profiles(client_id)`,
         `create table if not exists client_contacts (
             id text primary key,
             client_id text not null references "Client"(id) on delete cascade,
@@ -767,6 +790,31 @@ function buildStorageAssetKey(publicationNumber: string, asset: 'full' | 'drawin
     return `patent-docs/${safeBase}/${fileName}`;
 }
 
+async function isLikelyCompletePdfBuffer(buffer: Buffer): Promise<{ ok: boolean; pages: number; reason: string }> {
+    if (!buffer || buffer.length < 2048) return { ok: false, pages: 0, reason: 'pdf_muito_pequeno' };
+    const magic = buffer.slice(0, 4).toString();
+    if (magic !== '%PDF') return { ok: false, pages: 0, reason: 'arquivo_nao_pdf' };
+    try {
+        const parsed = await pdfParse(buffer);
+        const pages = Number(parsed?.numpages || 0);
+        if (pages >= 2) return { ok: true, pages, reason: 'ok' };
+        return { ok: false, pages, reason: 'pdf_sem_paginas_suficientes' };
+    } catch {
+        return { ok: false, pages: 0, reason: 'falha_parse_pdf' };
+    }
+}
+
+function extractMultipartFieldValue(data: any, field: string): string {
+    const fromFields = data?.fields?.[field];
+    if (!fromFields) return '';
+    if (Array.isArray(fromFields)) {
+        const candidate = fromFields.find((item) => typeof item?.value === 'string');
+        return String(candidate?.value || '').trim();
+    }
+    if (typeof fromFields?.value === 'string') return String(fromFields.value).trim();
+    return '';
+}
+
 function buildStorageAssets(publicationNumber: string) {
     return {
         fullDocumentPath: buildStorageAssetPath(publicationNumber, 'full'),
@@ -1170,9 +1218,24 @@ fastify.get('/clients', async (request: any, reply: any) => {
             : [];
         const contactCountMap = new Map<string, number>();
         for (const row of contactCountRows) contactCountMap.set(String(row.client_id), Number(row.total || 0));
+        const profileRows = ids.length > 0
+            ? await prisma.$queryRawUnsafe<any[]>(
+                `select client_id, pi_type from client_pi_profiles where client_id = any($1::text[])`,
+                ids
+            ).catch(() => [])
+            : [];
+        const piTypeMap = new Map<string, string[]>();
+        for (const row of profileRows) {
+            const clientId = String(row.client_id);
+            const current = piTypeMap.get(clientId) || [];
+            current.push(String(row.pi_type || '').toLowerCase());
+            piTypeMap.set(clientId, current);
+        }
         return clients.map((client) => ({
             ...client,
-            contacts_count: contactCountMap.get(client.id) || 0
+            contacts_count: contactCountMap.get(client.id) || 0,
+            pi_types: piTypeMap.get(client.id) || ['patente'],
+            primary_pi_type: (piTypeMap.get(client.id) || ['patente'])[0]
         }));
     } catch (error) {
         fastify.log.error(error);
@@ -1184,6 +1247,10 @@ fastify.post('/clients', async (request: any, reply: any) => {
     try {
         await ensureBusinessTables();
         const { name, email, document } = request.body;
+        const rawTypes = Array.isArray(request.body?.piTypes) ? request.body.piTypes : [];
+        const piTypes = Array.from(new Set(rawTypes
+            .map((item: any) => String(item || '').trim().toLowerCase())
+            .filter((item: string) => ['patente', 'marca', 'di'].includes(item))));
         if (!name) {
             return reply.status(400).send({ error: 'Nome é obrigatório' });
         }
@@ -1200,11 +1267,43 @@ fastify.post('/clients', async (request: any, reply: any) => {
                 String(email).trim()
             ).catch(() => undefined);
         }
+        const finalTypes = piTypes.length > 0 ? piTypes : ['patente'];
+        for (const piType of finalTypes) {
+            await prisma.$executeRawUnsafe(
+                `insert into client_pi_profiles (id, client_id, pi_type, created_at, updated_at)
+                 values ($1,$2,$3,now(),now())
+                 on conflict (client_id, pi_type) do update set updated_at=now()`,
+                randomUUID(),
+                client.id,
+                piType
+            ).catch(() => undefined);
+        }
         return reply.status(201).send(client);
     } catch (error) {
         fastify.log.error(error);
         return reply.status(500).send({ error: 'Erro ao criar cliente' });
     }
+});
+
+fastify.put('/clients/:id/pi-types', async (request: any, reply: any) => {
+    await ensureBusinessTables();
+    const { id } = request.params as { id: string };
+    const rawTypes = Array.isArray(request.body?.piTypes) ? request.body.piTypes : [];
+    const piTypes = Array.from(new Set(rawTypes
+        .map((item: any) => String(item || '').trim().toLowerCase())
+        .filter((item: string) => ['patente', 'marca', 'di'].includes(item))));
+    if (piTypes.length === 0) return reply.status(400).send({ error: 'piTypes deve conter ao menos um tipo válido' });
+    await prisma.$executeRawUnsafe(`delete from client_pi_profiles where client_id=$1`, id).catch(() => undefined);
+    for (const piType of piTypes) {
+        await prisma.$executeRawUnsafe(
+            `insert into client_pi_profiles (id, client_id, pi_type, created_at, updated_at)
+             values ($1,$2,$3,now(),now())`,
+            randomUUID(),
+            id,
+            piType
+        ).catch(() => undefined);
+    }
+    return { ok: true, piTypes };
 });
 
 fastify.get('/clients/:id/contacts', async (request: any, reply: any) => {
@@ -1325,6 +1424,7 @@ fastify.get('/demands', async (request: any, reply) => {
         const q = String(request.query?.q || '').trim();
         const status = String(request.query?.status || '').trim();
         const priority = String(request.query?.priority || '').trim();
+        const piType = String(request.query?.piType || '').trim().toLowerCase();
         const view = String(request.query?.view || 'list').trim().toLowerCase();
         const values: any[] = [];
         const conditions: string[] = [];
@@ -1342,11 +1442,14 @@ fastify.get('/demands', async (request: any, reply) => {
         if (priority && priority !== 'all') {
             conditions.push(`d.priority = ${push(priority)}`);
         }
+        if (piType && piType !== 'all') {
+            conditions.push(`d.pi_type = ${push(piType)}`);
+        }
         const whereClause = conditions.length ? `where ${conditions.join(' and ')}` : '';
         const rows = await prisma.$queryRawUnsafe<any[]>(
             `select d.id, d.client_id, c.name as client_name, d.contact_id, cc.name as contact_name, cc.email as contact_email,
                     d.monitoring_origin, d.monitoring_type, d.occurrence_id, d.item_related, d.ai_summary, d.sla_due_at, d.metadata,
-                    d.title, d.description, d.status, d.priority, d.due_date, d.owner_name, d.patent_number, d.created_at, d.updated_at
+                    d.title, d.description, d.status, d.priority, d.pi_type, d.due_date, d.owner_name, d.patent_number, d.created_at, d.updated_at
              from crm_demands d
              left join "Client" c on c.id = d.client_id
              left join client_contacts cc on cc.id = d.contact_id
@@ -1413,6 +1516,7 @@ fastify.post('/demands', async (request: any, reply) => {
         const slaDueAt = request.body?.slaDueAt ? new Date(request.body?.slaDueAt) : null;
         const ownerName = String(request.body?.ownerName || '').trim();
         const patentNumber = String(request.body?.patentNumber || '').trim();
+        const piType = String(request.body?.piType || 'patente').trim().toLowerCase();
         const monitoringOrigin = cleanTextValue(request.body?.monitoringOrigin);
         const monitoringType = cleanTextValue(request.body?.monitoringType);
         const occurrenceId = cleanTextValue(request.body?.occurrenceId);
@@ -1425,11 +1529,11 @@ fastify.post('/demands', async (request: any, reply) => {
         await prisma.$executeRawUnsafe(
             `insert into crm_demands (
                 id, client_id, contact_id, monitoring_origin, monitoring_type, occurrence_id, item_related, ai_summary,
-                title, description, status, priority, due_date, sla_due_at, owner_name, patent_number, metadata, created_at, updated_at
+                title, description, status, priority, pi_type, due_date, sla_due_at, owner_name, patent_number, metadata, created_at, updated_at
              )
              values (
                 $1, $2, nullif($3,''), nullif($4,''), nullif($5,''), nullif($6,''), nullif($7,''), nullif($8,''),
-                $9, nullif($10,''), 'nova', $11, $12, $13, nullif($14,''), nullif($15,''), $16::jsonb, now(), now()
+                $9, nullif($10,''), 'nova', $11, $12, $13, $14, nullif($15,''), nullif($16,''), $17::jsonb, now(), now()
              )`,
             id,
             clientId || null,
@@ -1442,6 +1546,7 @@ fastify.post('/demands', async (request: any, reply) => {
             title,
             description || null,
             ['baixa', 'media', 'alta', 'critica'].includes(priority) ? priority : 'media',
+            ['patente', 'marca', 'di'].includes(piType) ? piType : 'patente',
             dueDate && !Number.isNaN(dueDate.getTime()) ? dueDate.toISOString() : null,
             slaDueAt && !Number.isNaN(slaDueAt.getTime()) ? slaDueAt.toISOString() : null,
             ownerName,
@@ -3172,6 +3277,95 @@ fastify.get('/patent/document/translation', async (request, reply) => {
     }
 });
 
+fastify.post('/patent/document/manual-upload', async (request: any, reply: any) => {
+    const file = await request.file();
+    if (!file) return reply.code(400).send({ error: 'Arquivo PDF é obrigatório' });
+    const patentId = cleanTextValue(extractMultipartFieldValue(file, 'patentId'));
+    const publicationNumberRaw = cleanTextValue(extractMultipartFieldValue(file, 'publicationNumber'));
+    const contentBuffer = await file.toBuffer();
+    const quality = await isLikelyCompletePdfBuffer(contentBuffer);
+    if (!quality.ok) {
+        return reply.code(400).send({ error: `PDF inválido para monitoramento (${quality.reason})` });
+    }
+
+    let targetPatent = patentId
+        ? await prisma.inpiPatent.findUnique({ where: { cod_pedido: patentId } })
+        : null;
+    if (!targetPatent && publicationNumberRaw) {
+        targetPatent = await prisma.inpiPatent.findFirst({
+            where: {
+                OR: [
+                    { numero_publicacao: publicationNumberRaw },
+                    { cod_pedido: publicationNumberRaw }
+                ]
+            }
+        });
+    }
+    if (!targetPatent) {
+        return reply.code(404).send({ error: 'Patente não encontrada para vincular o documento' });
+    }
+
+    const publicationNumber = cleanTextValue(targetPatent.numero_publicacao || publicationNumberRaw || targetPatent.cod_pedido);
+    const storageKey = buildStorageAssetKey(publicationNumber, 'full');
+    const s3 = getS3Client();
+    await s3.send(new PutObjectCommand({
+        Bucket: S3_BUCKET,
+        Key: storageKey,
+        Body: contentBuffer,
+        ContentType: 'application/pdf'
+    }));
+
+    const documentStatusFinal = 'completed';
+    await prisma.documentDownloadJob.upsert({
+        where: { patent_id: targetPatent.cod_pedido },
+        update: {
+            status: documentStatusFinal,
+            error: null,
+            attempts: 0,
+            storage_key: storageKey,
+            publication_number: publicationNumber || null,
+            started_at: null,
+            finished_at: new Date(),
+            updated_at: new Date()
+        },
+        create: {
+            patent_id: targetPatent.cod_pedido,
+            publication_number: publicationNumber || null,
+            status: documentStatusFinal,
+            attempts: 0,
+            storage_key: storageKey,
+            finished_at: new Date()
+        }
+    });
+
+    await prisma.documentDownloadJob.updateMany({
+        where: {
+            patent_id: targetPatent.cod_pedido,
+            status: {
+                in: ['pending', 'running', 'pending_google_patents', 'running_google_patents', 'pending_ops', 'running_ops', 'waiting_inpi_text', 'waiting_inpi', 'failed', 'failed_permanent', 'not_found']
+            }
+        },
+        data: {
+            status: documentStatusFinal,
+            error: null,
+            attempts: 0,
+            storage_key: storageKey,
+            publication_number: publicationNumber || null,
+            started_at: null,
+            finished_at: new Date(),
+            updated_at: new Date()
+        }
+    });
+
+    return {
+        patentId: targetPatent.cod_pedido,
+        publicationNumber,
+        status: documentStatusFinal,
+        pages: quality.pages,
+        storageKey
+    };
+});
+
 async function fetchFullTextFromOps(publicationNumber: string): Promise<string | null> {
     if (!OPS_CONSUMER_KEY || !OPS_CONSUMER_SECRET) return null;
     const cleanedPn = publicationNumber.replace(/\s+/g, '');
@@ -3527,6 +3721,9 @@ const start = async () => {
             fastify.log.error(error, 'Falha ao inicializar tabelas de monitoramento. API seguirá no ar e tentará novamente nas rotas.');
         }
         startBackgroundWorkers();
+        startCollisionMonitoringWorker().catch((error) => {
+            fastify.log.error(error, 'Falha ao iniciar worker de colidência');
+        });
     } catch (err) {
         fastify.log.error(err);
         process.exit(1);
@@ -3591,6 +3788,8 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
     const resolvedInventors = dbData.inventors || latestPublicationWithBiblio?.ops_inventor || '';
     const resolvedFilingDate = dbData.filing_date || latestPublicationWithBiblio?.ops_publication_date || '';
     const resolvedIpc = dbData.ipc_codes || latestPublicationWithBiblio?.ops_ipc || '';
+    const latestPublishedDispatch = (dbData.publications || [])
+        .find((item: any) => ['3.1', '1.3', '16.1'].includes(normalizeText(item?.despacho_code || '').replace(',', '.')));
     const inpiResultData = latestInpiJob?.result_data && typeof latestInpiJob.result_data === 'object'
         ? latestInpiJob.result_data as Record<string, any>
         : null;
@@ -3617,20 +3816,55 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
             }
             return (a?.rpi || '').localeCompare(b?.rpi || '', 'pt-BR', { numeric: true });
         });
+    const classificationBlocks = normalizeStringField(
+        dbData.ipc_codes
+        || inpiResultData?.classificacao
+        || ''
+    )
+        .split(/\s*;\s*/g)
+        .map((item) => normalizeStringField(item))
+        .filter(Boolean)
+        .map((item) => {
+            const [code, ...descriptionParts] = item.split(/\s{2,}|\s-\s/);
+            return {
+                code: normalizeStringField(code),
+                description: normalizeStringField(descriptionParts.join(' - '))
+            };
+        });
+    const protocols = (dbData.petitions || [])
+        .map((petition: any) => ({
+            id: petition.id,
+            protocol: normalizeStringField(petition.protocol),
+            date: normalizeStringField(petition.date),
+            service_code: normalizeStringField(petition.service_code),
+            client: normalizeStringField(petition.client)
+        }))
+        .filter((item) => item.protocol);
+    const latestSucceededDocJob = (dbData.document_jobs || []).find((job: any) => job?.status === 'completed');
+    const activeDocumentError = hasStoredDocument
+        ? null
+        : latestDocJob?.error || null;
     return {
         ...dbData,
         title: resolvedTitle,
         applicant: resolvedApplicant,
+        depositante: resolvedApplicant,
+        titular: normalizeStringField(inpiResultData?.titular || resolvedApplicant),
         inventors: resolvedInventors,
+        inventor: resolvedInventors,
         abstract: resolvedDetailedAbstract,
         resumo_detalhado: resolvedDetailedAbstract,
         procurador: resolvedProcurador,
         filing_date: resolvedFilingDate,
+        publication_date: normalizeStringField(latestPublishedDispatch?.date || ''),
         ipc_codes: resolvedIpc,
+        classifications: classificationBlocks,
         publications,
+        protocols,
         scraping_status: dbData.scraping_jobs[0]?.status || 'available_for_queue',
         document_status: latestDocJob?.status || (hasStoredDocument ? 'completed' : 'not_queued'),
-        document_error: latestDocJob?.error || null,
+        document_error: activeDocumentError,
+        document_last_success_at: latestSucceededDocJob?.updated_at || null,
         doc_jobs: (dbData.document_jobs || []).map((job: any) => ({
             id: job.id,
             publication_number: job.publication_number,
@@ -3686,35 +3920,59 @@ fastify.get('/patent/storage/:publicationNumber/:asset', async (request: any, re
 // ─── Patent Base Endpoints ──────────────────────────────
 fastify.get('/patents/processed', async (request: any, reply) => {
     try {
-        const { page = 1, pageSize = 20, q } = request.query as any;
+        const { page = 1, pageSize = 20, q, documentAvailability, dispatchCode, processStatus } = request.query as any;
         const skip = (parseInt(page, 10) - 1) * parseInt(pageSize, 10);
         const take = parseInt(pageSize, 10);
         const queryText = String(q || '').trim();
         const queryNeedles = queryText ? buildPublicationSearchNeedles(queryText) : [];
-        const whereClause: any = queryText
-            ? {
-                OR: [
-                    ...queryNeedles.flatMap((needle) => ([
-                        { cod_pedido: { contains: needle } },
-                        { numero_publicacao: { contains: needle } }
-                    ])),
-                    { title: { contains: queryText } },
-                    { applicant: { contains: queryText } },
-                    { inventors: { contains: queryText } }
-                ]
-            }
-            : undefined;
+        const whereClause: any = {};
+        if (queryText) {
+            whereClause.OR = [
+                ...queryNeedles.flatMap((needle) => ([
+                    { cod_pedido: { contains: needle } },
+                    { numero_publicacao: { contains: needle } }
+                ])),
+                { title: { contains: queryText } },
+                { applicant: { contains: queryText } },
+                { inventors: { contains: queryText } }
+            ];
+        }
+        if (processStatus) {
+            whereClause.status = { contains: String(processStatus).trim() };
+        }
+        const normalizedDispatchCode = normalizeText(String(dispatchCode || '')).replace(',', '.');
+        if (normalizedDispatchCode) {
+            whereClause.publications = {
+                some: {
+                    despacho_code: { contains: normalizedDispatchCode }
+                }
+            };
+        }
+        const normalizedAvailability = normalizeText(String(documentAvailability || '')).toLowerCase();
+        if (normalizedAvailability === 'completo') {
+            whereClause.document_jobs = {
+                some: { status: 'completed' }
+            };
+        } else if (normalizedAvailability === 'parcial') {
+            whereClause.document_jobs = {
+                some: { status: { in: ['pending', 'running', 'pending_google_patents', 'running_google_patents', 'pending_ops', 'running_ops', 'waiting_inpi_text', 'waiting_inpi'] } }
+            };
+        } else if (normalizedAvailability === 'ausente') {
+            whereClause.document_jobs = {
+                none: {}
+            };
+        }
 
         const [patents, total] = await Promise.all([
             prisma.inpiPatent.findMany({
                 skip,
                 take,
                 orderBy: { updated_at: 'desc' },
-                where: whereClause,
+                where: Object.keys(whereClause).length ? whereClause : undefined,
                 include: {
                     publications: {
-                        orderBy: { created_at: 'desc' },
-                        take: 1
+                        orderBy: [{ date: 'desc' }, { created_at: 'desc' }],
+                        take: 5
                     },
                     document_jobs: {
                         orderBy: { updated_at: 'desc' },
@@ -3729,13 +3987,16 @@ fastify.get('/patents/processed', async (request: any, reply) => {
                     }
                 }
             }),
-            prisma.inpiPatent.count({ where: whereClause })
+            prisma.inpiPatent.count({ where: Object.keys(whereClause).length ? whereClause : undefined })
         ]);
-
         return {
             patents: patents.map((patent: any) => {
                 const latestPublication = patent.publications?.[0];
                 const latestDocJob = patent.document_jobs?.[0];
+                const hasStoredDocument = Boolean(latestDocJob?.status === 'completed' && latestDocJob?.storage_key);
+                const documentAvailability = hasStoredDocument
+                    ? 'completo'
+                    : (latestDocJob ? 'parcial' : 'ausente');
                 return {
                     ...patent,
                     title: patent.title || latestPublication?.ops_title || '',
@@ -3745,7 +4006,12 @@ fastify.get('/patents/processed', async (request: any, reply) => {
                     ipc_codes: patent.ipc_codes || latestPublication?.ops_ipc || '',
                     document_status: latestDocJob?.status || 'not_queued',
                     document_error: latestDocJob?.error || null,
-                    has_stored_document: Boolean(latestDocJob?.status === 'completed' && latestDocJob?.storage_key)
+                    has_stored_document: hasStoredDocument,
+                    document_availability: documentAvailability,
+                    last_dispatch_code: latestPublication?.despacho_code || null,
+                    last_dispatch_desc: latestPublication?.despacho_desc || null,
+                    last_dispatch_date: latestPublication?.date || null,
+                    process_situation: latestPublication?.despacho_desc || patent.status || null
                 };
             }),
             total,
@@ -4127,7 +4393,7 @@ fastify.post('/background-workers/clear-active-errors', async () => {
         }),
         prisma.documentDownloadJob.deleteMany({
             where: {
-                status: { in: ['pending', 'running', 'failed', 'failed_permanent', 'not_found', 'skipped_sigilo'] }
+                status: { in: ['pending', 'running', 'pending_google_patents', 'running_google_patents', 'pending_ops', 'running_ops', 'waiting_inpi_text', 'waiting_inpi', 'failed', 'failed_permanent', 'failed_google_patents', 'failed_ops', 'not_found', 'skipped_sigilo'] }
             }
         }),
         prismaAny.opsBibliographicJob.deleteMany({
@@ -4148,7 +4414,7 @@ fastify.post('/background-workers/reprocess-all', async () => {
         prisma.rpiImportJob.deleteMany({}),
         prisma.documentDownloadJob.deleteMany({
             where: {
-                status: { in: ['pending', 'running', 'failed', 'failed_permanent', 'not_found', 'skipped_sigilo'] }
+                status: { in: ['pending', 'running', 'pending_google_patents', 'running_google_patents', 'pending_ops', 'running_ops', 'waiting_inpi_text', 'waiting_inpi', 'failed', 'failed_permanent', 'failed_google_patents', 'failed_ops', 'not_found', 'skipped_sigilo'] }
             }
         }),
         prismaAny.opsBibliographicJob.deleteMany({
@@ -4170,6 +4436,46 @@ fastify.post('/background-workers/reprocess-all', async () => {
 
 fastify.get('/background-workers/state', async () => {
     return getBackgroundWorkerState();
+});
+
+fastify.get('/monitoring/collision/worker/state', async () => {
+    return getCollisionMonitoringWorkerState();
+});
+
+fastify.get('/monitoring/collision/worker/jobs', async (request: any) => {
+    const limit = Math.max(1, Math.min(200, parseInt(String(request.query?.limit || '50'), 10) || 50));
+    const rows = await listCollisionMonitoringJobs(limit);
+    return { rows, limit };
+});
+
+fastify.get('/monitoring/collision/worker/rpi/:rpiNumber/preview', async (request: any, reply: any) => {
+    const rpiNumber = cleanTextValue(request.params?.rpiNumber);
+    if (!rpiNumber) return reply.code(400).send({ error: 'rpiNumber é obrigatório' });
+    return previewCollisionCandidatesForRpi(rpiNumber);
+});
+
+fastify.post('/monitoring/collision/worker/process-rpi', async (request: any, reply: any) => {
+    const rpiNumber = cleanTextValue(request.body?.rpiNumber);
+    if (!rpiNumber) return reply.code(400).send({ error: 'rpiNumber é obrigatório' });
+    try {
+        const job = await enqueueCollisionMonitoringJob(rpiNumber, cleanTextValue(request.body?.triggeredBy) || undefined);
+        return { job };
+    } catch (error: any) {
+        return reply.code(500).send({ error: error?.message || 'Falha ao enfileirar processamento de colidência' });
+    }
+});
+
+fastify.post('/monitoring/collision/worker/jobs/:id/retry', async (request: any, reply: any) => {
+    const id = cleanTextValue(request.params?.id);
+    if (!id) return reply.code(400).send({ error: 'id é obrigatório' });
+    const job = await retryCollisionMonitoringJob(id);
+    if (!job) return reply.code(404).send({ error: 'Job não encontrado' });
+    return { job };
+});
+
+fastify.post('/monitoring/collision/worker/control', async (request: any, reply: any) => {
+    if (request.body?.paused === undefined) return reply.code(400).send({ error: 'paused é obrigatório' });
+    return setCollisionMonitoringWorkerPause(Boolean(request.body?.paused));
 });
 
 fastify.get('/background-workers/bigquery/test', async (request: any, reply) => {
@@ -4205,11 +4511,25 @@ fastify.post('/background-workers/inpi/enqueue', async (request: any, reply) => 
             ? request.body.patentNumbers.filter((item: any) => typeof item === 'string' && item.trim().length > 0)
             : undefined;
         const priorityRaw = Number(request.body?.priority);
-        const priority = Number.isFinite(priorityRaw) ? Math.max(1, Math.min(10, Math.floor(priorityRaw))) : 10;
-        const result = await enqueueInpiReprocessing(patentNumbers, priority);
+        const priority = Number.isFinite(priorityRaw) ? Math.max(1, Math.min(100, Math.floor(priorityRaw))) : 10;
+        const mode = String(request.body?.mode || 'text').toLowerCase() === 'document' ? 'document' : 'text';
+        const result = await enqueueInpiReprocessing(patentNumbers, priority, mode);
         return result;
     } catch (error: any) {
         return reply.code(500).send({ error: error?.message || 'Falha ao enfileirar processamento INPI' });
+    }
+});
+
+fastify.post('/background-workers/inpi/enqueue-document-priority', async (request: any, reply) => {
+    const patentId = cleanTextValue(request.body?.patentId || request.body?.patentNumber);
+    if (!patentId) return reply.code(400).send({ error: 'patentId é obrigatório' });
+    try {
+        const priorityRaw = Number(request.body?.priority);
+        const priority = Number.isFinite(priorityRaw) ? Math.max(1, Math.min(100, Math.floor(priorityRaw))) : 99;
+        const result = await enqueuePriorityInpiDocumentJob(patentId, priority);
+        return { ...result, queued: true };
+    } catch (error: any) {
+        return reply.code(500).send({ error: error?.message || 'Falha ao enfileirar DOC INPI prioritário' });
     }
 });
 
@@ -4505,6 +4825,94 @@ function parseJsonArray(value: any): any[] {
     }
 }
 
+const PROFILE_SEMANTIC_STOPWORDS = new Set([
+    'a', 'o', 'as', 'os', 'de', 'da', 'do', 'das', 'dos', 'e', 'em', 'na', 'no', 'nas', 'nos',
+    'para', 'por', 'com', 'sem', 'que', 'um', 'uma', 'uns', 'umas', 'ao', 'aos', 'ou', 'se',
+    'como', 'entre', 'sobre', 'sob', 'ate', 'apos', 'mais', 'menos', 'ja', 'foi', 'ser', 'sao',
+    'esta', 'este', 'isso', 'isto', 'seu', 'sua', 'seus', 'suas'
+]);
+
+function tokenizeSemanticKeywords(value: any): string[] {
+    const normalized = normalizeCompareValue(value)
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!normalized) return [];
+    return normalized
+        .split(' ')
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 3 && !PROFILE_SEMANTIC_STOPWORDS.has(token));
+}
+
+function buildTopSemanticKeywords(value: any, maxKeywords = 36): string[] {
+    const tokens = tokenizeSemanticKeywords(value);
+    const frequencies = new Map<string, number>();
+    for (const token of tokens) {
+        frequencies.set(token, (frequencies.get(token) || 0) + 1);
+    }
+    return Array.from(frequencies.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, maxKeywords)
+        .map((item) => item[0]);
+}
+
+async function buildCollisionSemanticRulesPayload(
+    profileType: MonitoringType,
+    rulesInput: Record<string, any>,
+    assetPatentNumber: string,
+    assetTitle: string,
+    notes: string
+): Promise<Record<string, any>> {
+    if (profileType !== 'collision') return rulesInput;
+    const rules = { ...rulesInput };
+    const normalizedAssetPatent = normalizePatentValue(assetPatentNumber);
+    let patentDataText = '';
+    if (normalizedAssetPatent) {
+        const row = await prisma.inpiPatent.findFirst({
+            where: {
+                OR: [
+                    { cod_pedido: normalizedAssetPatent },
+                    { numero_publicacao: normalizedAssetPatent }
+                ]
+            },
+            select: {
+                title: true,
+                abstract: true,
+                resumo_detalhado: true,
+                ipc_codes: true
+            }
+        }).catch(() => null);
+        if (row) {
+            patentDataText = [
+                cleanTextValue(row.title || ''),
+                cleanTextValue(row.abstract || ''),
+                cleanTextValue(row.resumo_detalhado || ''),
+                cleanTextValue(row.ipc_codes || '')
+            ].filter(Boolean).join(' ');
+        }
+    }
+    const manualKeywords = safeArrayString(rules?.keywords || []);
+    const existingSemantic = safeArrayString(rules?.semantic_keywords || []);
+    const semanticCorpus = [
+        cleanTextValue(assetTitle),
+        cleanTextValue(notes),
+        cleanTextValue(patentDataText),
+        manualKeywords.join(' ')
+    ].filter(Boolean).join(' ');
+    const generatedKeywords = buildTopSemanticKeywords(semanticCorpus, 36);
+    const semanticKeywords = Array.from(new Set([
+        ...existingSemantic.map((item) => normalizeCompareValue(item)),
+        ...generatedKeywords
+    ])).filter(Boolean).slice(0, 40);
+    const semanticFingerprint = semanticKeywords.slice(0, 24).join(' ');
+    return {
+        ...rules,
+        semantic_keywords: semanticKeywords,
+        semantic_fingerprint: semanticFingerprint,
+        semantic_index_version: 'collision_semantic_v1'
+    };
+}
+
 function computeRuleScore(profile: any, publication: any) {
     const rules = parseJsonObject(profile?.rules, {});
     const normalizedPatent = normalizePatentValue(publication?.patent_number);
@@ -4581,6 +4989,245 @@ function buildMonitoringOccurrenceSummary(type: MonitoringType, publication: any
         return `Movimentação de mercado detectada para critérios monitorados (${publication?.patent_number || '-'}).`;
     }
     return `Ativo monitorado com nova movimentação na RPI (${publication?.patent_number || '-'})`;
+}
+
+function scoreToRiskLevel(score: number): 'low' | 'medium' | 'high' | 'critical' {
+    if (score >= 86) return 'critical';
+    if (score >= 70) return 'high';
+    if (score >= 50) return 'medium';
+    return 'low';
+}
+
+function toStringList(value: any): string[] {
+    if (Array.isArray(value)) return value.map((item) => cleanTextValue(item)).filter(Boolean).slice(0, 12);
+    if (typeof value === 'string') {
+        return value.split(/[,\n;]+/).map((item) => cleanTextValue(item)).filter(Boolean).slice(0, 12);
+    }
+    return [];
+}
+
+function toNullableText(value: any): string | null {
+    const text = cleanTextValue(value);
+    return text || null;
+}
+
+function buildMonitoringAiInputEnvelope(occurrence: any, monitoringType: MonitoringType, detail: Record<string, any>) {
+    const publication = parseJsonObject(detail?.publication, {});
+    return {
+        occurrence_id: occurrence.id,
+        monitoring_type: monitoringType,
+        profile_context: {
+            profile_id: occurrence.profile_id,
+            profile_name: occurrence.monitoring_name || '',
+            sensitivity: occurrence.monitoring_sensitivity || '',
+            rules_applied: parseJsonObject(occurrence.rules, {})
+        },
+        reference_context: {
+            asset_patent_number: occurrence.reference_patent_number || occurrence.patent_number || null,
+            asset_title: occurrence.asset_title || null,
+            owner_name: occurrence.monitoring_owner || null,
+            attorney_name: occurrence.monitoring_attorney || null
+        },
+        candidate_context: {
+            publication_id: occurrence.publication_id || null,
+            patent_number: occurrence.patent_number || null,
+            title: occurrence.title || null,
+            summary: occurrence.summary || null,
+            event_type: occurrence.event_type || null,
+            despacho_code: publication?.despacho_code || null,
+            despacho_desc: publication?.despacho_desc || null,
+            complement: publication?.complement || null,
+            applicant: publication?.ops_applicant || null,
+            inventor: publication?.ops_inventor || null,
+            ipc: publication?.ops_ipc || null
+        },
+        scores_pre_ai: {
+            rule_score: clampScore(occurrence.rule_score, 0),
+            semantic_seed_score: clampScore(occurrence.semantic_score, 0),
+            legal_seed_score: clampScore(occurrence.legal_score, 0)
+        },
+        metadata: {
+            rpi_number: occurrence.rpi_number || null,
+            publication_date: publication?.date || null,
+            source: occurrence.origin_source || 'monitoring_center',
+            schema_version: 'monitoring_ai_input_v1'
+        }
+    };
+}
+
+function buildMonitoringAiPrompt(monitoringType: MonitoringType, envelope: Record<string, any>) {
+    const promptVersion = monitoringType === 'collision'
+        ? 'prompt_collision_v1'
+        : monitoringType === 'process'
+            ? 'prompt_process_v1'
+            : monitoringType === 'market'
+                ? 'prompt_market_v1'
+                : 'prompt_assets_v1';
+    const sharedOutput = `analysis_version, monitoring_type, relevance_score_0_100, confidence_0_100, risk_level, reasoning_summary, key_signals, recommended_action, recommended_client_message, structured_extras`;
+    const extrasByType = monitoringType === 'collision'
+        ? `novelty_overlap_score_0_100, claims_overlap_proxy_score_0_100, technical_proximity_score_0_100, collision_focus, differentiators, escalation_recommendation`
+        : monitoringType === 'process'
+            ? `event_classification, urgency_score_0_100, deadline_risk, recommended_internal_action, recommended_client_action`
+            : monitoringType === 'market'
+                ? `market_signal_type, importance_score_0_100, entity_impacted, cluster_summary, why_it_matters, recommended_followup`
+                : `asset_status, recommended_internal_action`;
+    const prompt = `Você é analista sênior de PI. Responda apenas JSON válido.
+Regras:
+- idioma PT-BR objetivo;
+- não inventar fatos fora do payload;
+- se dado insuficiente, use null explícito;
+- não retorne markdown.
+Obrigatório no topo: ${sharedOutput}
+No campo structured_extras para tipo ${monitoringType}, usar: ${extrasByType}
+Payload canônico:
+${JSON.stringify(envelope)}
+Retorne JSON estrito com analysis_version="monitoring_ai_output_v1" e monitoring_type="${monitoringType}".`;
+    return { promptVersion, prompt };
+}
+
+function normalizeMonitoringAiOutput(parsed: Record<string, any>, monitoringType: MonitoringType, occurrence: any) {
+    const relevance = clampScore(
+        parsed?.relevance_score_0_100
+        ?? parsed?.importance_score
+        ?? parsed?.importance_score_0_100
+        ?? parsed?.urgency_score
+        ?? parsed?.urgency_score_0_100
+        ?? occurrence.final_score,
+        Number(occurrence.final_score || 0)
+    );
+    const confidence = clampScore(
+        parsed?.confidence_0_100
+        ?? parsed?.confidence_level
+        ?? parsed?.confidence
+        ?? occurrence.semantic_score
+        ?? 60,
+        60
+    );
+    const riskLevelRaw = cleanTextValue(parsed?.risk_level).toLowerCase();
+    const riskLevel = (['low', 'medium', 'high', 'critical'].includes(riskLevelRaw)
+        ? riskLevelRaw
+        : scoreToRiskLevel(relevance)) as 'low' | 'medium' | 'high' | 'critical';
+    const reasoningSummary = toNullableText(
+        parsed?.reasoning_summary
+        ?? parsed?.event_summary
+        ?? parsed?.plain_language_explanation
+        ?? parsed?.why_it_matters
+        ?? occurrence.summary
+    );
+    const keySignals = toStringList(
+        parsed?.key_signals
+        ?? parsed?.key_matching_terms
+        ?? parsed?.emerging_entities
+    );
+    const recommendedAction = toNullableText(
+        parsed?.recommended_action
+        ?? parsed?.recommended_internal_action
+        ?? parsed?.recommended_followup
+    );
+    const recommendedClientMessage = toNullableText(
+        parsed?.recommended_client_message
+        ?? parsed?.recommended_client_action
+        ?? parsed?.plain_language_explanation
+    );
+    let structuredExtras: Record<string, any> = {};
+    if (monitoringType === 'collision') {
+        structuredExtras = {
+            novelty_overlap_score_0_100: clampScore(parsed?.novelty_overlap_score_0_100 ?? parsed?.technical_proximity_score_0_100 ?? relevance, relevance),
+            claims_overlap_proxy_score_0_100: clampScore(parsed?.claims_overlap_proxy_score_0_100 ?? parsed?.claims_overlap_score_0_100 ?? relevance, relevance),
+            technical_proximity_score_0_100: clampScore(parsed?.technical_proximity_score_0_100 ?? parsed?.novelty_overlap_score_0_100 ?? relevance, relevance),
+            collision_focus: toNullableText(parsed?.collision_focus),
+            differentiators: toStringList(parsed?.differentiators),
+            escalation_recommendation: toNullableText(parsed?.escalation_recommendation ?? recommendedAction)
+        };
+    } else if (monitoringType === 'process') {
+        structuredExtras = {
+            event_classification: toNullableText(parsed?.event_classification),
+            urgency_score_0_100: clampScore(parsed?.urgency_score_0_100 ?? parsed?.urgency_score ?? relevance, relevance),
+            deadline_risk: toNullableText(parsed?.deadline_risk),
+            recommended_internal_action: toNullableText(parsed?.recommended_internal_action ?? recommendedAction),
+            recommended_client_action: toNullableText(parsed?.recommended_client_action ?? recommendedClientMessage)
+        };
+    } else if (monitoringType === 'market') {
+        structuredExtras = {
+            market_signal_type: toNullableText(parsed?.market_signal_type),
+            importance_score_0_100: clampScore(parsed?.importance_score_0_100 ?? parsed?.importance_score ?? relevance, relevance),
+            entity_impacted: toNullableText(parsed?.entity_impacted),
+            cluster_summary: toNullableText(parsed?.cluster_summary),
+            why_it_matters: toNullableText(parsed?.why_it_matters),
+            recommended_followup: toNullableText(parsed?.recommended_followup ?? recommendedAction)
+        };
+    } else {
+        structuredExtras = {
+            asset_status: toNullableText(parsed?.asset_status),
+            recommended_internal_action: toNullableText(parsed?.recommended_internal_action ?? recommendedAction)
+        };
+    }
+    return {
+        analysis_version: 'monitoring_ai_output_v1',
+        monitoring_type: monitoringType,
+        relevance_score_0_100: relevance,
+        confidence_0_100: confidence,
+        risk_level: riskLevel,
+        reasoning_summary: reasoningSummary,
+        key_signals: keySignals,
+        recommended_action: recommendedAction,
+        recommended_client_message: recommendedClientMessage,
+        structured_extras: structuredExtras
+    };
+}
+
+function getSemanticAndLegalScoresFromAiOutput(aiOutput: Record<string, any>, monitoringType: MonitoringType, occurrence: any) {
+    if (monitoringType === 'collision') {
+        return {
+            semantic: clampScore(
+                aiOutput?.structured_extras?.novelty_overlap_score_0_100
+                ?? aiOutput?.structured_extras?.technical_proximity_score_0_100
+                ?? aiOutput?.relevance_score_0_100
+                ?? occurrence.semantic_score,
+                Number(occurrence.semantic_score || 0)
+            ),
+            legal: clampScore(
+                aiOutput?.structured_extras?.claims_overlap_proxy_score_0_100
+                ?? aiOutput?.relevance_score_0_100
+                ?? occurrence.legal_score,
+                Number(occurrence.legal_score || 0)
+            )
+        };
+    }
+    if (monitoringType === 'process') {
+        return {
+            semantic: clampScore(
+                aiOutput?.relevance_score_0_100
+                ?? occurrence.semantic_score,
+                Number(occurrence.semantic_score || 0)
+            ),
+            legal: clampScore(
+                aiOutput?.structured_extras?.urgency_score_0_100
+                ?? aiOutput?.relevance_score_0_100
+                ?? occurrence.legal_score,
+                Number(occurrence.legal_score || 0)
+            )
+        };
+    }
+    if (monitoringType === 'market') {
+        return {
+            semantic: clampScore(
+                aiOutput?.structured_extras?.importance_score_0_100
+                ?? aiOutput?.relevance_score_0_100
+                ?? occurrence.semantic_score,
+                Number(occurrence.semantic_score || 0)
+            ),
+            legal: clampScore(
+                aiOutput?.relevance_score_0_100
+                ?? occurrence.legal_score,
+                Number(occurrence.legal_score || 0)
+            )
+        };
+    }
+    return {
+        semantic: clampScore(aiOutput?.relevance_score_0_100 ?? occurrence.semantic_score, Number(occurrence.semantic_score || 0)),
+        legal: clampScore(aiOutput?.relevance_score_0_100 ?? occurrence.legal_score, Number(occurrence.legal_score || 0))
+    };
 }
 
 fastify.get('/monitoring/dashboard-summary', async () => {
@@ -5107,6 +5754,17 @@ fastify.post('/monitoring/center/profiles', async (request: any, reply: any) => 
     const sensitivity = cleanTextValue(request.body?.sensitivity || 'equilibrado') || 'equilibrado';
     const scoreMinAlert = clampScore(request.body?.scoreMinAlert, 55);
     const scoreMinQueue = clampScore(request.body?.scoreMinQueue, 70);
+    const assetPatentNumber = cleanTextValue(request.body?.assetPatentNumber);
+    const assetTitle = cleanTextValue(request.body?.assetTitle);
+    const notes = cleanTextValue(request.body?.notes);
+    const inputRules = parseJsonObject(request.body?.rules, {});
+    const preparedRules = await buildCollisionSemanticRulesPayload(
+        type,
+        inputRules,
+        assetPatentNumber,
+        assetTitle,
+        notes
+    );
     await prisma.$executeRawUnsafe(
         `insert into monitoring_profiles (
             id, type, name, client_id, asset_patent_number, asset_title, owner_name, attorney_name,
@@ -5120,8 +5778,8 @@ fastify.post('/monitoring/center/profiles', async (request: any, reply: any) => 
         type,
         name,
         clientId,
-        cleanTextValue(request.body?.assetPatentNumber),
-        cleanTextValue(request.body?.assetTitle),
+        assetPatentNumber,
+        assetTitle,
         cleanTextValue(request.body?.ownerName),
         cleanTextValue(request.body?.attorneyName),
         sensitivity,
@@ -5131,9 +5789,9 @@ fastify.post('/monitoring/center/profiles', async (request: any, reply: any) => 
         Boolean(request.body?.sendClientAfterValidation),
         Boolean(request.body?.feedbackRequired),
         toJsonString(request.body?.channels, []),
-        toJsonString(request.body?.rules, {}),
+        toJsonString(preparedRules, {}),
         toJsonString(request.body?.tags, []),
-        cleanTextValue(request.body?.notes)
+        notes
     );
     return reply.code(201).send({ id });
 });
@@ -5143,6 +5801,23 @@ fastify.patch('/monitoring/center/profiles/:id', async (request: any, reply: any
     const { id } = request.params as { id: string };
     const name = cleanTextValue(request.body?.name);
     if (!name) return reply.code(400).send({ error: 'name é obrigatório' });
+    const currentProfileRows = await prisma.$queryRawUnsafe<any[]>(
+        `select type from monitoring_profiles where id=$1 limit 1`,
+        id
+    ).catch(() => []);
+    if (!currentProfileRows?.[0]) return reply.code(404).send({ error: 'Monitoramento não encontrado' });
+    const profileType = normalizeMonitoringType(request.body?.type || currentProfileRows?.[0]?.type || 'process');
+    const assetPatentNumber = cleanTextValue(request.body?.assetPatentNumber);
+    const assetTitle = cleanTextValue(request.body?.assetTitle);
+    const notes = cleanTextValue(request.body?.notes);
+    const inputRules = parseJsonObject(request.body?.rules, {});
+    const preparedRules = await buildCollisionSemanticRulesPayload(
+        profileType,
+        inputRules,
+        assetPatentNumber,
+        assetTitle,
+        notes
+    );
     const updated = await prisma.$queryRawUnsafe<any[]>(
         `update monitoring_profiles
          set
@@ -5168,8 +5843,8 @@ fastify.patch('/monitoring/center/profiles/:id', async (request: any, reply: any
         id,
         name,
         cleanTextValue(request.body?.clientId) || null,
-        cleanTextValue(request.body?.assetPatentNumber),
-        cleanTextValue(request.body?.assetTitle),
+        assetPatentNumber,
+        assetTitle,
         cleanTextValue(request.body?.ownerName),
         cleanTextValue(request.body?.attorneyName),
         cleanTextValue(request.body?.sensitivity || 'equilibrado') || 'equilibrado',
@@ -5179,9 +5854,9 @@ fastify.patch('/monitoring/center/profiles/:id', async (request: any, reply: any
         Boolean(request.body?.sendClientAfterValidation),
         Boolean(request.body?.feedbackRequired),
         toJsonString(request.body?.channels, []),
-        toJsonString(request.body?.rules, {}),
+        toJsonString(preparedRules, {}),
         toJsonString(request.body?.tags, []),
-        cleanTextValue(request.body?.notes)
+        notes
     ).catch(() => []);
     if (!updated?.[0]) return reply.code(404).send({ error: 'Monitoramento não encontrado' });
     return { id };
@@ -5458,6 +6133,31 @@ fastify.get('/monitoring/center/occurrences', async (request: any) => {
     };
 });
 
+fastify.get('/monitoring/center/occurrences/:id/ai-envelope', async (request: any, reply: any) => {
+    await ensureBusinessTables();
+    const { id } = request.params as { id: string };
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+        `select o.*, p.name as monitoring_name, p.type as monitoring_type, p.rules, p.asset_title, p.asset_patent_number
+         from monitoring_occurrences o
+         join monitoring_profiles p on p.id=o.profile_id
+         where o.id=$1
+         limit 1`,
+        id
+    ).catch(() => []);
+    const occurrence = rows?.[0];
+    if (!occurrence) return reply.code(404).send({ error: 'Ocorrência não encontrada' });
+    const detail = parseJsonObject(occurrence.detail, {});
+    const profileType = normalizeMonitoringType(occurrence.monitoring_type);
+    const inputEnvelope = buildMonitoringAiInputEnvelope(occurrence, profileType, detail);
+    const { promptVersion } = buildMonitoringAiPrompt(profileType, inputEnvelope);
+    return {
+        occurrenceId: id,
+        monitoringType: profileType,
+        promptVersion,
+        inputEnvelope
+    };
+});
+
 fastify.post('/monitoring/center/occurrences/:id/analyze-ai', async (request: any, reply: any) => {
     await ensureBusinessTables();
     const { id } = request.params as { id: string };
@@ -5475,50 +6175,39 @@ fastify.post('/monitoring/center/occurrences/:id/analyze-ai', async (request: an
 
     const detail = parseJsonObject(occurrence.detail, {});
     const profileType = normalizeMonitoringType(occurrence.monitoring_type);
-    const promptPayload = {
-        monitoringType: profileType,
-        monitoringName: occurrence.monitoring_name,
-        referencePatent: occurrence.asset_patent_number || occurrence.patent_number,
-        referenceTitle: occurrence.asset_title || '',
-        candidateTitle: occurrence.title || '',
-        candidateSummary: occurrence.summary || '',
-        eventType: occurrence.event_type,
-        eventDetail: detail
-    };
-    let prompt = '';
-    if (profileType === 'collision') {
-        prompt = `Analise a colidência de patentes com base no JSON abaixo e retorne JSON válido com: relevance_score_0_100, novelty_overlap_score_0_100, claims_overlap_score_0_100, confidence_level, reasoning_summary, key_matching_terms, key_differentiators, recommended_action.\nJSON:\n${JSON.stringify(promptPayload)}`;
-    } else if (profileType === 'process') {
-        prompt = `Analise o evento processual e retorne JSON válido com: event_summary, urgency_score, recommended_internal_action, recommended_client_action, plain_language_explanation.\nJSON:\n${JSON.stringify(promptPayload)}`;
-    } else if (profileType === 'market') {
-        prompt = `Analise o sinal de mercado e retorne JSON válido com: market_signal_type, importance_score, cluster_summary, emerging_entities, why_it_matters, recommended_followup.\nJSON:\n${JSON.stringify(promptPayload)}`;
-    } else {
-        prompt = `Analise atualização de ativo e retorne JSON válido com: relevance_score_0_100, confidence_level, reasoning_summary, recommended_action.\nJSON:\n${JSON.stringify(promptPayload)}`;
-    }
+    const inputEnvelope = buildMonitoringAiInputEnvelope(occurrence, profileType, detail);
+    const { promptVersion, prompt } = buildMonitoringAiPrompt(profileType, inputEnvelope);
     try {
         const raw = await generateWithGemini(prompt, true);
-        const parsed = parseModelJsonResponse(raw);
-        const relevance = clampScore(
-            parsed?.relevance_score_0_100
-            ?? parsed?.importance_score
-            ?? parsed?.urgency_score
-            ?? occurrence.final_score,
-            Number(occurrence.final_score || 0)
-        );
-        const semantic = clampScore(
-            parsed?.novelty_overlap_score_0_100
-            ?? parsed?.importance_score
-            ?? occurrence.semantic_score,
-            Number(occurrence.semantic_score || 0)
-        );
-        const legal = clampScore(
-            parsed?.claims_overlap_score_0_100
-            ?? parsed?.urgency_score
-            ?? occurrence.legal_score,
-            Number(occurrence.legal_score || 0)
-        );
+        let parseStatus: 'ok' | 'failed_fallback' = 'ok';
+        let parsed: Record<string, any> = {};
+        try {
+            parsed = parseModelJsonResponse(raw);
+        } catch {
+            parseStatus = 'failed_fallback';
+            parsed = {};
+        }
+        const outputEnvelope = normalizeMonitoringAiOutput(parsed, profileType, occurrence);
+        const scores = getSemanticAndLegalScoresFromAiOutput(outputEnvelope, profileType, occurrence);
+        const semantic = scores.semantic;
+        const legal = scores.legal;
         const finalScore = clampScore(Math.round((Number(occurrence.rule_score || 0) * 0.40) + (semantic * 0.35) + (legal * 0.25)), Number(occurrence.final_score || 0));
         const priority = scoreToPriority(finalScore);
+        const normalizedRisk = scoreToRiskLevel(finalScore);
+        const iaStatus = parseStatus === 'ok' ? 'completed' : 'partial';
+        const iaPayload = {
+            analysis_contract_version: 'monitoring_ai_contract_v1',
+            model_name: 'llama-3.3-70b-versatile',
+            prompt_version: promptVersion,
+            parse_status: parseStatus,
+            input_envelope: inputEnvelope,
+            output_envelope: {
+                ...outputEnvelope,
+                relevance_score_0_100: finalScore,
+                risk_level: normalizedRisk
+            },
+            raw_response: parsed
+        };
         await prisma.$executeRawUnsafe(
             `update monitoring_occurrences
              set
@@ -5526,8 +6215,8 @@ fastify.post('/monitoring/center/occurrences/:id/analyze-ai', async (request: an
                 legal_score=$3,
                 final_score=$4,
                 priority=$5,
-                ia_status='completed',
-                ia_payload=$6::jsonb,
+                ia_status=$6,
+                ia_payload=$7::jsonb,
                 updated_at=now()
              where id=$1`,
             id,
@@ -5535,9 +6224,16 @@ fastify.post('/monitoring/center/occurrences/:id/analyze-ai', async (request: an
             legal,
             finalScore,
             priority,
-            JSON.stringify(parsed || {})
+            iaStatus,
+            JSON.stringify(iaPayload)
         );
-        return { id, ia: parsed, finalScore, priority };
+        return {
+            id,
+            ia: iaPayload.output_envelope,
+            parseStatus,
+            finalScore,
+            priority
+        };
     } catch (error: any) {
         await prisma.$executeRawUnsafe(
             `update monitoring_occurrences set ia_status='error', ia_payload=$2::jsonb, updated_at=now() where id=$1`,
@@ -5738,7 +6434,7 @@ fastify.get('/monitoring/center/occurrences/:id/email-preview', async (request: 
 fastify.get('/settings/system', async () => {
     await ensureBusinessTables();
     const rows = await prisma.$queryRawUnsafe<any[]>(
-        `select key, value, updated_at from system_settings where key in ('smtp','templates','workflows','integrations')`
+        `select key, value, updated_at from system_settings where key in ('smtp','templates','workflows','integrations','email_triggers')`
     ).catch(() => []);
     const byKey = new Map<string, any>(rows.map((row: any) => [row.key, row.value] as [string, any]));
     return {
@@ -5750,8 +6446,13 @@ fastify.get('/settings/system', async () => {
             senderName: ''
         },
         templates: byKey.get('templates') || {
+            layoutName: 'Layout padrão',
+            logoUrl: '',
+            signatureHtml: '',
+            variables: ['{{cliente_nome}}', '{{demanda_titulo}}', '{{demanda_codigo}}', '{{prazo}}', '{{responsavel}}', '{{status}}'],
             collision: '',
-            process: ''
+            process: '',
+            market: ''
         },
         workflows: byKey.get('workflows') || {
             statuses: ['nova', 'triagem', 'andamento', 'cliente', 'concluida'],
@@ -5765,7 +6466,12 @@ fastify.get('/settings/system', async () => {
             groqEnabled: Boolean(GROQ_API_KEY),
             groqModel: 'llama-3.1-70b-versatile',
             webhookUrl: ''
-        }
+        },
+        emailTriggers: byKey.get('email_triggers') || [
+            { id: 'status_change', event: 'status_change', condition: 'sempre', templateKey: 'process', recipientMode: 'primary_contact', active: true },
+            { id: 'sla_24h', event: 'sla_due', condition: '24h', templateKey: 'process', recipientMode: 'primary_contact', active: true },
+            { id: 'client_waiting', event: 'waiting_client', condition: '48h', templateKey: 'process', recipientMode: 'primary_contact', active: false }
+        ]
     };
 });
 
@@ -5775,11 +6481,13 @@ fastify.put('/settings/system', async (request: any, reply) => {
     const templates = request.body?.templates || {};
     const workflows = request.body?.workflows || {};
     const integrations = request.body?.integrations || {};
+    const emailTriggers = Array.isArray(request.body?.emailTriggers) ? request.body.emailTriggers : [];
     const entries: Array<{ key: string; value: any }> = [
         { key: 'smtp', value: smtp },
         { key: 'templates', value: templates },
         { key: 'workflows', value: workflows },
-        { key: 'integrations', value: integrations }
+        { key: 'integrations', value: integrations },
+        { key: 'email_triggers', value: emailTriggers }
     ];
     for (const entry of entries) {
         await prisma.$executeRawUnsafe(
@@ -6090,18 +6798,46 @@ fastify.post('/monitoring/patents/add', async (request: any, reply) => {
     await ensureMonitoringTables();
     const patentNumber = String(request.body?.patentNumber || '').trim();
     const patentId = String(request.body?.patentId || '').trim();
+    const monitorTypeRaw = String(request.body?.monitorType || '').trim().toLowerCase();
+    const monitorType = ['processo', 'colidencia', 'mercado'].includes(monitorTypeRaw) ? monitorTypeRaw : 'processo';
+    const source = `manual_${monitorType}`;
     if (!patentNumber) return reply.code(400).send({ error: 'patentNumber é obrigatório' });
+    const normalizedPatentId = cleanTextValue(patentId);
+    const normalizedPatentNumber = cleanTextValue(patentNumber);
+    const patentRow = normalizedPatentId
+        ? await prisma.inpiPatent.findUnique({ where: { cod_pedido: normalizedPatentId } }).catch(() => null)
+        : await prisma.inpiPatent.findFirst({
+            where: {
+                OR: [
+                    { numero_publicacao: normalizedPatentNumber },
+                    { cod_pedido: normalizedPatentNumber }
+                ]
+            }
+        }).catch(() => null);
+    if (!patentRow) {
+        return reply.code(400).send({ error: 'Patente precisa existir na base local para entrar no monitoramento' });
+    }
+    const docJob = await prisma.documentDownloadJob.findFirst({
+        where: { patent_id: patentRow.cod_pedido },
+        orderBy: { updated_at: 'desc' }
+    }).catch(() => null);
+    const hasCompleteDoc = Boolean(docJob?.status === 'completed' && cleanTextValue(docJob?.storage_key || '').length > 0);
+    if (!hasCompleteDoc) {
+        return reply.code(400).send({ error: 'Somente patentes com documento completo podem ser adicionadas ao monitoramento' });
+    }
+    const monitorPatentNumber = cleanTextValue(patentRow.numero_publicacao || patentRow.cod_pedido || normalizedPatentNumber);
     const id = randomUUID();
     await prisma.$executeRawUnsafe(
         `insert into monitored_inpi_patents (id, patent_number, patent_id, source, matched_attorney, active, blocked_by_user, created_at, updated_at, last_seen_at)
-         values ($1,$2,$3,'manual',null,true,false,now(),now(),now())
+         values ($1,$2,$3,$4,null,true,false,now(),now(),now())
          on conflict (patent_number) do update
-         set active=true, blocked_by_user=false, patent_id=coalesce(excluded.patent_id, monitored_inpi_patents.patent_id), source='manual', updated_at=now(), last_seen_at=now()`,
+         set active=true, blocked_by_user=false, patent_id=coalesce(excluded.patent_id, monitored_inpi_patents.patent_id), source=$4, updated_at=now(), last_seen_at=now()`,
         id,
-        patentNumber,
-        patentId || null
+        monitorPatentNumber,
+        patentRow.cod_pedido || null,
+        source
     );
-    return { id, patentNumber, active: true };
+    return { id, patentNumber: monitorPatentNumber, active: true, monitorType };
 });
 
 fastify.post('/monitoring/patents/:id/toggle', async (request: any, reply) => {
