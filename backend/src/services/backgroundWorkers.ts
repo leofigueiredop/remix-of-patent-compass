@@ -3,24 +3,68 @@ import * as cheerio from 'cheerio';
 import { promisify } from 'util';
 import { exec } from 'child_process';
 import fs from 'fs/promises';
+import { existsSync, readFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { createSign, randomUUID } from 'crypto';
 import { CreateBucketCommand, DeleteObjectCommand, GetObjectCommand, HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { prisma } from '../db';
 
+function parseDotEnv(content: string): Record<string, string> {
+    const parsed: Record<string, string> = {};
+    const lines = String(content || '').split(/\r?\n/);
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith('#')) continue;
+        const cleanLine = line.startsWith('export ') ? line.slice(7).trim() : line;
+        const separator = cleanLine.indexOf('=');
+        if (separator <= 0) continue;
+        const key = cleanLine.slice(0, separator).trim();
+        if (!key || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+        let value = cleanLine.slice(separator + 1).trim();
+        if (
+            (value.startsWith('"') && value.endsWith('"'))
+            || (value.startsWith('\'') && value.endsWith('\''))
+        ) {
+            value = value.slice(1, -1);
+        }
+        if (value.includes('\\n')) {
+            value = value.replace(/\\n/g, '\n');
+        }
+        parsed[key] = value;
+    }
+    return parsed;
+}
+
+function loadDotenvFileFallback(filePath: string) {
+    if (!filePath || !existsSync(filePath)) return;
+    try {
+        const content = readFileSync(filePath, 'utf8');
+        const parsed = parseDotEnv(content);
+        for (const [key, value] of Object.entries(parsed)) {
+            if (process.env[key] === undefined || process.env[key] === '') {
+                process.env[key] = value;
+            }
+        }
+    } catch {
+    }
+}
+
 function loadEnvironmentFiles() {
-    if (typeof (process as any).loadEnvFile !== 'function') return;
     const candidates = [
         path.resolve(process.cwd(), '.env'),
         path.resolve(process.cwd(), 'backend/.env'),
         path.resolve(__dirname, '../../.env')
     ];
+    const canUseNativeLoader = typeof (process as any).loadEnvFile === 'function';
     for (const candidate of candidates) {
-        try {
-            (process as any).loadEnvFile(candidate);
-        } catch (_) {
+        if (canUseNativeLoader) {
+            try {
+                (process as any).loadEnvFile(candidate);
+            } catch {
+            }
         }
+        loadDotenvFileFallback(candidate);
     }
 }
 loadEnvironmentFiles();
@@ -885,6 +929,11 @@ function getS3RuntimeConfig(): S3RuntimeConfig {
     const secretKey = normalizeText(process.env.S3_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY || '');
     const bucket = normalizeText(process.env.S3_BUCKET || process.env.AWS_S3_BUCKET || 'patents') || 'patents';
     return { endpoint, region, accessKey, secretKey, bucket };
+}
+
+function hasMinimumS3RuntimeConfig() {
+    const config = getS3RuntimeConfig();
+    return Boolean(config.endpoint && config.accessKey && config.secretKey && config.bucket);
 }
 
 function getS3ConfigSignature(config: S3RuntimeConfig): string {
@@ -2924,6 +2973,16 @@ async function processNextBigQueryBibliographicJob() {
 
 async function processNextDocumentJob() {
     if (docRunning || docsPaused) return;
+    if (!hasMinimumS3RuntimeConfig()) {
+        documentJobLog({
+            status: 'skipped_worker_missing_s3_env',
+            endpoint: Boolean(getS3RuntimeConfig().endpoint),
+            accessKey: Boolean(getS3RuntimeConfig().accessKey),
+            secretKey: Boolean(getS3RuntimeConfig().secretKey),
+            bucket: Boolean(getS3RuntimeConfig().bucket)
+        });
+        return;
+    }
     const acquireLock = async (): Promise<boolean> => {
         try {
             const rows = await prisma.$queryRawUnsafe<any[]>(
