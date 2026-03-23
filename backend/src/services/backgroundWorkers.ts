@@ -959,7 +959,7 @@ async function ensureS3Bucket() {
     const signature = getS3ConfigSignature(config);
     if (s3BucketReady && s3BucketReadySignature === signature) return;
     if (!config.endpoint || !config.accessKey || !config.secretKey) {
-        throw new Error(`Credenciais S3 não configuradas endpoint=${Boolean(config.endpoint)} accessKey=${Boolean(config.accessKey)} secretKey=${Boolean(config.secretKey)} bucket=${normalizeText(config.bucket || '') ? 'ok' : 'missing'}`);
+        throw new Error(`DOC_S3_RUNTIME_CONFIG_MISSING endpoint=${Boolean(config.endpoint)} accessKey=${Boolean(config.accessKey)} secretKey=${Boolean(config.secretKey)} bucket=${normalizeText(config.bucket || '') ? 'ok' : 'missing'} pid=${process.pid} host=${normalizeText(process.env.HOSTNAME || 'unknown') || 'unknown'}`);
     }
     const s3 = getS3Client(config);
     try {
@@ -3386,6 +3386,26 @@ async function processNextDocumentJob() {
             const raw = serializeUnknownError(error);
             const message = truncateError(`DOC_RUNTIME_ERROR ${raw}`);
             const lower = message.toLowerCase();
+            const s3RuntimeConfigMissing = lower.includes('doc_s3_runtime_config_missing') || lower.includes('credenciais s3 não configuradas');
+            if (s3RuntimeConfigMissing) {
+                docsPaused = true;
+                await prisma.documentDownloadJob.update({
+                    where: { id: job.id },
+                    data: {
+                        status: stage === 'ops' ? 'pending_ops' : 'pending_google_patents',
+                        error: truncateError(`${message} DOC_WORKER_PAUSED=true`),
+                        finished_at: new Date()
+                    }
+                });
+                documentJobLog({
+                    jobId: job.id,
+                    patentId: job.patent_id,
+                    status: stage === 'ops' ? 'pending_ops' : 'pending_google_patents',
+                    code: 'DOC_RUNTIME_S3_ENV_MISSING_WORKER_PAUSED',
+                    detail: raw
+                });
+                return;
+            }
             const notFound = lower.includes('not found') || lower.includes('404') || lower.includes('não encontrado');
             if (notFound && stage === 'ops') {
                 await queueInpiProcessingJob({
