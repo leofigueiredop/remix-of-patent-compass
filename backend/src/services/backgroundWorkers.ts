@@ -114,7 +114,9 @@ const INPI_JOB_DELAY_JITTER_MS = Math.max(500, parseInt(process.env.INPI_JOB_DEL
 const INPI_STALE_RUNNING_MS = Math.max(10 * 60_000, parseInt(process.env.INPI_STALE_RUNNING_MS || '3600000', 10));
 const INPI_WORKER_LOCK_KEY = Number.parseInt(process.env.INPI_WORKER_LOCK_KEY || '920105', 10);
 const DOC_WORKER_LOCK_KEY = Number.parseInt(process.env.DOC_WORKER_LOCK_KEY || '920106', 10);
-const BACKGROUND_WORKERS_ROLE = normalizeText(process.env.BACKGROUND_WORKERS_ROLE || 'embedded').toLowerCase();
+const BACKGROUND_WORKERS_ROLE = normalizeText(
+    process.env.BACKGROUND_WORKERS_ROLE || (process.env.NODE_ENV === 'production' ? 'api' : 'embedded')
+).toLowerCase();
 const WORKER_CONTROL_QUEUES = ['rpi', 'docs', 'ops', 'inpi', 'bigquery'] as const;
 type WorkerControlQueue = typeof WORKER_CONTROL_QUEUES[number];
 
@@ -3463,14 +3465,18 @@ async function processNextDocumentJob() {
             const raw = serializeUnknownError(error);
             const message = truncateError(`DOC_RUNTIME_ERROR ${raw}`);
             const lower = message.toLowerCase();
-            const s3RuntimeConfigMissing = lower.includes('doc_s3_runtime_config_missing') || lower.includes('credenciais s3 não configuradas');
+            const s3RuntimeConfigMissing = lower.includes('doc_s3_runtime_config_missing')
+                || lower.includes('credenciais s3')
+                || (lower.includes('s3') && lower.includes('accesskey'))
+                || (lower.includes('s3') && lower.includes('secretkey'));
             if (s3RuntimeConfigMissing) {
                 docsPaused = true;
+                const s3GuardError = 'DOC_S3_RUNTIME_CONFIG_MISSING DOC_WORKER_PAUSED=true';
                 await prisma.documentDownloadJob.update({
                     where: { id: job.id },
                     data: {
                         status: stage === 'ops' ? 'pending_ops' : 'pending_google_patents',
-                        error: truncateError(`${message} DOC_WORKER_PAUSED=true`),
+                        error: s3GuardError,
                         finished_at: new Date()
                     }
                 });

@@ -3712,18 +3712,25 @@ fastify.get('/debug/test-inpi', async () => {
 
 const start = async () => {
     try {
+        const runtimeRole = String(process.env.BACKGROUND_WORKERS_ROLE || 'api').trim().toLowerCase();
         const startupLog = `/tmp/server_startup.log`;
-        fs.writeFileSync(startupLog, `Server starting at ${new Date().toISOString()} with PID ${process.pid}\n`);
+        fs.writeFileSync(startupLog, `Server starting at ${new Date().toISOString()} with PID ${process.pid} and role=${runtimeRole}\n`);
         await fastify.listen({ port: parseInt(process.env.PORT || '3001'), host: '0.0.0.0' });
         try {
             await ensureMonitoringTables();
         } catch (error) {
             fastify.log.error(error, 'Falha ao inicializar tabelas de monitoramento. API seguirá no ar e tentará novamente nas rotas.');
         }
-        startBackgroundWorkers();
-        startCollisionMonitoringWorker().catch((error) => {
-            fastify.log.error(error, 'Falha ao iniciar worker de colidência');
-        });
+        if (runtimeRole === 'api') {
+            await setBackgroundWorkerPause('all', true).catch(() => undefined);
+            await setCollisionMonitoringWorkerPause(true).catch(() => undefined);
+            fastify.log.info('API mode ativo: loops de background bloqueados neste serviço');
+        } else {
+            startBackgroundWorkers();
+            startCollisionMonitoringWorker().catch((error) => {
+                fastify.log.error(error, 'Falha ao iniciar worker de colidência');
+            });
+        }
     } catch (err) {
         fastify.log.error(err);
         process.exit(1);

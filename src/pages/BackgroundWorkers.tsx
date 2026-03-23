@@ -805,6 +805,53 @@ export default function BackgroundWorkers() {
             <Badge variant={state.googlePatentsEnabled ? "default" : "secondary"}>Google Patents {state.googlePatentsEnabled ? "ON" : "OFF"}</Badge>
             <Badge variant={state.googlePatentsCircuitOpen ? "destructive" : "secondary"}>Circuito GP {state.googlePatentsCircuitOpen ? "ABERTO" : "OK"}</Badge>
           </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={loading}
+              onClick={() => controlWorkers("rpi", state.rpiPaused ? "resume" : "pause")}
+              className="h-8"
+            >
+              {state.rpiPaused ? "Retomar RPI" : "Pausar RPI"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={loading}
+              onClick={() => controlWorkers("docs", state.docsPaused ? "resume" : "pause")}
+              className="h-8"
+            >
+              {state.docsPaused ? "Retomar Docs" : "Pausar Docs"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={loading}
+              onClick={() => controlWorkers("ops", state.opsPaused ? "resume" : "pause")}
+              className="h-8"
+            >
+              {state.opsPaused ? "Retomar OPS" : "Pausar OPS"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={loading}
+              onClick={() => controlWorkers("inpi", state.inpiPaused ? "resume" : "pause")}
+              className="h-8"
+            >
+              {state.inpiPaused ? "Retomar INPI" : "Pausar INPI"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={loading}
+              onClick={() => controlWorkers("bigquery", state.bqPaused ? "resume" : "pause")}
+              className="h-8"
+            >
+              {state.bqPaused ? "Retomar BQ" : "Pausar BQ"}
+            </Button>
+          </div>
         </div>
 
         <Tabs value={mainTab} onValueChange={setMainTab} className="animate-in fade-in duration-500">

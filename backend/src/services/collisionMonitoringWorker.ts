@@ -5,7 +5,9 @@ const COLLISION_DISPATCH_CODES = ['3.1', '1.3', '16.1'];
 const MAX_COLLISION_JOB_ATTEMPTS = Math.max(2, parseInt(process.env.MAX_COLLISION_JOB_ATTEMPTS || '4', 10));
 const COLLISION_SEMANTIC_MIN_SCORE = Math.max(1, Math.min(100, parseInt(process.env.COLLISION_SEMANTIC_MIN_SCORE || '34', 10)));
 const COLLISION_TOP_K_PER_PUBLICATION = Math.max(1, Math.min(40, parseInt(process.env.COLLISION_TOP_K_PER_PUBLICATION || '8', 10)));
-const BACKGROUND_WORKERS_ROLE = cleanTextValue(process.env.BACKGROUND_WORKERS_ROLE || 'embedded').toLowerCase();
+const BACKGROUND_WORKERS_ROLE = cleanTextValue(
+    process.env.BACKGROUND_WORKERS_ROLE || (process.env.NODE_ENV === 'production' ? 'api' : 'embedded')
+).toLowerCase();
 
 let collisionLoopStarted = false;
 let collisionRunning = false;
