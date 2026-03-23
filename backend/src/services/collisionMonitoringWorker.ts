@@ -5,10 +5,43 @@ const COLLISION_DISPATCH_CODES = ['3.1', '1.3', '16.1'];
 const MAX_COLLISION_JOB_ATTEMPTS = Math.max(2, parseInt(process.env.MAX_COLLISION_JOB_ATTEMPTS || '4', 10));
 const COLLISION_SEMANTIC_MIN_SCORE = Math.max(1, Math.min(100, parseInt(process.env.COLLISION_SEMANTIC_MIN_SCORE || '34', 10)));
 const COLLISION_TOP_K_PER_PUBLICATION = Math.max(1, Math.min(40, parseInt(process.env.COLLISION_TOP_K_PER_PUBLICATION || '8', 10)));
+const BACKGROUND_WORKERS_ROLE = cleanTextValue(process.env.BACKGROUND_WORKERS_ROLE || 'embedded').toLowerCase();
 
 let collisionLoopStarted = false;
 let collisionRunning = false;
 let collisionPaused = false;
+let collisionControlReady = false;
+
+function isCollisionWorkerExecutionEnabled() {
+    return BACKGROUND_WORKERS_ROLE !== 'api';
+}
+
+async function ensureCollisionControlTable() {
+    if (collisionControlReady) return;
+    await prisma.$executeRawUnsafe(
+        `create table if not exists monitoring_collision_control (
+            id int primary key,
+            paused boolean not null default false,
+            updated_at timestamptz not null default now()
+        )`
+    );
+    await prisma.$executeRawUnsafe(
+        `insert into monitoring_collision_control(id, paused, updated_at)
+         values (1, false, now())
+         on conflict(id) do nothing`
+    );
+    collisionControlReady = true;
+}
+
+async function syncCollisionPauseFromDb() {
+    await ensureCollisionControlTable();
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+        `select paused from monitoring_collision_control where id=1 limit 1`
+    ).catch(() => []);
+    if (rows?.[0]?.paused !== undefined) {
+        collisionPaused = Boolean(rows[0].paused);
+    }
+}
 
 function cleanTextValue(value: any): string {
     return String(value || '').replace(/\s+/g, ' ').trim();
@@ -399,6 +432,8 @@ async function runCollisionJob(job: any) {
 }
 
 async function processNextCollisionJob() {
+    if (!isCollisionWorkerExecutionEnabled()) return;
+    await syncCollisionPauseFromDb().catch(() => undefined);
     if (collisionPaused || collisionRunning) return;
     collisionRunning = true;
     try {
@@ -471,7 +506,7 @@ export async function enqueueCollisionMonitoringJob(rpiNumber: string, triggered
         normalizedRpi
     ).catch(() => []);
     if (existing?.[0]) {
-        processNextCollisionJob().catch(() => undefined);
+        if (isCollisionWorkerExecutionEnabled()) processNextCollisionJob().catch(() => undefined);
         return existing[0];
     }
     const id = randomUUID();
@@ -484,7 +519,7 @@ export async function enqueueCollisionMonitoringJob(rpiNumber: string, triggered
         JSON.stringify(COLLISION_DISPATCH_CODES),
         cleanTextValue(triggeredBy) || null
     );
-    processNextCollisionJob().catch(() => undefined);
+    if (isCollisionWorkerExecutionEnabled()) processNextCollisionJob().catch(() => undefined);
     const inserted = await prisma.$queryRawUnsafe<any[]>(
         `select id, rpi_number, status, attempts, dispatch_codes, triggered_by, result_data, error, started_at, finished_at, created_at, updated_at
          from monitoring_collision_jobs
@@ -503,7 +538,7 @@ export async function retryCollisionMonitoringJob(jobId: string) {
          where id=$1`,
         cleanTextValue(jobId)
     );
-    processNextCollisionJob().catch(() => undefined);
+    if (isCollisionWorkerExecutionEnabled()) processNextCollisionJob().catch(() => undefined);
     const rows = await prisma.$queryRawUnsafe<any[]>(
         `select id, rpi_number, status, attempts, dispatch_codes, triggered_by, result_data, error, started_at, finished_at, created_at, updated_at
          from monitoring_collision_jobs
@@ -564,6 +599,7 @@ export async function previewCollisionCandidatesForRpi(rpiNumber: string) {
 }
 
 export async function getCollisionMonitoringWorkerState() {
+    await syncCollisionPauseFromDb().catch(() => undefined);
     await ensureCollisionWorkerTables();
     const counts = await prisma.$queryRawUnsafe<any[]>(
         `select status, count(*)::int as total
@@ -588,18 +624,26 @@ export async function getCollisionMonitoringWorkerState() {
     };
 }
 
-export function setCollisionMonitoringWorkerPause(paused: boolean) {
+export async function setCollisionMonitoringWorkerPause(paused: boolean) {
     collisionPaused = paused;
-    return {
-        paused: collisionPaused,
-        running: collisionRunning,
-        allowedDispatchCodes: COLLISION_DISPATCH_CODES
-    };
+    await ensureCollisionControlTable().catch(() => undefined);
+    await prisma.$executeRawUnsafe(
+        `insert into monitoring_collision_control(id, paused, updated_at)
+         values (1, $1, now())
+         on conflict(id) do update set paused=excluded.paused, updated_at=now()`,
+        paused
+    ).catch(() => undefined);
+    return getCollisionMonitoringWorkerState();
 }
 
 export async function startCollisionMonitoringWorker() {
+    if (!isCollisionWorkerExecutionEnabled()) {
+        await syncCollisionPauseFromDb().catch(() => undefined);
+        return;
+    }
     if (collisionLoopStarted) return;
     collisionLoopStarted = true;
+    await syncCollisionPauseFromDb().catch(() => undefined);
     await ensureCollisionWorkerTables();
     processNextCollisionJob().catch(() => undefined);
     setInterval(() => {

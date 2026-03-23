@@ -9,8 +9,8 @@ COPY prisma ./prisma
 RUN npx prisma generate
 RUN npm run build
 
-# Stage 2: Production
-FROM node:20-bookworm-slim
+# Stage 2: Runtime base
+FROM node:20-bookworm-slim AS runtime-base
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --only=production
@@ -69,4 +69,8 @@ EXPOSE 3000
 
 USER appuser
 
-CMD npx prisma migrate deploy && node dist/server.js
+FROM runtime-base AS worker
+CMD BACKGROUND_WORKERS_ROLE=worker node dist/worker.js
+
+FROM runtime-base AS api
+CMD npx prisma migrate deploy && BACKGROUND_WORKERS_ROLE=api node dist/server.js

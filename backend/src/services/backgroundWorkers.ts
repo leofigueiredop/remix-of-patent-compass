@@ -114,6 +114,9 @@ const INPI_JOB_DELAY_JITTER_MS = Math.max(500, parseInt(process.env.INPI_JOB_DEL
 const INPI_STALE_RUNNING_MS = Math.max(10 * 60_000, parseInt(process.env.INPI_STALE_RUNNING_MS || '3600000', 10));
 const INPI_WORKER_LOCK_KEY = Number.parseInt(process.env.INPI_WORKER_LOCK_KEY || '920105', 10);
 const DOC_WORKER_LOCK_KEY = Number.parseInt(process.env.DOC_WORKER_LOCK_KEY || '920106', 10);
+const BACKGROUND_WORKERS_ROLE = normalizeText(process.env.BACKGROUND_WORKERS_ROLE || 'embedded').toLowerCase();
+const WORKER_CONTROL_QUEUES = ['rpi', 'docs', 'ops', 'inpi', 'bigquery'] as const;
+type WorkerControlQueue = typeof WORKER_CONTROL_QUEUES[number];
 
 let loopsStarted = false;
 let rpiRunning = false;
@@ -154,6 +157,72 @@ const googlePatentsMetrics = {
 
 function normalizeText(value?: string): string {
     return (value || '').replace(/\s+/g, ' ').trim();
+}
+
+function isBackgroundWorkerExecutionEnabled() {
+    return BACKGROUND_WORKERS_ROLE !== 'api';
+}
+
+let workerControlTableReady = false;
+
+async function ensureWorkerControlTable() {
+    if (workerControlTableReady) return;
+    await prisma.$executeRawUnsafe(
+        `create table if not exists background_worker_control (
+            queue text primary key,
+            paused boolean not null default false,
+            updated_at timestamptz not null default now()
+        )`
+    );
+    for (const queue of WORKER_CONTROL_QUEUES) {
+        await prisma.$executeRawUnsafe(
+            `insert into background_worker_control(queue, paused, updated_at)
+             values($1, false, now())
+             on conflict(queue) do nothing`,
+            queue
+        );
+    }
+    workerControlTableReady = true;
+}
+
+function applyPauseFlagsFromRowMap(map: Map<string, boolean>) {
+    if (map.has('rpi')) rpiPaused = Boolean(map.get('rpi'));
+    if (map.has('docs')) docsPaused = Boolean(map.get('docs'));
+    if (map.has('ops')) opsPaused = Boolean(map.get('ops'));
+    if (map.has('inpi')) inpiPaused = Boolean(map.get('inpi'));
+    if (map.has('bigquery')) bqPaused = Boolean(map.get('bigquery'));
+}
+
+async function syncPauseFlagsFromDb() {
+    await ensureWorkerControlTable();
+    const rows = await prisma.$queryRawUnsafe<Array<{ queue: string; paused: boolean }>>(
+        `select queue, paused from background_worker_control where queue = any($1::text[])`,
+        WORKER_CONTROL_QUEUES
+    ).catch(() => []);
+    const map = new Map<string, boolean>();
+    for (const row of rows) map.set(normalizeText(row.queue).toLowerCase(), Boolean(row.paused));
+    applyPauseFlagsFromRowMap(map);
+}
+
+async function persistPauseFlagsToDb(queue: WorkerControlQueue | 'all', paused: boolean) {
+    await ensureWorkerControlTable();
+    if (queue === 'all') {
+        await prisma.$executeRawUnsafe(
+            `update background_worker_control
+             set paused=$1, updated_at=now()
+             where queue = any($2::text[])`,
+            paused,
+            WORKER_CONTROL_QUEUES
+        );
+        return;
+    }
+    await prisma.$executeRawUnsafe(
+        `insert into background_worker_control(queue, paused, updated_at)
+         values($1, $2, now())
+         on conflict(queue) do update set paused=excluded.paused, updated_at=now()`,
+        queue,
+        paused
+    );
 }
 
 function parseInpiJobMode(value?: string): 'text' | 'document' {
@@ -1745,6 +1814,8 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
 }
 
 async function processNextRpiImportJob() {
+    if (!isBackgroundWorkerExecutionEnabled()) return;
+    await syncPauseFlagsFromDb().catch(() => undefined);
     if (rpiRunning || rpiPaused) return;
     rpiRunning = true;
     try {
@@ -2780,6 +2851,8 @@ async function applyBibliographicData(patentNumber: string, biblio: OpsBibliogra
 }
 
 async function processNextOpsBibliographicJob() {
+    if (!isBackgroundWorkerExecutionEnabled()) return;
+    await syncPauseFlagsFromDb().catch(() => undefined);
     if (opsRunning || opsPaused) return;
     opsRunning = true;
     try {
@@ -2875,6 +2948,8 @@ async function processNextOpsBibliographicJob() {
 }
 
 async function processNextBigQueryBibliographicJob() {
+    if (!isBackgroundWorkerExecutionEnabled()) return;
+    await syncPauseFlagsFromDb().catch(() => undefined);
     if (bqRunning || bqPaused || !GOOGLE_PATENTS_FALLBACK_ENABLED) return;
     bqRunning = true;
     try {
@@ -2972,6 +3047,8 @@ async function processNextBigQueryBibliographicJob() {
 }
 
 async function processNextDocumentJob() {
+    if (!isBackgroundWorkerExecutionEnabled()) return;
+    await syncPauseFlagsFromDb().catch(() => undefined);
     if (docRunning || docsPaused) return;
     if (!hasMinimumS3RuntimeConfig()) {
         documentJobLog({
@@ -3440,21 +3517,43 @@ async function processNextDocumentJob() {
     }
 }
 
-export function getBackgroundWorkerState() {
+export async function getBackgroundWorkerState() {
+    await syncPauseFlagsFromDb().catch(() => undefined);
     const inpiRunning = inpiTextRunning || inpiDocRunning;
-    return {
-        rpiPaused,
-        docsPaused,
-        opsPaused,
-        inpiPaused,
-        bqPaused,
+    let runtimeState = {
         rpiRunning,
         docRunning,
         opsRunning,
         inpiRunning,
         inpiTextRunning,
         inpiDocRunning,
-        bqRunning,
+        bqRunning
+    };
+    if (!isBackgroundWorkerExecutionEnabled()) {
+        const [rpiCount, docCount, opsCount, inpiCount, bqCount] = await Promise.all([
+            prisma.rpiImportJob.count({ where: { status: 'running' } }).catch(() => 0),
+            prisma.documentDownloadJob.count({ where: { status: { in: ['running_google_patents', 'running_ops'] } } }).catch(() => 0),
+            prismaAny.opsBibliographicJob.count({ where: { status: 'running' } }).catch(() => 0),
+            prisma.inpiProcessingJob.count({ where: { status: 'running' } }).catch(() => 0),
+            prismaAny.bigQueryBibliographicJob.count({ where: { status: 'running' } }).catch(() => 0)
+        ]);
+        runtimeState = {
+            rpiRunning: rpiCount > 0,
+            docRunning: docCount > 0,
+            opsRunning: opsCount > 0,
+            inpiRunning: inpiCount > 0,
+            inpiTextRunning: false,
+            inpiDocRunning: false,
+            bqRunning: bqCount > 0
+        };
+    }
+    return {
+        rpiPaused,
+        docsPaused,
+        opsPaused,
+        inpiPaused,
+        bqPaused,
+        ...runtimeState,
         opsCircuitOpen: opsCircuitOpenUntil > Date.now(),
         opsCircuitOpenUntil: opsCircuitOpenUntil > Date.now() ? new Date(opsCircuitOpenUntil).toISOString() : null,
         googlePatentsCircuitOpen: googlePatentsCircuitOpenUntil > Date.now(),
@@ -3540,12 +3639,13 @@ export async function debugInpiLookup(patentNumber: string) {
     return { patentNumber, ...result };
 }
 
-export function setBackgroundWorkerPause(queue: 'rpi' | 'docs' | 'ops' | 'inpi' | 'bigquery' | 'all', paused: boolean) {
+export async function setBackgroundWorkerPause(queue: 'rpi' | 'docs' | 'ops' | 'inpi' | 'bigquery' | 'all', paused: boolean) {
     if (queue === 'all' || queue === 'rpi') rpiPaused = paused;
     if (queue === 'all' || queue === 'docs') docsPaused = paused;
     if (queue === 'all' || queue === 'ops') opsPaused = paused;
     if (queue === 'all' || queue === 'inpi') inpiPaused = paused;
     if (queue === 'all' || queue === 'bigquery') bqPaused = paused;
+    await persistPauseFlagsToDb(queue, paused).catch(() => undefined);
     return getBackgroundWorkerState();
 }
 
@@ -4056,6 +4156,8 @@ async function processNextInpiJobByMode(mode: 'text' | 'document'): Promise<bool
 }
 
 async function processNextInpiJobs() {
+    if (!isBackgroundWorkerExecutionEnabled()) return;
+    await syncPauseFlagsFromDb().catch(() => undefined);
     if (inpiPaused || inpiTextRunning || inpiDocRunning) return;
     const acquireLock = async (): Promise<boolean> => {
         try {
@@ -4212,8 +4314,13 @@ export async function enqueuePriorityInpiDocumentJob(patentNumber: string, prior
 }
 
 export async function startBackgroundWorkers() {
+    if (!isBackgroundWorkerExecutionEnabled()) {
+        await syncPauseFlagsFromDb().catch(() => undefined);
+        return;
+    }
     if (loopsStarted) return;
     loopsStarted = true;
+    await syncPauseFlagsFromDb().catch(() => undefined);
     recoverStaleRunningJobs().catch(() => undefined);
     quarantineInvalidFutureRpiJobs().catch(() => undefined);
     enqueueLastFiveYearsRpi().catch(() => undefined);

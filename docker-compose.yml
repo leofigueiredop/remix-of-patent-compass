@@ -18,6 +18,7 @@ services:
     restart: unless-stopped
     environment:
       - PORT=3000
+      - BACKGROUND_WORKERS_ROLE=api
       - JWT_SECRET=${JWT_SECRET:-patent-scope-secret-change-me}
       - DATA_DIR=/app/data
       - DATABASE_URL=postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-patent_compass}
@@ -37,6 +38,33 @@ services:
       - api_data:/app/data
     depends_on:
       - whisper
+      - db
+
+  worker:
+    build: ./backend
+    command: sh -c "npx prisma migrate deploy && BACKGROUND_WORKERS_ROLE=worker node dist/worker.js"
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - BACKGROUND_WORKERS_ROLE=worker
+      - JWT_SECRET=${JWT_SECRET:-patent-scope-secret-change-me}
+      - DATA_DIR=/app/data
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-patent_compass}
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - WHISPER_BASE_URL=http://whisper:8000
+      - OLLAMA_PRIMARY_MODEL=${OLLAMA_PRIMARY_MODEL:-llama3.1:8b-instruct-q4_K_M}
+      - OLLAMA_SECONDARY_MODEL=${OLLAMA_SECONDARY_MODEL:-llama3.1:8b-instruct-q4_K_M}
+      - OPS_CONSUMER_KEY=${OPS_CONSUMER_KEY:-}
+      - OPS_CONSUMER_SECRET=${OPS_CONSUMER_SECRET:-}
+      - INPI_MODE=${INPI_MODE:-scrape}
+      - S3_ENDPOINT=${S3_ENDPOINT:-}
+      - S3_REGION=${S3_REGION:-garage}
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-}
+      - S3_BUCKET=${S3_BUCKET:-patents}
+    volumes:
+      - api_data:/app/data
+    depends_on:
       - db
 
   # Speech-to-Text Service
