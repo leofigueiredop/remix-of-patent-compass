@@ -9,12 +9,21 @@ import { createSign, randomUUID } from 'crypto';
 import { CreateBucketCommand, DeleteObjectCommand, GetObjectCommand, HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { prisma } from '../db';
 
-if (typeof (process as any).loadEnvFile === 'function') {
-    try {
-        (process as any).loadEnvFile(path.resolve(process.cwd(), '.env'));
-    } catch (_) {
+function loadEnvironmentFiles() {
+    if (typeof (process as any).loadEnvFile !== 'function') return;
+    const candidates = [
+        path.resolve(process.cwd(), '.env'),
+        path.resolve(process.cwd(), 'backend/.env'),
+        path.resolve(__dirname, '../../.env')
+    ];
+    for (const candidate of candidates) {
+        try {
+            (process as any).loadEnvFile(candidate);
+        } catch (_) {
+        }
     }
 }
+loadEnvironmentFiles();
 
 const prismaAny = prisma as any;
 
@@ -60,11 +69,7 @@ const INPI_JOB_MIN_INTERVAL_MS = Math.max(5_000, parseInt(process.env.INPI_JOB_M
 const INPI_JOB_DELAY_JITTER_MS = Math.max(500, parseInt(process.env.INPI_JOB_DELAY_JITTER_MS || '4000', 10));
 const INPI_STALE_RUNNING_MS = Math.max(10 * 60_000, parseInt(process.env.INPI_STALE_RUNNING_MS || '3600000', 10));
 const INPI_WORKER_LOCK_KEY = Number.parseInt(process.env.INPI_WORKER_LOCK_KEY || '920105', 10);
-const S3_ENDPOINT = process.env.S3_ENDPOINT || '';
-const S3_REGION = process.env.S3_REGION || 'garage';
-const S3_ACCESS_KEY = process.env.S3_ACCESS_KEY || '';
-const S3_SECRET_KEY = process.env.S3_SECRET_KEY || '';
-const S3_BUCKET = process.env.S3_BUCKET || 'patents';
+const DOC_WORKER_LOCK_KEY = Number.parseInt(process.env.DOC_WORKER_LOCK_KEY || '920106', 10);
 
 let loopsStarted = false;
 let rpiRunning = false;
@@ -90,6 +95,7 @@ let googlePatentsFailureCount = 0;
 let googlePatentsCircuitOpenUntil = 0;
 let lastInpiJobCompletedAt = 0;
 let inpiDbLockHeld = false;
+let docDbLockHeld = false;
 let bigQueryAccessToken: string | null = null;
 let bigQueryAccessTokenExpiration = 0;
 const googlePatentsMetrics = {
@@ -864,37 +870,64 @@ async function fetchBigQueryBibliographicData(publicationNumber: string): Promis
     }
 }
 
-function getS3Client() {
+type S3RuntimeConfig = {
+    endpoint: string;
+    region: string;
+    accessKey: string;
+    secretKey: string;
+    bucket: string;
+};
+
+function getS3RuntimeConfig(): S3RuntimeConfig {
+    const endpoint = normalizeText(process.env.S3_ENDPOINT || process.env.AWS_ENDPOINT_URL_S3 || process.env.AWS_S3_ENDPOINT || '');
+    const region = normalizeText(process.env.S3_REGION || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'garage') || 'garage';
+    const accessKey = normalizeText(process.env.S3_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID || '');
+    const secretKey = normalizeText(process.env.S3_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY || '');
+    const bucket = normalizeText(process.env.S3_BUCKET || process.env.AWS_S3_BUCKET || 'patents') || 'patents';
+    return { endpoint, region, accessKey, secretKey, bucket };
+}
+
+function getS3ConfigSignature(config: S3RuntimeConfig): string {
+    return `${config.endpoint}|${config.region}|${config.bucket}|${config.accessKey.slice(0, 8)}|${config.secretKey.slice(0, 8)}`;
+}
+
+function getS3Client(config: S3RuntimeConfig) {
     return new S3Client({
-        endpoint: S3_ENDPOINT,
-        region: S3_REGION,
+        endpoint: config.endpoint,
+        region: config.region,
         credentials: {
-            accessKeyId: S3_ACCESS_KEY,
-            secretAccessKey: S3_SECRET_KEY
+            accessKeyId: config.accessKey,
+            secretAccessKey: config.secretKey
         },
         forcePathStyle: true
     });
 }
 
+let s3BucketReadySignature: string | null = null;
+
 async function ensureS3Bucket() {
-    if (s3BucketReady) return;
-    if (!S3_ENDPOINT || !S3_ACCESS_KEY || !S3_SECRET_KEY) {
-        throw new Error(`Credenciais S3 não configuradas endpoint=${Boolean(S3_ENDPOINT)} accessKey=${Boolean(S3_ACCESS_KEY)} secretKey=${Boolean(S3_SECRET_KEY)} bucket=${normalizeText(S3_BUCKET || '') ? 'ok' : 'missing'}`);
+    const config = getS3RuntimeConfig();
+    const signature = getS3ConfigSignature(config);
+    if (s3BucketReady && s3BucketReadySignature === signature) return;
+    if (!config.endpoint || !config.accessKey || !config.secretKey) {
+        throw new Error(`Credenciais S3 não configuradas endpoint=${Boolean(config.endpoint)} accessKey=${Boolean(config.accessKey)} secretKey=${Boolean(config.secretKey)} bucket=${normalizeText(config.bucket || '') ? 'ok' : 'missing'}`);
     }
-    const s3 = getS3Client();
+    const s3 = getS3Client(config);
     try {
-        await s3.send(new HeadBucketCommand({ Bucket: S3_BUCKET }));
+        await s3.send(new HeadBucketCommand({ Bucket: config.bucket }));
     } catch {
-        await s3.send(new CreateBucketCommand({ Bucket: S3_BUCKET }));
+        await s3.send(new CreateBucketCommand({ Bucket: config.bucket }));
     }
     s3BucketReady = true;
+    s3BucketReadySignature = signature;
 }
 
 async function uploadPdfToS3(key: string, content: Buffer) {
-    const s3 = getS3Client();
     await ensureS3Bucket();
+    const config = getS3RuntimeConfig();
+    const s3 = getS3Client(config);
     await s3.send(new PutObjectCommand({
-        Bucket: S3_BUCKET,
+        Bucket: config.bucket,
         Key: key,
         Body: content,
         ContentType: 'application/pdf'
@@ -902,11 +935,12 @@ async function uploadPdfToS3(key: string, content: Buffer) {
 }
 
 async function objectExistsInS3(key: string): Promise<boolean> {
-    const s3 = getS3Client();
     await ensureS3Bucket();
+    const config = getS3RuntimeConfig();
+    const s3 = getS3Client(config);
     try {
         await s3.send(new HeadObjectCommand({
-            Bucket: S3_BUCKET,
+            Bucket: config.bucket,
             Key: key
         }));
         return true;
@@ -916,11 +950,12 @@ async function objectExistsInS3(key: string): Promise<boolean> {
 }
 
 async function readObjectBufferFromS3(key: string): Promise<Buffer | null> {
-    const s3 = getS3Client();
     await ensureS3Bucket();
+    const config = getS3RuntimeConfig();
+    const s3 = getS3Client(config);
     try {
         const response = await s3.send(new GetObjectCommand({
-            Bucket: S3_BUCKET,
+            Bucket: config.bucket,
             Key: key
         }));
         const body: any = response.Body as any;
@@ -967,10 +1002,11 @@ async function ensureDerivedStorageAssetsFromExistingKey(publicationNumber: stri
 async function deleteStorageKeys(keys: string[]) {
     const unique = Array.from(new Set(keys.map((item) => normalizeText(item)).filter(Boolean)));
     if (unique.length === 0) return;
-    const s3 = getS3Client();
     await ensureS3Bucket();
+    const config = getS3RuntimeConfig();
+    const s3 = getS3Client(config);
     for (const key of unique) {
-        await s3.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: key })).catch(() => undefined);
+        await s3.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key })).catch(() => undefined);
     }
 }
 
@@ -2888,8 +2924,37 @@ async function processNextBigQueryBibliographicJob() {
 
 async function processNextDocumentJob() {
     if (docRunning || docsPaused) return;
+    const acquireLock = async (): Promise<boolean> => {
+        try {
+            const rows = await prisma.$queryRawUnsafe<any[]>(
+                `select pg_try_advisory_lock($1::bigint) as locked`,
+                DOC_WORKER_LOCK_KEY
+            );
+            docDbLockHeld = Boolean(rows?.[0]?.locked);
+            return docDbLockHeld;
+        } catch {
+            docDbLockHeld = true;
+            return true;
+        }
+    };
+    const releaseLock = async () => {
+        if (!docDbLockHeld) return;
+        try {
+            await prisma.$queryRawUnsafe<any[]>(
+                `select pg_advisory_unlock($1::bigint)`,
+                DOC_WORKER_LOCK_KEY
+            );
+        } catch {
+        }
+        docDbLockHeld = false;
+    };
+    if (!(await acquireLock())) return;
     docRunning = true;
     try {
+        const currentlyRunning = await prisma.documentDownloadJob.count({
+            where: { status: { in: ['running_google_patents', 'running_ops'] } }
+        });
+        if (currentlyRunning > 0) return;
         let job = await prisma.documentDownloadJob.findFirst({
             where: { status: 'pending_google_patents' },
             orderBy: [{ created_at: 'asc' }]
@@ -3292,6 +3357,7 @@ async function processNextDocumentJob() {
         }
     } finally {
         docRunning = false;
+        await releaseLock();
     }
 }
 
