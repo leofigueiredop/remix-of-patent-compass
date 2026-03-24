@@ -39,6 +39,7 @@ import {
     setBackgroundWorkerPause,
     startBackgroundWorkers
 } from './services/backgroundWorkers';
+import { sanitizeInpiDetailedAbstract } from './services/inpiSummarySanitizer';
 import {
     enqueueCollisionMonitoringJob,
     getCollisionMonitoringWorkerState,
@@ -3800,13 +3801,13 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
     const inpiResultData = latestInpiJob?.result_data && typeof latestInpiJob.result_data === 'object'
         ? latestInpiJob.result_data as Record<string, any>
         : null;
-    const resolvedDetailedAbstract = normalizeStringField(
+    const resolvedDetailedAbstract = sanitizeInpiDetailedAbstract(normalizeStringField(
         dbData.resumo_detalhado
         || dbData.abstract
         || inpiResultData?.resumoDetalhado
         || inpiResultData?.resumo
         || ''
-    );
+    ));
     const resolvedProcurador = normalizeStringField(dbData.procurador || inpiResultData?.procurador || '');
     const publications = (dbData.publications || [])
         .map((item: any) => ({

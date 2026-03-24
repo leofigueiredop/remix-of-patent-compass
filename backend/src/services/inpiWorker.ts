@@ -6,6 +6,7 @@ import * as path from 'path';
 import axios from 'axios';
 import { prisma } from '../db';
 import type { Browser, Page } from 'puppeteer';
+import { sanitizeInpiDetailedAbstract } from './inpiSummarySanitizer';
 
 puppeteer.use(StealthPlugin());
 
@@ -698,7 +699,7 @@ async function extractPatentData(page: Page, codPedido: string, options: Process
 
         const resumoElements = $('.resumo, .abstract, .summary, [id*="resumo"], [class*="resumo"], [data-label*="resumo"]');
         if (resumoElements.length) {
-            const parsed = cleanResumoText(resumoElements.first().text());
+            const parsed = sanitizeInpiDetailedAbstract(cleanResumoText(resumoElements.first().text()));
             if (isUsefulResumo(parsed)) return parsed;
         }
 
@@ -709,21 +710,21 @@ async function extractPatentData(page: Page, codPedido: string, options: Process
 
         for (let i = 0; i < labelCandidates.length; i++) {
             const element = labelCandidates.eq(i);
-            const current = cleanResumoText(element.text());
+            const current = sanitizeInpiDetailedAbstract(cleanResumoText(element.text()));
             if (isUsefulResumo(current)) return current;
             const row = element.closest('tr');
-            const rowText = cleanResumoText(row.text());
+            const rowText = sanitizeInpiDetailedAbstract(cleanResumoText(row.text()));
             if (isUsefulResumo(rowText)) return rowText;
-            const nextRowText = cleanResumoText(row.next('tr').text());
+            const nextRowText = sanitizeInpiDetailedAbstract(cleanResumoText(row.next('tr').text()));
             if (isUsefulResumo(nextRowText)) return nextRowText;
-            const siblingText = cleanResumoText(element.next().text());
+            const siblingText = sanitizeInpiDetailedAbstract(cleanResumoText(element.next().text()));
             if (isUsefulResumo(siblingText)) return siblingText;
         }
 
-        return cleanResumoText($('p').filter((_, el) => {
+        return sanitizeInpiDetailedAbstract(cleanResumoText($('p').filter((_, el) => {
             const text = $(el).text();
             return text.length > 100 && text.length < 2000;
-        }).first().text());
+        }).first().text()));
     };
 
     const extractAnuidades = () => {
