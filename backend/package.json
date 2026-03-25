@@ -29,6 +29,7 @@
         "fluent-ffmpeg": "^2.1.2",
         "form-data": "^4.0.0",
         "pdf-parse": "^1.1.1",
+        "playwright": "^1.58.2",
         "prisma": "^6.4.1",
         "puppeteer": "^22.0.0",
         "puppeteer-extra": "^3.3.6",
