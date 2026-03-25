@@ -4,6 +4,7 @@ import * as cheerio from 'cheerio';
 import * as fs from 'fs';
 import * as path from 'path';
 import axios from 'axios';
+import anticaptcha from '@antiadmin/anticaptchaofficial';
 import { prisma } from '../db';
 import type { Browser, Page } from 'puppeteer';
 import { sanitizeInpiDetailedAbstract } from './inpiSummarySanitizer';
@@ -12,6 +13,7 @@ puppeteer.use(StealthPlugin());
 
 const INPI_USER = process.env.INPI_USER || '';
 const INPI_PASSWORD = process.env.INPI_PASSWORD || '';
+const ANTI_CAPTCHA_API_KEY = process.env.ANTI_CAPTCHA_API_KEY || '';
 const DOWNLOAD_DIR = process.env.INPI_DOWNLOAD_DIR || '/tmp/inpi_documents';
 const COOKIE_PATH = '/tmp/inpi_session_cookies.json';
 
@@ -26,6 +28,7 @@ const INPI_RANDOM_SCROLLING = true;
 const INPI_NAVIGATION_TIMEOUT_MS = Math.max(90_000, parseInt(process.env.INPI_NAVIGATION_TIMEOUT_MS || '120000', 10));
 const INPI_WAIT_TIMEOUT_MS = Math.max(60_000, parseInt(process.env.INPI_WAIT_TIMEOUT_MS || '90000', 10));
 const INPI_DOWNLOAD_TIMEOUT_MS = Math.max(60_000, parseInt(process.env.INPI_DOWNLOAD_TIMEOUT_MS || '90000', 10));
+const TARGET_DOCUMENT_DISPATCHES = ['3.1', '1.3', '16.1'] as const;
 
 // Controle de rate limiting
 let lastRequestTime = 0;
@@ -629,6 +632,191 @@ async function downloadDocument(url: string, filename: string): Promise<string> 
     }
 }
 
+type CaptchaMode = 'V2_PROXY_OFF' | 'V2_ENTERPRISE_PROXY_OFF';
+type InpiDocumentFailureCode =
+    | 'DOC_INPI_RPI_DOC_NOT_FOUND'
+    | 'DOC_INPI_CAPTCHA_NOT_SOLVED'
+    | 'DOC_INPI_CAPTCHA_VALIDATE_FAILED'
+    | 'DOC_INPI_DOWNLOAD_FAILED';
+type InpiCaptchaDownloadResult = {
+    filePath: string | null;
+    failureCode?: InpiDocumentFailureCode;
+    failureDetail?: string;
+};
+
+async function solveInpiDownloadCaptchaToken(page: Page, mode: CaptchaMode): Promise<{ token: string; mode: CaptchaMode } | null> {
+    if (!ANTI_CAPTCHA_API_KEY) {
+        console.log('⚠️ ANTI_CAPTCHA_API_KEY ausente');
+        return null;
+    }
+
+    const siteKey = await page.evaluate(() => {
+        const node = document.querySelector('.g-recaptcha');
+        return node ? node.getAttribute('data-sitekey') : null;
+    }).catch(() => null);
+
+    if (!siteKey) return null;
+
+    anticaptcha.setAPIKey(ANTI_CAPTCHA_API_KEY);
+    const pageUrl = page.url();
+
+    try {
+        if (mode === 'V2_PROXY_OFF') {
+            const tokenV2 = await anticaptcha.solveRecaptchaV2Proxyless(pageUrl, siteKey, false);
+            if (tokenV2) return { token: tokenV2, mode };
+        } else {
+            const tokenEnterprise = await anticaptcha.solveRecaptchaV2EnterpriseProxyless(pageUrl, siteKey, false, 0, null);
+            if (tokenEnterprise) return { token: tokenEnterprise, mode };
+        }
+    } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.log(`⚠️ AntiCaptcha ${mode} falhou: ${msg}`);
+    }
+
+    return null;
+}
+
+async function downloadDocumentViaCaptcha(page: Page, codPedido: string, numeroID: string, rpi: string, numero: string): Promise<InpiCaptchaDownloadResult> {
+    try {
+        await page.evaluate((docId) => {
+            const selector = `img.salvaDocumento[id="${docId}"]`;
+            const img = document.querySelector(selector) as HTMLElement | null;
+            if (img) img.click();
+        }, numeroID);
+
+        await page.waitForSelector('.g-recaptcha', { visible: true, timeout: INPI_WAIT_TIMEOUT_MS });
+
+        const captchaModes: CaptchaMode[] = ['V2_PROXY_OFF', 'V2_ENTERPRISE_PROXY_OFF'];
+        let lastFailureCode: InpiDocumentFailureCode | undefined;
+        let lastFailureDetail = '';
+
+        for (let attempt = 0; attempt < captchaModes.length; attempt++) {
+            const mode = captchaModes[attempt];
+            if (attempt > 0) {
+                await page.evaluate((docId) => {
+                    const selector = `img.salvaDocumento[id="${docId}"]`;
+                    const img = document.querySelector(selector) as HTMLElement | null;
+                    if (img) img.click();
+                }, numeroID);
+                await page.waitForSelector('.g-recaptcha', { visible: true, timeout: INPI_WAIT_TIMEOUT_MS });
+            }
+
+            const solved = await solveInpiDownloadCaptchaToken(page, mode);
+            if (!solved?.token) {
+                console.log(`⚠️ Token de captcha não obtido (${mode}) para RPI ${rpi}`);
+                lastFailureCode = 'DOC_INPI_CAPTCHA_NOT_SOLVED';
+                lastFailureDetail = `mode=${mode}`;
+                continue;
+            }
+
+            await page.evaluate((captchaToken) => {
+                const textarea = document.getElementById('g-recaptcha-response') || document.querySelector('textarea[name="g-recaptcha-response"]');
+                if (textarea) {
+                    (textarea as HTMLTextAreaElement).value = captchaToken;
+                    (textarea as HTMLTextAreaElement).innerHTML = captchaToken;
+                    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                    textarea.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                const win = window as any;
+                if (win.grecaptcha && typeof win.grecaptcha.getResponse === 'function') {
+                    win.grecaptcha.getResponse = () => captchaToken;
+                }
+                const button = document.getElementById('captchaButton') as HTMLButtonElement | null;
+                if (button) button.style.display = 'inline-block';
+            }, solved.token);
+            const downloadMeta = await page.evaluate(() => {
+                const getVal = (id: string) => {
+                    const node = document.getElementById(id) as HTMLInputElement | null;
+                    return node?.value || '';
+                };
+                return {
+                    codDiretoria: getVal('codDiretoria') || '200',
+                    codPedido: getVal('CodPedido'),
+                    certificado: getVal('certificado'),
+                    numeroProcesso: getVal('numeroProcesso'),
+                    ipasDoc: getVal('ipasDoc')
+                };
+            });
+
+            const validaCaptchaResult = await page.evaluate(async ({ numId, captchaToken }) => {
+                const validaUrl = `https://busca.inpi.gov.br/pePI/servlet/ImagemDocumentoPdfController?action=validaCaptcha&NumID=${encodeURIComponent(numId)}&captcha=${encodeURIComponent(captchaToken)}`;
+                const resp = await fetch(validaUrl, {
+                    method: 'GET',
+                    credentials: 'include',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Accept': 'application/json, text/javascript, */*; q=0.01'
+                    }
+                });
+                const text = await resp.text();
+                const lowered = text.toLowerCase();
+                let ok = false;
+                try {
+                    const parsed = JSON.parse(text);
+                    const json = JSON.stringify(parsed).toLowerCase();
+                    ok = json.includes('success') && !json.includes('error');
+                } catch {
+                    ok = lowered.includes('success') && !lowered.includes('error') && !lowered.includes('login:') && !lowered.includes('cadastre-se');
+                }
+                return {
+                    status: resp.status,
+                    ok,
+                    textSample: text.slice(0, 220)
+                };
+            }, { numId: numeroID, captchaToken: solved.token });
+
+            if (!validaCaptchaResult.ok) {
+                console.log(`⚠️ validaCaptcha rejeitado (${mode}) RPI ${rpi}: status=${validaCaptchaResult.status} body=${validaCaptchaResult.textSample}`);
+                lastFailureCode = 'DOC_INPI_CAPTCHA_VALIDATE_FAILED';
+                lastFailureDetail = `mode=${mode} status=${validaCaptchaResult.status}`;
+                continue;
+            }
+
+            const downloadUrl = `https://busca.inpi.gov.br/pePI/servlet/ImagemDocumentoPdfController?CodDiretoria=${encodeURIComponent(downloadMeta.codDiretoria || '200')}&NumeroID=${encodeURIComponent(numeroID)}&certificado=${encodeURIComponent(downloadMeta.certificado || '')}&numeroProcesso=${encodeURIComponent(downloadMeta.numeroProcesso || '')}&ipasDoc=${encodeURIComponent(downloadMeta.ipasDoc || '')}&codPedido=${encodeURIComponent(downloadMeta.codPedido || codPedido)}`;
+
+            const downloadPayload = await page.evaluate(async (url) => {
+                const response = await fetch(url, { method: 'GET', credentials: 'include' });
+                const contentType = (response.headers.get('content-type') || '').toLowerCase();
+                const arrayBuffer = await response.arrayBuffer();
+                const bytes = new Uint8Array(arrayBuffer);
+                let binary = '';
+                for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+                const base64 = btoa(binary);
+                const header = String.fromCharCode(...bytes.slice(0, 5));
+                return {
+                    status: response.status,
+                    contentType,
+                    size: bytes.length,
+                    header,
+                    base64
+                };
+            }, downloadUrl);
+
+            const buffer = Buffer.from(downloadPayload.base64 || '', 'base64');
+            const contentType = String(downloadPayload.contentType || '').toLowerCase();
+            const pdfHeader = buffer ? buffer.subarray(0, 5).toString('utf8') : '';
+            if (downloadPayload.status >= 300 || !contentType.includes('pdf') || !buffer || buffer.length < 100 || !pdfHeader.startsWith('%PDF-')) {
+                console.log(`⚠️ Download não retornou PDF válido (${mode}) RPI ${rpi}: status=${downloadPayload.status} ct=${contentType} size=${buffer?.length || 0} header=${pdfHeader}`);
+                lastFailureCode = 'DOC_INPI_DOWNLOAD_FAILED';
+                lastFailureDetail = `mode=${mode} status=${downloadPayload.status} ct=${contentType} size=${buffer?.length || 0}`;
+                continue;
+            }
+
+            const filename = `${codPedido}_despacho_${numero}_rpi_${rpi}_${Date.now()}.pdf`;
+            const filePath = path.join(DOWNLOAD_DIR, filename);
+            fs.writeFileSync(filePath, buffer);
+            console.log(`✅ Documento baixado via captcha (${solved.mode}) RPI ${rpi}: ${filename}`);
+            return { filePath };
+        }
+
+        return { filePath: null, failureCode: lastFailureCode || 'DOC_INPI_DOWNLOAD_FAILED', failureDetail: lastFailureDetail || undefined };
+    } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.log(`⚠️ Falha no download via captcha RPI ${rpi}: ${msg}`);
+        return { filePath: null, failureCode: 'DOC_INPI_DOWNLOAD_FAILED', failureDetail: msg };
+    }
+}
+
 type ProcessInpiPatentOptions = {
     includeDocuments?: boolean;
 };
@@ -791,183 +979,67 @@ async function extractPatentData(page: Page, codPedido: string, options: Process
             baixado: boolean;
             caminho?: string;
             rpi?: string;
+            erro?: InpiDocumentFailureCode;
+            detalheErro?: string;
         }> = [];
-        
-        // Buscar links para documentos
-        const docLinks = $('a[href*=".pdf"], a[href*="download"], a[href*="documento"], a:contains("PDF"), a:contains("Download")');
-        
-        for (let i = 0; i < docLinks.length; i++) {
-            const el = docLinks[i];
-            const link = $(el);
-            const href = link.attr('href') || '';
-            const text = normalizeFlat(link.text());
-            
-            if (href && (href.includes('.pdf') || href.includes('download') || text.match(/(pdf|download|documento)/i))) {
-                const fullUrl = href.startsWith('http') ? href : `https://busca.inpi.gov.br${href}`;
-                
-                // Identificar tipo de documento
-                let tipo = 'Documento';
-                let numero = '';
-                
-                if (text.includes('3.1') || href.includes('3.1')) {
-                    tipo = 'Formulário 3.1';
-                    numero = '3.1';
-                } else if (text.includes('3.2') || href.includes('3.2')) {
-                    tipo = 'Formulário 3.2';
-                    numero = '3.2';
-                } else if (text.includes('16.1') || href.includes('16.1')) {
-                    tipo = 'Formulário 16.1';
-                    numero = '16.1';
-                } else if (text.match(/\d+\.\d+/)) {
-                    const match = text.match(/(\d+\.\d+)/);
-                    if (match) {
-                        tipo = `Formulário ${match[1]}`;
-                        numero = match[1];
-                    }
-                }
-                
-                const documento = {
-                    tipo: tipo,
-                    url: fullUrl,
-                    descricao: text || `Documento ${i + 1}`,
-                    numero: numero,
-                    baixado: false,
-                    caminho: ''
-                };
-                
-                // Tentar baixar documentos importantes
-                if (numero === '3.1' || numero === '3.2' || numero === '16.1') {
-                    try {
-                        const filename = `${codPedido}_formulario_${numero}_${Date.now()}.pdf`;
-                        const filePath = await downloadDocument(fullUrl, filename);
-                        documento.baixado = true;
-                        documento.caminho = filePath;
-                        console.log(`✅ Baixado: ${tipo} - ${filename}`);
-                    } catch (error) {
-                        const msg = error instanceof Error ? error.message : String(error);
-                        console.log(`⚠️  Não foi possível baixar ${tipo}: ${msg}`);
-                    }
-                }
-                
+        const publicationRows = $('tr').toArray().map((row) => normalizeFlat($(row).text()));
+        const targetDespachos = publicationRows
+            .map((text) => {
+                const m = text.match(/(?:^|\s)(\d{4,6})\s+\d{2}\/\d{2}\/\d{4}\s+(\d+\.\d+)\b/i);
+                if (!m) return null;
+                const numero = m[2];
+                if (!TARGET_DOCUMENT_DISPATCHES.includes(numero as typeof TARGET_DOCUMENT_DISPATCHES[number])) return null;
+                return { rpi: m[1], numero: m[2] };
+            })
+            .filter((item): item is { rpi: string; numero: string } => Boolean(item))
+            .filter((item, index, all) => all.findIndex((other) => other.rpi === item.rpi && other.numero === item.numero) === index);
+
+        const docsPublicados = $('img.salvaDocumento').toArray().map((img) => {
+            const $img = $(img);
+            const numeroID = normalizeFlat($img.attr('id') || '');
+            const label = normalizeFlat($img.closest('a').find('label').first().text()) || normalizeFlat($img.parent().text());
+            const rpiMatch = label.match(/RPI\s*(\d{4,6})/i) || label.match(/\b(\d{4,6})\b/);
+            const rpi = rpiMatch ? rpiMatch[1] : '';
+            return { numeroID, rpi, label };
+        }).filter((item) => item.numeroID && item.rpi);
+
+        for (const target of targetDespachos) {
+            const docFromRpi = docsPublicados.find((item) => item.rpi === target.rpi);
+            const documento: {
+                tipo: string;
+                url: string;
+                descricao: string;
+                numero: string;
+                baixado: boolean;
+                caminho: string;
+                rpi: string;
+                erro?: InpiDocumentFailureCode;
+                detalheErro?: string;
+            } = {
+                tipo: `Despacho ${target.numero}`,
+                url: '',
+                descricao: `RPI ${target.rpi} - despacho ${target.numero}`,
+                numero: target.numero,
+                baixado: false,
+                caminho: '',
+                rpi: target.rpi
+            };
+
+            if (!docFromRpi) {
+                documento.erro = 'DOC_INPI_RPI_DOC_NOT_FOUND';
                 documentos.push(documento);
+                continue;
             }
-        }
-        
-        // Extrair despachos 3.1 da tabela de publicações (RPI)
-        const publicationsTable = $('font:contains("Publicações")').closest('table').next('table');
-        const publicacoes: Array<{ rpi: string; date: string; despacho_code: string; complement: string; pdfLink?: string }> = [];
-        if (publicationsTable.length) {
-            const rows = publicationsTable.find('tr').slice(1);
-            for (let i = 0; i < rows.length; i++) {
-                const cols = $(rows[i]).find('td');
-                if (cols.length >= 5) {
-                    const rpi = normalizeFlat($(cols[0]).text());
-                    const despachoCode = normalizeFlat($(cols[2]).text());
-                    const complement = normalizeFlat($(cols[4]).text());
-                    const pdfLink = $(cols[3]).find('a').attr('href');
-                    const date = normalizeFlat($(cols[1]).text());
-                    
-                    publicacoes.push({
-                        rpi,
-                        date,
-                        despacho_code: despachoCode,
-                        complement,
-                        pdfLink: pdfLink ? (pdfLink.startsWith('http') ? pdfLink : `https://busca.inpi.gov.br${pdfLink}`) : undefined
-                    });
-                    
-                    // Verificar se é despacho 3.1
-                    if (despachoCode.includes('3.1') || complement.includes('3.1')) {
-                        const fullPdfUrl = pdfLink ? (pdfLink.startsWith('http') ? pdfLink : `https://busca.inpi.gov.br${pdfLink}`) : '';
-                        
-                        const documento = {
-                            tipo: 'Despacho 3.1',
-                            url: fullPdfUrl,
-                            descricao: `RPI ${rpi} - ${despachoCode} ${complement}`,
-                            numero: '3.1',
-                            baixado: false,
-                            caminho: '',
-                            rpi: rpi
-                        };
-                        
-                        // Tentar baixar o documento do despacho 3.1
-                        if (fullPdfUrl) {
-                            try {
-                                const filename = `${codPedido}_despacho_3.1_rpi_${rpi}_${Date.now()}.pdf`;
-                                const filePath = await downloadDocument(fullPdfUrl, filename);
-                                documento.baixado = true;
-                                documento.caminho = filePath;
-                                console.log(`✅ Baixado despacho 3.1: RPI ${rpi} - ${filename}`);
-                            } catch (error) {
-                                const msg = error instanceof Error ? error.message : String(error);
-                                console.log(`⚠️  Não foi possível baixar despacho 3.1 (RPI ${rpi}): ${msg}`);
-                            }
-                        } else {
-                            console.log(`ℹ️  Despacho 3.1 encontrado (RPI ${rpi}) mas sem link PDF`);
-                        }
-                        
-                        documentos.push(documento);
-                    }
-                }
-            }
-        }
 
-        // Documentos Publicados (mosaico com imagens) — mapear por RPI
-        const docsPublicadosContainer = $('font:contains("Documentos Publicados")').closest('table');
-        const publishedAnchors = docsPublicadosContainer.find('a[href*=".pdf"], a[href*="Download"], a[href*="download"]');
-        const docsPorRpi = new Map<string, string>();
-        if (publishedAnchors.length) {
-            publishedAnchors.each((_, a) => {
-                const $a = $(a);
-                const href = $a.attr('href') || '';
-                if (!href) return;
-                const full = href.startsWith('http') ? href : `https://busca.inpi.gov.br${href}`;
-                const labelCandidates = [
-                    normalizeFlat($a.text()),
-                    normalizeFlat($a.attr('title') || ''),
-                    normalizeFlat($a.find('img').attr('alt') || ''),
-                    normalizeFlat($a.parent().text())
-                ].filter(Boolean);
-                const joined = labelCandidates.join(' ');
-                let rpiMatch = joined.match(/RPI\s*(\d{3,6})/i);
-                if (!rpiMatch) {
-                    rpiMatch = full.match(/RPI[\-_]?(\d{3,6})/i) || full.match(/rpi[\-_]?(\d{3,6})/i) || full.match(/\/(\d{4,5})[^\/]*\.pdf$/i);
-                }
-                if (rpiMatch && rpiMatch[1]) {
-                    docsPorRpi.set(rpiMatch[1], full);
-                }
-            });
-        }
-
-        // Vincular PDF de Documentos Publicados aos despachos 3.1 sem link
-        if (publicacoes.length && docsPorRpi.size) {
-            const jaCadastrados = new Set(documentos.filter(d => d.rpi && d.numero === '3.1' && d.url).map(d => `${d.rpi}`));
-            for (const pub of publicacoes) {
-                const is31 = (pub.despacho_code || '').includes('3.1') || (pub.complement || '').includes('3.1');
-                if (!is31) continue;
-                if (jaCadastrados.has(pub.rpi)) continue;
-                const candidateUrl = docsPorRpi.get(pub.rpi);
-                if (!candidateUrl) continue;
-                const doc = {
-                    tipo: 'Despacho 3.1',
-                    url: candidateUrl,
-                    descricao: `RPI ${pub.rpi} - ${pub.despacho_code} ${pub.complement}`.trim(),
-                    numero: '3.1',
-                    baixado: false,
-                    caminho: '',
-                    rpi: pub.rpi
-                };
-                try {
-                    const filename = `${codPedido}_despacho_3.1_rpi_${pub.rpi}_${Date.now()}.pdf`;
-                    const filePath = await downloadDocument(candidateUrl, filename);
-                    doc.baixado = true;
-                    doc.caminho = filePath;
-                    console.log(`✅ Baixado despacho 3.1 por Documentos Publicados: RPI ${pub.rpi}`);
-                } catch (error) {
-                    const msg = error instanceof Error ? error.message : String(error);
-                    console.log(`⚠️  Falhou download em Documentos Publicados (RPI ${pub.rpi}): ${msg}`);
-                }
-                documentos.push(doc);
+            const downloaded = await downloadDocumentViaCaptcha(page, codPedido, docFromRpi.numeroID, target.rpi, target.numero);
+            if (downloaded.filePath) {
+                documento.baixado = true;
+                documento.caminho = downloaded.filePath;
+            } else {
+                documento.erro = downloaded.failureCode || 'DOC_INPI_DOWNLOAD_FAILED';
+                documento.detalheErro = downloaded.failureDetail || '';
             }
+            documentos.push(documento);
         }
 
         return documentos;
@@ -1047,7 +1119,7 @@ export async function processInpiPatent(codPedido: string, options: ProcessInpiP
                 
                 const success = await searchAndOpenPatentDetail(page, codPedido);
                 if (!success) {
-                    throw new Error(`Não foi possível encontrar a patente ${codPedido}`);
+                    throw new Error(`DOC_INPI_PROCESS_NOT_FOUND Não foi possível encontrar a patente ${codPedido}`);
                 }
                 
                 const patentData = await extractPatentData(page, codPedido, options);

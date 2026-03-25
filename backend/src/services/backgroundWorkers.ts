@@ -4060,6 +4060,7 @@ async function processNextInpiJobByMode(mode: 'text' | 'document'): Promise<bool
             if (includeDocuments) {
                 const publicationNumber = normalizeText((result as any)?.numeroProcesso || '');
                 const docs = Array.isArray((result as any)?.documentos) ? (result as any).documentos : [];
+                const failedDocs = docs.filter((doc: any) => !doc?.baixado);
                 let uploadedStorageKey: string | null = null;
                 for (const doc of docs) {
                     const localPath = normalizeText(doc?.caminho || '');
@@ -4090,12 +4091,34 @@ async function processNextInpiJobByMode(mode: 'text' | 'document'): Promise<bool
                         }
                     }).catch(() => undefined);
                 } else {
+                    const failedCodes = new Set(
+                        failedDocs
+                            .map((doc: any) => normalizeText(doc?.erro || ''))
+                            .filter(Boolean)
+                    );
+                    let code = 'DOC_INPI_FALLBACK_NOT_FOUND';
+                    if (docs.length === 0) {
+                        code = 'DOC_INPI_TARGET_DISPATCH_NOT_FOUND';
+                    } else if (failedCodes.has('DOC_INPI_CAPTCHA_VALIDATE_FAILED')) {
+                        code = 'DOC_INPI_CAPTCHA_VALIDATE_FAILED';
+                    } else if (failedCodes.has('DOC_INPI_CAPTCHA_NOT_SOLVED')) {
+                        code = 'DOC_INPI_CAPTCHA_NOT_SOLVED';
+                    } else if (failedCodes.has('DOC_INPI_DOWNLOAD_FAILED')) {
+                        code = 'DOC_INPI_DOWNLOAD_FAILED';
+                    } else if (failedCodes.has('DOC_INPI_RPI_DOC_NOT_FOUND')) {
+                        code = 'DOC_INPI_RPI_DOC_NOT_FOUND';
+                    }
+                    const detail = failedDocs
+                        .map((doc: any) => `${normalizeText(doc?.numero || '?')}@${normalizeText(doc?.rpi || '?')}:${normalizeText(doc?.erro || 'DOC_INPI_UNKNOWN')}`)
+                        .slice(0, 6)
+                        .join('|');
+                    const errorText = truncateError(`${code} source=inpi_worker docs_total=${docs.length} docs_failed=${failedDocs.length}${detail ? ` detail=${detail}` : ''}`);
                     await prisma.documentDownloadJob.updateMany({
                         where: { patent_id: job.patent_number },
                         data: {
                             status: 'not_found',
                             finished_at: new Date(),
-                            error: 'DOC_INPI_FALLBACK_NOT_FOUND source=inpi_worker'
+                            error: errorText
                         }
                     }).catch(() => undefined);
                 }
@@ -4146,6 +4169,22 @@ async function processNextInpiJobByMode(mode: 'text' | 'document'): Promise<bool
                         status: 'pending_google_patents',
                         error: truncateError(`INPI_TEXT_FAILED_FALLBACK_TO_GOOGLE ${errorMessage}`),
                         finished_at: null
+                    }
+                }).catch(() => undefined);
+            } else {
+                const processNotFound = errorMessage.includes('DOC_INPI_PROCESS_NOT_FOUND');
+                const errorText = processNotFound
+                    ? truncateError(`DOC_INPI_PROCESS_NOT_FOUND source=inpi_worker detail=${errorMessage}`)
+                    : truncateError(`DOC_INPI_WORKER_FAILED source=inpi_worker detail=${errorMessage}`);
+                await prisma.documentDownloadJob.updateMany({
+                    where: {
+                        patent_id: job.patent_number,
+                        status: { in: ['waiting_inpi', 'not_found'] }
+                    },
+                    data: {
+                        status: processNotFound ? 'not_found' : 'waiting_inpi',
+                        error: errorText,
+                        finished_at: processNotFound ? new Date() : null
                     }
                 }).catch(() => undefined);
             }
