@@ -637,6 +637,8 @@ type InpiDocumentFailureCode =
     | 'DOC_INPI_RPI_DOC_NOT_FOUND'
     | 'DOC_INPI_CAPTCHA_NOT_SOLVED'
     | 'DOC_INPI_CAPTCHA_VALIDATE_FAILED'
+    | 'DOC_INPI_DOWNLOAD_HTTP_FAILED'
+    | 'DOC_INPI_DOWNLOAD_CONTENT_INVALID'
     | 'DOC_INPI_DOWNLOAD_FAILED';
 type InpiCaptchaDownloadResult = {
     filePath: string | null;
@@ -689,6 +691,8 @@ async function downloadDocumentViaCaptcha(page: Page, codPedido: string, numeroI
         const captchaModes: CaptchaMode[] = ['V2_PROXY_OFF', 'V2_ENTERPRISE_PROXY_OFF'];
         let lastFailureCode: InpiDocumentFailureCode | undefined;
         let lastFailureDetail = '';
+        let tokenSolvedCount = 0;
+        let validaCaptchaOkCount = 0;
 
         for (let attempt = 0; attempt < captchaModes.length; attempt++) {
             const mode = captchaModes[attempt];
@@ -705,9 +709,10 @@ async function downloadDocumentViaCaptcha(page: Page, codPedido: string, numeroI
             if (!solved?.token) {
                 console.log(`⚠️ Token de captcha não obtido (${mode}) para RPI ${rpi}`);
                 lastFailureCode = 'DOC_INPI_CAPTCHA_NOT_SOLVED';
-                lastFailureDetail = `mode=${mode}`;
+                lastFailureDetail = `stage=captcha_token mode=${mode} solved_tokens=${tokenSolvedCount} validated=${validaCaptchaOkCount}`;
                 continue;
             }
+            tokenSolvedCount += 1;
 
             await page.evaluate((captchaToken) => {
                 const textarea = document.getElementById('g-recaptcha-response') || document.querySelector('textarea[name="g-recaptcha-response"]');
@@ -768,9 +773,10 @@ async function downloadDocumentViaCaptcha(page: Page, codPedido: string, numeroI
             if (!validaCaptchaResult.ok) {
                 console.log(`⚠️ validaCaptcha rejeitado (${mode}) RPI ${rpi}: status=${validaCaptchaResult.status} body=${validaCaptchaResult.textSample}`);
                 lastFailureCode = 'DOC_INPI_CAPTCHA_VALIDATE_FAILED';
-                lastFailureDetail = `mode=${mode} status=${validaCaptchaResult.status}`;
+                lastFailureDetail = `stage=validaCaptcha mode=${mode} solved_tokens=${tokenSolvedCount} validated=${validaCaptchaOkCount} status=${validaCaptchaResult.status} sample=${normalizeFlat(validaCaptchaResult.textSample).slice(0, 120)}`;
                 continue;
             }
+            validaCaptchaOkCount += 1;
 
             const downloadUrl = `https://busca.inpi.gov.br/pePI/servlet/ImagemDocumentoPdfController?CodDiretoria=${encodeURIComponent(downloadMeta.codDiretoria || '200')}&NumeroID=${encodeURIComponent(numeroID)}&certificado=${encodeURIComponent(downloadMeta.certificado || '')}&numeroProcesso=${encodeURIComponent(downloadMeta.numeroProcesso || '')}&ipasDoc=${encodeURIComponent(downloadMeta.ipasDoc || '')}&codPedido=${encodeURIComponent(downloadMeta.codPedido || codPedido)}`;
 
@@ -795,10 +801,16 @@ async function downloadDocumentViaCaptcha(page: Page, codPedido: string, numeroI
             const buffer = Buffer.from(downloadPayload.base64 || '', 'base64');
             const contentType = String(downloadPayload.contentType || '').toLowerCase();
             const pdfHeader = buffer ? buffer.subarray(0, 5).toString('utf8') : '';
-            if (downloadPayload.status >= 300 || !contentType.includes('pdf') || !buffer || buffer.length < 100 || !pdfHeader.startsWith('%PDF-')) {
+            if (downloadPayload.status >= 300) {
                 console.log(`⚠️ Download não retornou PDF válido (${mode}) RPI ${rpi}: status=${downloadPayload.status} ct=${contentType} size=${buffer?.length || 0} header=${pdfHeader}`);
-                lastFailureCode = 'DOC_INPI_DOWNLOAD_FAILED';
-                lastFailureDetail = `mode=${mode} status=${downloadPayload.status} ct=${contentType} size=${buffer?.length || 0}`;
+                lastFailureCode = 'DOC_INPI_DOWNLOAD_HTTP_FAILED';
+                lastFailureDetail = `stage=download_http mode=${mode} solved_tokens=${tokenSolvedCount} validated=${validaCaptchaOkCount} status=${downloadPayload.status} ct=${contentType} size=${buffer?.length || 0}`;
+                continue;
+            }
+            if (!contentType.includes('pdf') || !buffer || buffer.length < 100 || !pdfHeader.startsWith('%PDF-')) {
+                console.log(`⚠️ Download não retornou PDF válido (${mode}) RPI ${rpi}: status=${downloadPayload.status} ct=${contentType} size=${buffer?.length || 0} header=${pdfHeader}`);
+                lastFailureCode = 'DOC_INPI_DOWNLOAD_CONTENT_INVALID';
+                lastFailureDetail = `stage=download_content mode=${mode} solved_tokens=${tokenSolvedCount} validated=${validaCaptchaOkCount} status=${downloadPayload.status} ct=${contentType} size=${buffer?.length || 0} header=${pdfHeader}`;
                 continue;
             }
 
@@ -809,11 +821,15 @@ async function downloadDocumentViaCaptcha(page: Page, codPedido: string, numeroI
             return { filePath };
         }
 
-        return { filePath: null, failureCode: lastFailureCode || 'DOC_INPI_DOWNLOAD_FAILED', failureDetail: lastFailureDetail || undefined };
+        return {
+            filePath: null,
+            failureCode: lastFailureCode || 'DOC_INPI_DOWNLOAD_FAILED',
+            failureDetail: lastFailureDetail || `stage=unknown solved_tokens=${tokenSolvedCount} validated=${validaCaptchaOkCount}`
+        };
     } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         console.log(`⚠️ Falha no download via captcha RPI ${rpi}: ${msg}`);
-        return { filePath: null, failureCode: 'DOC_INPI_DOWNLOAD_FAILED', failureDetail: msg };
+        return { filePath: null, failureCode: 'DOC_INPI_DOWNLOAD_FAILED', failureDetail: `stage=exception ${normalizeFlat(msg).slice(0, 180)}` };
     }
 }
 

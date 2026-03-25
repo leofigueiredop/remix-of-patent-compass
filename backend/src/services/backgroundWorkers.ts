@@ -4103,13 +4103,21 @@ async function processNextInpiJobByMode(mode: 'text' | 'document'): Promise<bool
                         code = 'DOC_INPI_CAPTCHA_VALIDATE_FAILED';
                     } else if (failedCodes.has('DOC_INPI_CAPTCHA_NOT_SOLVED')) {
                         code = 'DOC_INPI_CAPTCHA_NOT_SOLVED';
+                    } else if (failedCodes.has('DOC_INPI_DOWNLOAD_HTTP_FAILED')) {
+                        code = 'DOC_INPI_DOWNLOAD_HTTP_FAILED';
+                    } else if (failedCodes.has('DOC_INPI_DOWNLOAD_CONTENT_INVALID')) {
+                        code = 'DOC_INPI_DOWNLOAD_CONTENT_INVALID';
                     } else if (failedCodes.has('DOC_INPI_DOWNLOAD_FAILED')) {
                         code = 'DOC_INPI_DOWNLOAD_FAILED';
                     } else if (failedCodes.has('DOC_INPI_RPI_DOC_NOT_FOUND')) {
                         code = 'DOC_INPI_RPI_DOC_NOT_FOUND';
                     }
                     const detail = failedDocs
-                        .map((doc: any) => `${normalizeText(doc?.numero || '?')}@${normalizeText(doc?.rpi || '?')}:${normalizeText(doc?.erro || 'DOC_INPI_UNKNOWN')}`)
+                        .map((doc: any) => {
+                            const docCode = normalizeText(doc?.erro || 'DOC_INPI_UNKNOWN');
+                            const docDetail = normalizeText(doc?.detalheErro || '').slice(0, 160);
+                            return `${normalizeText(doc?.numero || '?')}@${normalizeText(doc?.rpi || '?')}:${docCode}${docDetail ? `(${docDetail})` : ''}`;
+                        })
                         .slice(0, 6)
                         .join('|');
                     const errorText = truncateError(`${code} source=inpi_worker docs_total=${docs.length} docs_failed=${failedDocs.length}${detail ? ` detail=${detail}` : ''}`);
