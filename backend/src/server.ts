@@ -776,6 +776,31 @@ function sanitizePublicationForStorage(publicationNumber?: string): string {
     return (publicationNumber || '').replace(/[^\w.-]/g, '_');
 }
 
+function extractStorageBaseFromKey(storageKey?: string): string {
+    const key = cleanTextValue(storageKey);
+    if (!key) return '';
+    const match = key.match(/^patent-docs\/([^/]+)\/(?:full_document|drawings|first_page)\.pdf$/i);
+    return cleanTextValue(match?.[1] || '');
+}
+
+function resolveStorageBase(publicationNumber?: string, patentNumber?: string, storageKey?: string): string {
+    const fromKey = extractStorageBaseFromKey(storageKey);
+    if (fromKey) return fromKey;
+    const normalizedPublication = normalizePatentForWeb(publicationNumber);
+    const normalizedPatent = normalizePatentForWeb(patentNumber);
+    const candidates = [
+        publicationNumber,
+        patentNumber,
+        normalizedPublication,
+        normalizedPatent
+    ];
+    for (const candidate of candidates) {
+        const safe = sanitizePublicationForStorage(cleanTextValue(candidate));
+        if (safe) return safe;
+    }
+    return '';
+}
+
 function buildStorageAssetPath(publicationNumber: string, asset: 'full' | 'drawings' | 'first'): string {
     const encodedPublication = encodeURIComponent(publicationNumber);
     return `/patent/storage/${encodedPublication}/${asset}`;
@@ -954,6 +979,8 @@ async function searchLocalPatentBase(input: LocalPatentSearchInput): Promise<{
         const publicationNumber = patent.numero_publicacao || patent.cod_pedido;
         const documentJob = Array.isArray(patent.document_jobs) ? patent.document_jobs[0] : null;
         const downloadable = Boolean(documentJob?.status === 'completed' && documentJob?.storage_key);
+        const storageBase = resolveStorageBase(publicationNumber, patent.cod_pedido, documentJob?.storage_key || undefined);
+        const storagePathBase = storageBase || publicationNumber;
         return {
             publicationNumber,
             title: patent.title || 'Sem título',
@@ -964,17 +991,17 @@ async function searchLocalPatentBase(input: LocalPatentSearchInput): Promise<{
             classification: patent.ipc_codes || '',
             source: 'INPI',
             url: downloadable
-                ? buildStorageAssetPath(publicationNumber, 'full')
+                ? buildStorageAssetPath(storagePathBase, 'full')
                 : buildInpiDetailUrl(patent.cod_pedido, publicationNumber),
             status: patent.status || '',
             cod_pedido: patent.cod_pedido,
             inpiUrl: buildInpiDetailUrl(patent.cod_pedido, publicationNumber),
             googlePatentsUrl: buildGooglePatentsUrl(publicationNumber),
             espacenetUrl: buildEspacenetUiUrl(publicationNumber),
-            figures: downloadable ? [buildStorageAssetPath(publicationNumber, 'first'), buildStorageAssetPath(publicationNumber, 'drawings')] : [],
+            figures: downloadable ? [buildStorageAssetPath(storagePathBase, 'first'), buildStorageAssetPath(storagePathBase, 'drawings')] : [],
             storage: {
                 hasStoredDocument: downloadable,
-                ...buildStorageAssets(publicationNumber)
+                ...buildStorageAssets(storagePathBase)
             }
         };
     });
@@ -3787,6 +3814,8 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
     }).catch(() => null);
     const completedDocJob = (dbData.document_jobs || []).find((item: any) => item?.status === 'completed' && item?.storage_key);
     const hasStoredDocument = Boolean(completedDocJob?.storage_key);
+    const storageBase = resolveStorageBase(publicationNumber, dbData.cod_pedido, completedDocJob?.storage_key || undefined);
+    const storagePathBase = storageBase || publicationNumber;
     const latestDocJob = dbData.document_jobs?.[0] || null;
     const latestPublicationWithBiblio = (dbData.publications || []).find((item: any) =>
         Boolean(item?.ops_title || item?.ops_applicant || item?.ops_inventor || item?.ops_ipc || item?.ops_publication_date)
@@ -3884,11 +3913,11 @@ fastify.get('/search/inpi/detail/:codPedido', async (request, reply) => {
         inpiUrl: buildInpiDetailUrl(codPedido, publicationNumber),
         googlePatentsUrl: buildGooglePatentsUrl(publicationNumber),
         espacenetUrl: buildEspacenetUiUrl(publicationNumber),
-        figures: hasStoredDocument ? [buildStorageAssetPath(publicationNumber, 'first'), buildStorageAssetPath(publicationNumber, 'drawings')] : [],
+        figures: hasStoredDocument ? [buildStorageAssetPath(storagePathBase, 'first'), buildStorageAssetPath(storagePathBase, 'drawings')] : [],
         storage: hasStoredDocument
             ? {
                 hasStoredDocument: true,
-                ...buildStorageAssets(publicationNumber)
+                ...buildStorageAssets(storagePathBase)
             }
             : {
                 hasStoredDocument: false
@@ -3908,21 +3937,60 @@ fastify.get('/patent/storage/:publicationNumber/:asset', async (request: any, re
     if (!S3_ENDPOINT || !S3_ACCESS_KEY || !S3_SECRET_KEY) {
         return reply.code(500).send({ error: 'Storage não configurado' });
     }
-    const key = buildStorageAssetKey(decodedPublication, normalizedAsset);
-    const s3 = getS3Client();
-    try {
-        await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: key }));
-        const object = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: key }));
-        const body = object.Body as any;
-        if (!body) {
-            return reply.code(404).send({ error: 'Arquivo não encontrado no storage' });
+    const normalizedPublication = normalizePatentForWeb(decodedPublication);
+    const storageCandidates = new Set<string>();
+    const pushCandidate = (value?: string) => {
+        const base = resolveStorageBase(value);
+        if (base) storageCandidates.add(base);
+    };
+    pushCandidate(decodedPublication);
+    pushCandidate(normalizedPublication);
+    const patentRow = await prisma.inpiPatent.findFirst({
+        where: {
+            OR: [
+                { numero_publicacao: decodedPublication },
+                { cod_pedido: decodedPublication },
+                { numero_publicacao: normalizedPublication },
+                { cod_pedido: normalizedPublication }
+            ]
+        },
+        include: {
+            document_jobs: {
+                where: {
+                    status: 'completed',
+                    storage_key: { not: null }
+                },
+                orderBy: { updated_at: 'desc' },
+                take: 1
+            }
         }
-        reply.header('Content-Type', 'application/pdf');
-        reply.header('Cache-Control', 'public, max-age=3600');
-        return reply.send(body);
-    } catch (error: any) {
-        return reply.code(404).send({ error: 'Arquivo não encontrado no storage', details: error?.message || '' });
+    }).catch(() => null);
+    if (patentRow) {
+        pushCandidate(patentRow.numero_publicacao || '');
+        pushCandidate(patentRow.cod_pedido || '');
+        const latestStorageKey = patentRow.document_jobs?.[0]?.storage_key || '';
+        const fromStorageKey = extractStorageBaseFromKey(latestStorageKey);
+        if (fromStorageKey) storageCandidates.add(fromStorageKey);
     }
+    const keys = Array.from(storageCandidates).map((base) => buildStorageAssetKey(base, normalizedAsset));
+    const s3 = getS3Client();
+    for (const key of keys) {
+        try {
+            await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: key }));
+            const object = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: key }));
+            const body = object.Body as any;
+            if (!body) continue;
+            reply.header('Content-Type', 'application/pdf');
+            reply.header('Cache-Control', 'public, max-age=3600');
+            return reply.send(body);
+        } catch {
+        }
+    }
+    return reply.code(404).send({
+        error: 'Arquivo não encontrado no storage',
+        requestedPublication: decodedPublication,
+        triedKeys: keys
+    });
 });
 
 // ─── Patent Base Endpoints ──────────────────────────────
