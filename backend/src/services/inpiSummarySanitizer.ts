@@ -25,6 +25,12 @@ function cutAtStopMarkers(text: string): string {
         /\(\s*73\s*\)\s*nome\s+do\s+titular/i,
         /\(\s*72\s*\)\s*nome\s+do\s+inventor/i,
         /\(\s*71\s*\)\s*nome\s+do\s+depositante/i,
+        /\(\s*74\s*\)\s*nome\s+do\s+procurador/i,
+        /\(\s*51\s*\)\s*classifica[cç][aã]o/i,
+        /\(\s*52\s*\)\s*classifica[cç][aã]o/i,
+        /\(\s*54\s*\)\s*t[íi]tulo/i,
+        /\bclassifica[cç][aã]o(?:\s+(?:ipc|cpc|internacional))?\s*[:\-]/i,
+        /\b(?:titular|depositante|inventor(?:es)?|procurador)\s*[:\-]/i,
         /\btodas\s+as\s+anuidades\s+vinculadas\b/i,
         /\bpeti[cç][oõ]es\b/i,
         /\bservi[cç]o\s+pgo\b/i,
@@ -65,4 +71,3 @@ export function sanitizeInpiDetailedAbstract(input?: string): string {
     if (cleaned.length < 80) return '';
     return cleaned;
 }
-

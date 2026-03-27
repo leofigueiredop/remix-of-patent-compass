@@ -25,9 +25,9 @@ const INPI_HUMANIZE_TYPING_DELAY_MIN = 45; // Digitação mais lenta
 const INPI_HUMANIZE_TYPING_DELAY_MAX = 120;
 const INPI_RANDOM_MOUSE_MOVEMENTS = true;
 const INPI_RANDOM_SCROLLING = true;
-const INPI_NAVIGATION_TIMEOUT_MS = Math.max(90_000, parseInt(process.env.INPI_NAVIGATION_TIMEOUT_MS || '120000', 10));
-const INPI_WAIT_TIMEOUT_MS = Math.max(60_000, parseInt(process.env.INPI_WAIT_TIMEOUT_MS || '90000', 10));
-const INPI_DOWNLOAD_TIMEOUT_MS = Math.max(60_000, parseInt(process.env.INPI_DOWNLOAD_TIMEOUT_MS || '90000', 10));
+const INPI_NAVIGATION_TIMEOUT_MS = Math.max(120_000, parseInt(process.env.INPI_NAVIGATION_TIMEOUT_MS || '180000', 10));
+const INPI_WAIT_TIMEOUT_MS = Math.max(90_000, parseInt(process.env.INPI_WAIT_TIMEOUT_MS || '180000', 10));
+const INPI_DOWNLOAD_TIMEOUT_MS = Math.max(90_000, parseInt(process.env.INPI_DOWNLOAD_TIMEOUT_MS || '150000', 10));
 const TARGET_DOCUMENT_DISPATCHES = ['3.1', '1.3', '16.1'] as const;
 
 // Controle de rate limiting
@@ -142,6 +142,15 @@ async function humanMouseMovement(page: Page) {
 
 function normalizeFlat(value?: string) {
     return (value || '').replace(/\s+/g, ' ').trim();
+}
+
+function cleanBibliographicField(value?: string): string {
+    const normalized = normalizeFlat(value);
+    if (!normalized) return '';
+    return normalized
+        .replace(/\b(?:resumo|classifica[cç][aã]o(?:\s+(?:ipc|cpc|internacional))?|titular|depositante|inventor(?:es)?|procurador)\s*[:\-]\s*$/i, '')
+        .replace(/\(\s*(?:57|71|72|73|74)\s*\)\s*$/i, '')
+        .trim();
 }
 
 function parseBrDate(value?: string): Date | null {
@@ -1091,27 +1100,35 @@ async function extractPatentData(page: Page, codPedido: string, options: Process
     }
     
     // Dados completos da patente
+    const tituloRaw = extractTableData('Título') || normalizeFlat($('h1, .titulo, .title').first().text());
+    const titularRaw = extractTableData('Nome do Depositante') || extractTableData('Depositante') || extractTableData('Titular') || extractTableData('Inventor');
+    const titularCompletoRaw = extractTableData('Nome do Depositante') || extractTableData('Depositante') || extractTableData('Titular');
+    const inventorRaw = extractTableData('Nome do Inventor') || extractTableData('Inventor') || extractTableData('Inventores');
+    const classificacaoRaw = extractTableData('Classificação CPC') || extractTableData('Classificação') || extractTableData('IPC');
+    const classificacaoIpcRaw = extractTableData('Classificação Internacional') || extractTableData('IPC');
+    const ultimoDespachoRaw = extractTableData('Despacho') || extractTableData('Último Despacho');
+    const complementoDespachoRaw = extractTableData('Complemento') || extractTableData('Situação');
     const data = {
         numeroProcesso: codPedido,
-        titulo: extractTableData('Título') || normalizeFlat($('h1, .titulo, .title').first().text()),
+        titulo: cleanBibliographicField(tituloRaw),
         resumo: extractResumoDetalhado(),
         resumoDetalhado: extractResumoDetalhado(),
         dataDeposito: extractTableData('Data do Depósito') || extractTableData('Depósito'),
         dataPublicacao: extractTableData('Data de Publicação') || extractTableData('Publicação'),
-        titular: extractTableData('Nome do Depositante') || extractTableData('Depositante') || extractTableData('Titular') || extractTableData('Inventor'),
-        titularCompleto: extractTableData('Nome do Depositante') || extractTableData('Depositante') || extractTableData('Titular'),
-        inventor: extractTableData('Nome do Inventor') || extractTableData('Inventor') || extractTableData('Inventores'),
-        inventores: extractTableData('Nome do Inventor') || extractTableData('Inventor') || extractTableData('Inventores'),
+        titular: cleanBibliographicField(titularRaw),
+        titularCompleto: cleanBibliographicField(titularCompletoRaw),
+        inventor: cleanBibliographicField(inventorRaw),
+        inventores: cleanBibliographicField(inventorRaw),
         procurador: extractProcurador(),
-        classificacao: extractTableData('Classificação CPC') || extractTableData('Classificação') || extractTableData('IPC'),
-        classificacaoIPC: extractTableData('Classificação Internacional') || extractTableData('IPC'),
+        classificacao: cleanBibliographicField(classificacaoRaw),
+        classificacaoIPC: cleanBibliographicField(classificacaoIpcRaw),
         prioridade: extractTableData('Prioridade') || extractTableData('Reivindicação de Prioridade'),
         status: classifyPatentStatus(
-            extractTableData('Despacho') || extractTableData('Último Despacho'),
-            extractTableData('Complemento') || extractTableData('Situação')
+            ultimoDespachoRaw,
+            complementoDespachoRaw
         ),
-        ultimoDespacho: extractTableData('Despacho') || extractTableData('Último Despacho'),
-        complementoDespacho: extractTableData('Complemento') || extractTableData('Situação'),
+        ultimoDespacho: cleanBibliographicField(ultimoDespachoRaw),
+        complementoDespacho: cleanBibliographicField(complementoDespachoRaw),
         documentos: documentos,
         temDocumentos: documentos.length > 0,
         documentosBaixados: documentos.filter(d => d.baixado).length,
