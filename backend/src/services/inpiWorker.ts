@@ -1008,16 +1008,34 @@ async function extractPatentData(page: Page, codPedido: string, options: Process
             detalheErro?: string;
         }> = [];
         const publicationRows = $('tr').toArray().map((row) => normalizeFlat($(row).text()));
-        const targetDespachos = publicationRows
+        const targetDespachosByNumero = publicationRows
             .map((text) => {
-                const m = text.match(/(?:^|\s)(\d{4,6})\s+\d{2}\/\d{2}\/\d{4}\s+(\d+\.\d+)\b/i);
+                const m = text.match(/(?:^|\s)(\d{4,6})\s+(\d{2}\/\d{2}\/\d{4})\s+(\d+\.\d+)\b/i);
                 if (!m) return null;
-                const numero = m[2];
+                const numero = m[3];
                 if (!TARGET_DOCUMENT_DISPATCHES.includes(numero as typeof TARGET_DOCUMENT_DISPATCHES[number])) return null;
-                return { rpi: m[1], numero: m[2] };
+                return { rpi: m[1], date: m[2], numero: m[3] };
             })
-            .filter((item): item is { rpi: string; numero: string } => Boolean(item))
-            .filter((item, index, all) => all.findIndex((other) => other.rpi === item.rpi && other.numero === item.numero) === index);
+            .filter((item): item is { rpi: string; date: string; numero: string } => Boolean(item))
+            .reduce((acc, item) => {
+                const existing = acc.get(item.numero);
+                if (!existing) {
+                    acc.set(item.numero, item);
+                    return acc;
+                }
+                const existingDate = parseBrDate(existing.date)?.getTime() || 0;
+                const itemDate = parseBrDate(item.date)?.getTime() || 0;
+                if (itemDate > existingDate) {
+                    acc.set(item.numero, item);
+                    return acc;
+                }
+                if (itemDate === existingDate && Number(item.rpi) > Number(existing.rpi)) {
+                    acc.set(item.numero, item);
+                }
+                return acc;
+            }, new Map<string, { rpi: string; date: string; numero: string }>());
+        const targetDespachos = Array.from(targetDespachosByNumero.values())
+            .sort((a, b) => (parseBrDate(b.date)?.getTime() || 0) - (parseBrDate(a.date)?.getTime() || 0));
 
         const docsPublicados = $('img.salvaDocumento').toArray().map((img) => {
             const $img = $(img);
@@ -1026,7 +1044,8 @@ async function extractPatentData(page: Page, codPedido: string, options: Process
             const rpiMatch = label.match(/RPI\s*(\d{4,6})/i) || label.match(/\b(\d{4,6})\b/);
             const rpi = rpiMatch ? rpiMatch[1] : '';
             return { numeroID, rpi, label };
-        }).filter((item) => item.numeroID && item.rpi);
+        }).filter((item) => item.numeroID && item.rpi)
+            .filter((item, index, all) => all.findIndex((other) => other.numeroID === item.numeroID) === index);
 
         for (const target of targetDespachos) {
             const docFromRpi = docsPublicados.find((item) => item.rpi === target.rpi);

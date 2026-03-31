@@ -53,6 +53,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { createHash, randomUUID } from 'crypto';
 import pdfParse from 'pdf-parse';
+import { registerModules } from './modules/registerModules';
 
 if (typeof (process as any).loadEnvFile === 'function') {
     try {
@@ -94,6 +95,7 @@ fastify.register(cors, {
 });
 fastify.register(multipart);
 fastify.register(jwt, { secret: process.env.JWT_SECRET || 'patent-scope-secret-change-me' });
+registerModules(fastify, prisma as any);
 
 // ─── Environment ───────────────────────────────────────────────
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
@@ -1740,6 +1742,19 @@ fastify.get('/health', async () => {
         ops: OPS_CONSUMER_KEY ? 'configured' : 'missing',
         inpi_mode: INPI_MODE
     };
+});
+
+fastify.get('/', async () => {
+    return {
+        status: 'ok',
+        endpoint: 'api',
+        health: '/health'
+    };
+});
+
+fastify.get('/robots.txt', async (_request, reply) => {
+    reply.type('text/plain; charset=utf-8');
+    return 'User-agent: *\nDisallow: /\n';
 });
 
 fastify.get('/system-health', async () => {

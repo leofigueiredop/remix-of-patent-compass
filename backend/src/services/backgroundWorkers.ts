@@ -94,6 +94,10 @@ const ESPACENET_UI_FALLBACK_ENABLED = (process.env.ESPACENET_UI_FALLBACK_ENABLED
 const INPI_CREDENTIALS_PRESENT = Boolean((process.env.INPI_USER || '').trim() && (process.env.INPI_PASSWORD || '').trim());
 const INPI_SCRAPE_FALLBACK_ENABLED = (process.env.INPI_SCRAPE_FALLBACK_ENABLED || (INPI_CREDENTIALS_PRESENT ? 'true' : 'false')).toLowerCase() === 'true';
 const INPI_SCRAPE_FIRST_ENABLED = (process.env.INPI_SCRAPE_FIRST_ENABLED || 'true').toLowerCase() === 'true';
+const INPI_ONLY_MODE = (process.env.INPI_ONLY_MODE || 'true').toLowerCase() === 'true';
+const INPI_BLOCK_AUTO_PAUSE = (process.env.INPI_BLOCK_AUTO_PAUSE || 'true').toLowerCase() === 'true';
+const RPI_CURRENT_YEAR_ONLY_ENABLED = (process.env.RPI_CURRENT_YEAR_ONLY_ENABLED || 'true').toLowerCase() === 'true';
+const RPI_CURRENT_YEAR_MAX_LOOKBACK_ISSUES = Math.max(26, parseInt(process.env.RPI_CURRENT_YEAR_MAX_LOOKBACK_ISSUES || '100', 10));
 const BIGQUERY_PROJECT_ID = process.env.BIGQUERY_PROJECT_ID || '';
 const GOOGLE_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '';
 const GOOGLE_SERVICE_ACCOUNT_FILE = process.env.GOOGLE_SERVICE_ACCOUNT_FILE || '';
@@ -1244,6 +1248,9 @@ async function detectLatestRpiNumber(): Promise<number | null> {
 }
 
 export async function enqueueLastFiveYearsRpi() {
+    if (RPI_CURRENT_YEAR_ONLY_ENABLED) {
+        return enqueueCurrentYearRpi();
+    }
     const latest = await detectLatestRpiNumber();
     if (!latest) throw new Error('Não foi possível detectar a RPI mais recente');
     const from = Math.max(1, latest - RPI_LOOKBACK_ISSUES + 1);
@@ -1331,8 +1338,89 @@ async function downloadRpiZipWithRetry(zipUrl: string, zipPath: string, maxAttem
     throw new Error(`Não foi possível baixar ZIP íntegro da RPI após ${maxAttempts} tentativas: ${lastError}`);
 }
 
+async function detectRpiPublicationYear(rpiNumber: number): Promise<number | null> {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), `rpi-year-${rpiNumber}-`));
+    const zipPath = path.join(tempDir, `P${rpiNumber}.zip`);
+    try {
+        const zipUrl = `${RPI_BASE_URL}/P${rpiNumber}.zip`;
+        await downloadRpiZipWithRetry(zipUrl, zipPath, 2);
+        const { xmlContent } = await getXmlFromZip(zipPath);
+        const match = String(xmlContent || '').match(/dataPublicacao\s*=\s*["'](\d{2})\/(\d{2})\/(\d{4})["']/i);
+        if (!match) return null;
+        const year = Number.parseInt(match[3], 10);
+        return Number.isFinite(year) ? year : null;
+    } catch {
+        return null;
+    } finally {
+        await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+}
+
+async function enqueueCurrentYearRpi() {
+    const latest = await detectLatestRpiNumber();
+    if (!latest) throw new Error('Não foi possível detectar a RPI mais recente');
+    const currentYear = new Date().getUTCFullYear();
+    const minProbe = Math.max(1, latest - RPI_CURRENT_YEAR_MAX_LOOKBACK_ISSUES + 1);
+    const selected: number[] = [];
+    for (let rpi = latest; rpi >= minProbe; rpi--) {
+        if (!(await rpiZipExists(rpi))) continue;
+        const year = await detectRpiPublicationYear(rpi);
+        if (!year) continue;
+        if (year === currentYear) {
+            selected.push(rpi);
+            continue;
+        }
+        if (year < currentYear && selected.length > 0) {
+            break;
+        }
+    }
+    const sorted = Array.from(new Set(selected)).sort((a, b) => a - b);
+    if (!sorted.length) {
+        const fromFallback = Math.max(1, latest - 26);
+        const fallbackRows: Array<{ rpi_number: number; status: 'pending'; source_url: string }> = [];
+        for (let rpi = fromFallback; rpi <= latest; rpi++) {
+            fallbackRows.push({
+                rpi_number: rpi,
+                status: 'pending',
+                source_url: `${RPI_BASE_URL}/P${rpi}.zip`
+            });
+        }
+        await prisma.rpiImportJob.createMany({
+            data: fallbackRows,
+            skipDuplicates: true
+        });
+        return { from: fromFallback, to: latest, count: fallbackRows.length, strategy: 'fallback_recent' };
+    }
+    const rows = sorted.map((rpi) => ({
+        rpi_number: rpi,
+        status: 'pending' as const,
+        source_url: `${RPI_BASE_URL}/P${rpi}.zip`
+    }));
+    await prisma.rpiImportJob.createMany({
+        data: rows,
+        skipDuplicates: true
+    });
+    return { from: sorted[0], to: sorted[sorted.length - 1], count: rows.length, strategy: 'current_year_only' };
+}
+
 function nodeText(node: cheerio.Cheerio, selector: string): string {
     return normalizeText(node.find(selector).first().text());
+}
+
+function isInpiBlockingSignal(message?: string): boolean {
+    const normalized = normalizeText(message).toLowerCase();
+    if (!normalized) return false;
+    return normalized.includes('captcha')
+        || normalized.includes('recaptcha')
+        || normalized.includes('too many requests')
+        || normalized.includes('temporarily blocked')
+        || normalized.includes('access denied')
+        || normalized.includes('forbidden')
+        || normalized.includes('cloudflare')
+        || normalized.includes('erro 403')
+        || normalized.includes('http 403')
+        || normalized.includes('http 429')
+        || normalized.includes('bot');
 }
 
 async function queueDocumentJobForPatent(params: {
@@ -1610,7 +1698,8 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
             ipc: resolvedExternalData?.ipc,
             filingDate: resolvedExternalData?.filingDate
         });
-        const shouldQueueOpsBiblio = !isDocumentEligible
+        const shouldQueueOpsBiblio = !INPI_ONLY_MODE
+            && !isDocumentEligible
             && !hasXmlBiblio
             && !hasStoredBiblio
             && !hasBigQueryBiblio
@@ -1786,7 +1875,7 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
             ).catch(() => undefined);
         }
 
-        if (patentId && INPI_SCRAPE_FIRST_ENABLED) {
+        if (patentId && isDocumentEligible && (INPI_SCRAPE_FIRST_ENABLED || INPI_ONLY_MODE)) {
             await queueInpiProcessingJob({
                 patentNumber: patentId,
                 priority: 10
@@ -1799,7 +1888,7 @@ async function processRpiXmlContent(rpiNumber: number, xmlContent: string): Prom
                 publicationNumber: numeroPublicacao || numeroRaw || patentNumber,
                 status: dispatchTitle,
                 dispatchCode: dispatchCode,
-                waitForInpi: Boolean(INPI_SCRAPE_FIRST_ENABLED)
+                waitForInpi: Boolean(INPI_SCRAPE_FIRST_ENABLED || INPI_ONLY_MODE)
             });
         } else if (shouldQueueOpsBiblio) {
             await queueOpsBibliographicJob({
@@ -2852,6 +2941,7 @@ async function applyBibliographicData(patentNumber: string, biblio: OpsBibliogra
 
 async function processNextOpsBibliographicJob() {
     if (!isBackgroundWorkerExecutionEnabled()) return;
+    if (INPI_ONLY_MODE) return;
     await syncPauseFlagsFromDb().catch(() => undefined);
     if (opsRunning || opsPaused) return;
     opsRunning = true;
@@ -2949,6 +3039,7 @@ async function processNextOpsBibliographicJob() {
 
 async function processNextBigQueryBibliographicJob() {
     if (!isBackgroundWorkerExecutionEnabled()) return;
+    if (INPI_ONLY_MODE) return;
     await syncPauseFlagsFromDb().catch(() => undefined);
     if (bqRunning || bqPaused || !GOOGLE_PATENTS_FALLBACK_ENABLED) return;
     bqRunning = true;
@@ -3048,6 +3139,7 @@ async function processNextBigQueryBibliographicJob() {
 
 async function processNextDocumentJob() {
     if (!isBackgroundWorkerExecutionEnabled()) return;
+    if (INPI_ONLY_MODE) return;
     await syncPauseFlagsFromDb().catch(() => undefined);
     if (docRunning || docsPaused) return;
     if (!hasMinimumS3RuntimeConfig()) {
@@ -4106,13 +4198,17 @@ async function processNextInpiJob(): Promise<boolean> {
                     .slice(0, 6)
                     .join('|');
                 const errorText = truncateError(`${code} source=inpi_worker docs_total=${docs.length} docs_failed=${failedDocs.length}${detail ? ` detail=${detail}` : ''}`);
+                if (INPI_BLOCK_AUTO_PAUSE && isInpiBlockingSignal(`${code} ${detail}`)) {
+                    inpiPaused = true;
+                    await persistPauseFlagsToDb('inpi', true).catch(() => undefined);
+                }
                 await prisma.documentDownloadJob.updateMany({
                     where: {
                         patent_id: job.patent_number,
                         status: { not: 'completed' }
                     },
                     data: {
-                        status: 'pending_google_patents',
+                        status: INPI_ONLY_MODE ? 'waiting_inpi' : 'pending_google_patents',
                         finished_at: null,
                         error: errorText
                     }
@@ -4142,13 +4238,17 @@ async function processNextInpiJob(): Promise<boolean> {
                     error: truncateError(`mode=full ${errorMessage}`)
                 }
             });
+            if (INPI_BLOCK_AUTO_PAUSE && isInpiBlockingSignal(errorMessage)) {
+                inpiPaused = true;
+                await persistPauseFlagsToDb('inpi', true).catch(() => undefined);
+            }
             await prisma.documentDownloadJob.updateMany({
                 where: {
                     patent_id: job.patent_number,
                     status: { not: 'completed' }
                 },
                 data: {
-                    status: 'pending_google_patents',
+                    status: INPI_ONLY_MODE ? 'waiting_inpi' : 'pending_google_patents',
                     error: truncateError(`DOC_INPI_FULL_FAILED_FALLBACK_TO_GOOGLE ${errorMessage}`),
                     finished_at: null
                 }
@@ -4370,24 +4470,28 @@ export async function startBackgroundWorkers() {
     enqueueLastFiveYearsRpi().catch(() => undefined);
     processNextInpiJobs().catch(() => undefined);
     processNextRpiImportJob().catch(() => undefined);
-    processNextDocumentJob().catch(() => undefined);
-    processNextOpsBibliographicJob().catch(() => undefined);
-    processNextBigQueryBibliographicJob().catch(() => undefined);
+    if (!INPI_ONLY_MODE) {
+        processNextDocumentJob().catch(() => undefined);
+        processNextOpsBibliographicJob().catch(() => undefined);
+        processNextBigQueryBibliographicJob().catch(() => undefined);
+    }
     setInterval(() => {
         processNextInpiJobs().catch(() => undefined);
     }, 3000);
     setInterval(() => {
         processNextRpiImportJob().catch(() => undefined);
     }, 4000);
-    setInterval(() => {
-        processNextDocumentJob().catch(() => undefined);
-    }, 5000);
-    setInterval(() => {
-        processNextOpsBibliographicJob().catch(() => undefined);
-    }, 6000);
-    setInterval(() => {
-        processNextBigQueryBibliographicJob().catch(() => undefined);
-    }, 6500);
+    if (!INPI_ONLY_MODE) {
+        setInterval(() => {
+            processNextDocumentJob().catch(() => undefined);
+        }, 5000);
+        setInterval(() => {
+            processNextOpsBibliographicJob().catch(() => undefined);
+        }, 6000);
+        setInterval(() => {
+            processNextBigQueryBibliographicJob().catch(() => undefined);
+        }, 6500);
+    }
     setInterval(() => {
         recoverStaleRunningJobs().catch(() => undefined);
     }, 60 * 1000);
