@@ -53,7 +53,6 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { createHash, randomUUID } from 'crypto';
 import pdfParse from 'pdf-parse';
-import { registerModules } from './modules/registerModules';
 
 if (typeof (process as any).loadEnvFile === 'function') {
     try {
@@ -95,7 +94,22 @@ fastify.register(cors, {
 });
 fastify.register(multipart);
 fastify.register(jwt, { secret: process.env.JWT_SECRET || 'patent-scope-secret-change-me' });
-registerModules(fastify, prisma as any);
+const tryRegisterOptionalModules = () => {
+    try {
+        const maybeModule = require('./modules/registerModules');
+        const registerModulesFn = maybeModule?.registerModules;
+        if (typeof registerModulesFn === 'function') {
+            registerModulesFn(fastify, prisma as any);
+        }
+    } catch (error) {
+        const err = error as any;
+        const message = String(err?.message || '');
+        const missingOptionalModule = err?.code === 'MODULE_NOT_FOUND' && message.includes('./modules/registerModules');
+        if (!missingOptionalModule) throw error;
+        fastify.log.warn('Módulos opcionais não encontrados: seguindo sem registerModules');
+    }
+};
+tryRegisterOptionalModules();
 
 // ─── Environment ───────────────────────────────────────────────
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
