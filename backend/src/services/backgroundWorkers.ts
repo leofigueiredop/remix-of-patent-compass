@@ -4108,7 +4108,7 @@ async function processNextInpiJob(): Promise<boolean> {
     try {
         let job = await prisma.inpiProcessingJob.findFirst({
             where: { status: 'pending' },
-            orderBy: [{ priority: 'desc' }, { created_at: 'asc' }]
+            orderBy: [{ priority: 'desc' }, { created_at: 'desc' }]
         });
         if (!job) {
             job = await prisma.inpiProcessingJob.findFirst({

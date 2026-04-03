@@ -1196,6 +1196,27 @@ export async function processInpiPatent(codPedido: string, options: ProcessInpiP
                     const targetCodPedido = linkedPatent?.cod_pedido || codPedido;
                     const currentPublication = linkedPatent?.numero_publicacao || '';
                     const normalizedPublication = normalizeFlat(codPedido).replace(/\s+/g, '');
+                    await prisma.inpiPatent.upsert({
+                        where: { cod_pedido: targetCodPedido },
+                        update: {
+                            updated_at: new Date(),
+                            numero_publicacao: currentPublication || normalizedPublication || undefined
+                        },
+                        create: {
+                            cod_pedido: targetCodPedido,
+                            numero_publicacao: currentPublication || normalizedPublication || '',
+                            title: '',
+                            abstract: '',
+                            resumo_detalhado: '',
+                            procurador: '',
+                            applicant: '',
+                            inventors: '',
+                            filing_date: '',
+                            ipc_codes: '',
+                            status: '',
+                            last_event: ''
+                        }
+                    });
                     if (Array.isArray(patentData.publicacoes) && patentData.publicacoes.length) {
                         for (const pub of patentData.publicacoes) {
                             try {
